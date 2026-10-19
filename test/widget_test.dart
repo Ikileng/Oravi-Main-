@@ -1,30 +1,49 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:oravi_app/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Oravi Ward Board loads beds and displays patient identifiers', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: OraviApp(),
+      ),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify AppBar
+    expect(find.text('ORAVI — WARD BOARD'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Verify beds and 2 required patient identifiers (PRD FR-3: Bed + Admission Number)
+    expect(find.text('Bed 1'), findsOneWidget);
+    expect(find.text('J.K.'), findsOneWidget);
+    expect(find.text('(ADM-2026-8812)'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Bed 2'), findsOneWidget);
+    expect(find.text('P.O.'), findsOneWidget);
+    expect(find.text('(ADM-2026-8834)'), findsOneWidget);
+
+    // Verify open loop count badge on Bed 1
+    expect(find.text('1 OPEN'), findsWidgets);
+
+    // Verify "ALL CLEAR" on Beds with 0 open loops (Bed 4 and Bed 5)
+    expect(find.text('ALL CLEAR'), findsNWidgets(2));
+  });
+
+  testWidgets('Tapping a bed row opens PatientDetailScreen with loops', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: OraviApp(),
+      ),
+    );
+
+    // Tap Bed 1
+    await tester.tap(find.text('Bed 1'));
+    await tester.pumpAndSettle();
+
+    // Verify detail screen loaded with loop title
+    expect(find.text('Maintain SpO2 > 92% on nasal cannula'), findsOneWidget);
+    expect(find.text('Thread History (Append-Only):'), findsOneWidget);
+    expect(find.text('Normal saline running at 100ml/hr. MAP is 68.'), findsNothing); // Bed 1 message was SpO2
+    expect(find.textContaining('SpO2 stable at 94% on 2L nasal prongs'), findsOneWidget);
   });
 }

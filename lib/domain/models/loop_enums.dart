@@ -2,6 +2,7 @@
 ///
 /// Implemented in pure Dart with zero Flutter/UI dependencies, strictly following
 /// the Oravi PRD v0.1 and Technical Architecture v0.1.
+library;
 
 /// Urgency levels for an open loop (PRD Section 6).
 enum LoopUrgency {

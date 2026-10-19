@@ -1,0 +1,411 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../domain/models/loop_enums.dart';
+import '../domain/projections/projections.dart';
+import 'providers/ward_providers.dart';
+import 'theme/clinical_theme.dart';
+import 'widgets/close_loop_dialog.dart';
+import 'widgets/create_loop_dialog.dart';
+
+/// Screen displaying all loops (active & recently closed) for a single patient.
+///
+/// Implements PRD Section 7.2:
+/// - Loop card list sorted by urgency.
+/// - Inline append-only thread message history.
+/// - 2-tap loop creation and strict closure & reopen flows.
+class PatientDetailScreen extends ConsumerStatefulWidget {
+  final PatientStateProjection patient;
+
+  const PatientDetailScreen({super.key, required this.patient});
+
+  @override
+  ConsumerState<PatientDetailScreen> createState() => _PatientDetailScreenState();
+}
+
+class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
+  final Map<String, TextEditingController> _replyControllers = {};
+
+  @override
+  void dispose() {
+    for (final c in _replyControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController _getReplyController(String loopId) {
+    return _replyControllers.putIfAbsent(loopId, () => TextEditingController());
+  }
+
+  void _sendReply(String loopId) {
+    final controller = _getReplyController(loopId);
+    final text = controller.text.trim();
+    if (text.isEmpty) return;
+
+    ref.read(wardControllerProvider.notifier).postMessage(
+          patientId: widget.patient.patientId,
+          loopId: loopId,
+          content: text,
+        );
+    controller.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loops = ref.watch(patientLoopsProvider(widget.patient.patientId));
+
+    return Scaffold(
+      backgroundColor: ClinicalTheme.background,
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${widget.patient.bedNumber} — ${widget.patient.nameOrInitials} (${widget.patient.admissionNumber})'),
+            Text(
+              '${widget.patient.age}y / ${widget.patient.sex} • Admitted: ${widget.patient.shortAdmittingNote}',
+              style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          // Alerts Banner if patient has key alerts
+          if (widget.patient.keyAlerts.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: ClinicalTheme.criticalRed, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
+                    style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+
+          // Loops List
+          Expanded(
+            child: loops.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 48, color: ClinicalTheme.successGreen),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No Open Clinical Loops',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'All pending issues are closed or nothing was entered.',
+                          style: TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(backgroundColor: ClinicalTheme.routineTeal),
+                          onPressed: () => showDialog(
+                            context: context,
+                            builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
+                          ),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Raise First Loop'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: loops.length,
+                    itemBuilder: (context, index) {
+                      return _buildLoopCard(loops[index]);
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: ClinicalTheme.routineTeal,
+        foregroundColor: Colors.white,
+        onPressed: () => showDialog(
+          context: context,
+          builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
+        ),
+        icon: const Icon(Icons.add_task),
+        label: const Text('Open Loop'),
+      ),
+    );
+  }
+
+  Widget _buildLoopCard(LoopStateProjection loop) {
+    final urgencyColor = ClinicalTheme.urgencyColor(loop.urgency);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Row: Type, Urgency Badge, State Badge
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: urgencyColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: urgencyColor, width: 0.8),
+                  ),
+                  child: Text(
+                    loop.urgency.wireName.toUpperCase(),
+                    style: TextStyle(color: urgencyColor, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  loop.loopType.wireName.replaceAll('_', ' ').toUpperCase(),
+                  style: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                _buildStateBadge(loop),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Loop Title & Description
+            Text(
+              loop.title,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: loop.isOpen ? ClinicalTheme.textPrimary : ClinicalTheme.textMuted,
+                decoration: loop.isOpen ? null : TextDecoration.lineThrough,
+              ),
+            ),
+            if (loop.description.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                loop.description,
+                style: const TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+              ),
+            ],
+            const SizedBox(height: 8),
+
+            // Active Escalation Warning if present
+            if (loop.activeEscalation != null)
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: ClinicalTheme.criticalRed.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: ClinicalTheme.criticalRed),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.emergency, color: ClinicalTheme.criticalRed, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Escalated to ${loop.activeEscalation!.targetRole}: "${loop.activeEscalation!.reason}"',
+                        style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Owner & Metadata Row
+            Row(
+              children: [
+                const Icon(Icons.person_outline, size: 14, color: ClinicalTheme.textMuted),
+                const SizedBox(width: 4),
+                Text(
+                  'Owner: ${loop.currentOwnerId} (${loop.currentOwnerRole})',
+                  style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted),
+                ),
+                if (loop.reopenCount > 0) ...[
+                  const Spacer(),
+                  Text(
+                    'Reopened ${loop.reopenCount}x',
+                    style: const TextStyle(fontSize: 11, color: ClinicalTheme.urgentAmber, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ],
+            ),
+            const Divider(color: ClinicalTheme.border, height: 20),
+
+            // Append-only Thread Messages
+            if (loop.messages.isNotEmpty) ...[
+              const Text(
+                'Thread History (Append-Only):',
+                style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              ...loop.messages.map((msg) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4.0),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: ClinicalTheme.surfaceElevated,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${msg.authorId}: ',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClinicalTheme.routineTeal),
+                          ),
+                          Expanded(
+                            child: Text(
+                              msg.content,
+                              style: const TextStyle(fontSize: 12, color: ClinicalTheme.textPrimary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
+              const SizedBox(height: 8),
+            ],
+
+            // Action Row: Close, Confirm, Reopen, Reply
+            if (loop.isOpen) ...[
+              if (loop.state == LoopState.closedAwaitingConfirmation)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.urgentAmber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: ClinicalTheme.urgentAmber),
+                  ),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Closed awaiting senior/opener confirmation.',
+                          style: TextStyle(fontSize: 11, color: ClinicalTheme.urgentAmber, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: ClinicalTheme.urgentAmber,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        ),
+                        onPressed: () => ref
+                            .read(wardControllerProvider.notifier)
+                            .confirmCriticalClosure(patientId: loop.patientId, loopId: loop.loopId),
+                        child: const Text('Confirm', style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Reply Input
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _getReplyController(loop.loopId),
+                      style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 12),
+                      decoration: InputDecoration(
+                        hintText: 'Add note or update...',
+                        hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 11),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        filled: true,
+                        fillColor: ClinicalTheme.surfaceElevated,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(color: ClinicalTheme.border),
+                        ),
+                      ),
+                      onSubmitted: (_) => _sendReply(loop.loopId),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.send, color: ClinicalTheme.routineTeal, size: 20),
+                    onPressed: () => _sendReply(loop.loopId),
+                  ),
+                  const SizedBox(width: 4),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: ClinicalTheme.successGreen,
+                      side: const BorderSide(color: ClinicalTheme.successGreen),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (ctx) => CloseLoopDialog(loop: loop),
+                    ),
+                    icon: const Icon(Icons.check, size: 16),
+                    label: const Text('Close', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ] else ...[
+              // Closed State Details & Reopen Button
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Closed by ${loop.closedByUserId}: [${loop.closureReason?.wireName ?? "closed"}] ${loop.closureNote ?? ""}',
+                      style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted, fontStyle: FontStyle.italic),
+                    ),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: ClinicalTheme.urgentAmber),
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (ctx) => ReopenLoopDialog(loop: loop),
+                    ),
+                    icon: const Icon(Icons.replay, size: 16),
+                    label: const Text('Reopen', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStateBadge(LoopStateProjection loop) {
+    switch (loop.state) {
+      case LoopState.raised:
+        return _badge('RAISED', ClinicalTheme.textSecondary);
+      case LoopState.acknowledged:
+        return _badge('ACKNOWLEDGED', ClinicalTheme.routineTeal);
+      case LoopState.inProgress:
+        return _badge('IN PROGRESS', ClinicalTheme.urgentAmber);
+      case LoopState.closedAwaitingConfirmation:
+        return _badge('AWAITING CONFIRMATION', ClinicalTheme.criticalRed);
+      case LoopState.closed:
+        return _badge('CLOSED', ClinicalTheme.textMuted);
+    }
+  }
+
+  Widget _badge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color, width: 0.8),
+      ),
+      child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+    );
+  }
+}
