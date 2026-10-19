@@ -1,0 +1,495 @@
+Oravi: Product Requirements Document
+Version 0.1 (working draft) | October 15, 2026 | Owner: Ikileng (Bradley Ikileng Etyang)
+How to read this document. Every significant statement carries a status. [Decided] means settled for now. [Assumed] means we are building on it, but it must be tested. [Open] means undecided, with options listed. Numeric targets are targets until measured. This is a living draft meant to be revised after research and hospital visits.
+1. Summary
+Oravi keeps unfinished clinical business from getting lost when care passes between people and shifts. Today, what a nurse knows about a patient (what is pending, what changed, what to watch, what was asked of a doctor) travels through memory, a paper counter-book, verbal recap, and WhatsApp. It is routinely lost at shift boundaries.
+Oravi's central idea [Decided]: tie communication and responsibility to the clinical issue, not to the person or the shift. Every unfinished item is an open loop with an owner, a conversation, and a state. Loops do not expire at shift change. They transfer, and they persist until someone explicitly closes them. A deterministic flagging layer surfaces loops that are overdue, unacknowledged, or at risk of being dropped. Intelligence beyond rules (AI drafts, risk flags) is a later phase, introduced only after it is validated.
+Oravi is built for Kenyan and wider African wards: offline-first, low-cost, usable on the devices clinicians already own, in English and Kiswahili, and fitting existing workflow rather than adding a parallel one.
+2. Problem and evidence
+Problem statement [Decided]. When a shift changes, or when a question passes between a nurse and a doctor, critical information and responsibility do not reliably cross the boundary, and that gap is where avoidable harm occurs.
+What we know.
+Handoff communication failure is a widely documented source of avoidable harm in hospitals worldwide, which is why structured protocols such as SBAR and I-PASS exist.
+In interviews with twelve nurses, all twelve confirmed handoff communication is a real challenge, and seven of twelve said a suitable digital tool would help and that they would embrace it. The Kardex concept came directly from these interviews.
+What we do not yet know [Open].
+How handoff actually runs, minute by minute, on target wards (who, where, how long, what is written versus said).
+Whether dropped loops are the dominant failure, or whether staffing, missing information, or physician availability matter more.
+Why five of twelve nurses were not clearly in favor, and whether the sample (small, nurse-only, limited sites) generalizes.
+Whether a ward would choose Oravi over WhatsApp plus the counter-book, and what it would have to give up.
+Baselines for handoff duration and missed items.
+3. Vision and design principles
+Vision. Nothing that matters falls through the cracks when care passes between nurses, between doctors, between departments, or from the ambulance to the ER.
+Principles [Decided].
+Issue over schedule. Conversations and responsibility attach to the clinical issue.
+Ownership is explicit. No open loop is ever unowned.
+Silence is never ambiguous. The system distinguishes 'nothing pending' (confirmed) from 'nothing recorded'.
+No parallel workflow. Entry happens at moments clinicians already document, in one or two taps, mirroring the counter-book they know.
+Offline by default. Core functions never depend on the internet.
+Explainable intelligence. Every flag says why it fired. Humans own every clinical decision.
+Honest limits. Oravi protects what is entered. It states this plainly.
+Built for the setting. Low cost, cheap devices, local languages, local workflow.
+4. Users and personas
+Persona
+Needs
+Key moments
+Ward nurse (outgoing and incoming)
+Hand over and receive everything pending without rewriting it; know exactly what they now own
+Shift change, bedside handover, raising questions to doctors
+Ward doctor (intern, medical officer, consultant)
+Be reached for the right reason, see what is waiting across patients, reply fast
+Escalations, clarifications, consult requests, ward rounds
+Doctor handing over (sign-out, on-call)
+Pass plans, contingencies, and pending items to the next doctor without losing context
+Evening sign-out, on-call changeover, consultant cover
+ER clinician (nurse or doctor)
+Know what is arriving; send and receive patients with clear ownership
+Pre-alert, arrival handover, transfer to ward or theatre
+Paramedic or ambulance crew (who they are in our setting is open)
+Alert the ER quickly and hand over condition and interventions on arrival, even with weak connectivity
+En route, arrival at the ER
+Nurse-in-charge or matron
+See what is open too long, unanswered, or missed at handover; run the ward
+Shift start and end, incident review
+Ward admin or clerk (support)
+Enroll staff, maintain bed list and roster
+Onboarding, shift changes
+Hospital management (secondary)
+Evidence of safer handover; audit trail
+Reviews, procurement
+4A. Handoff contexts
+Oravi covers every point where responsibility for a patient moves between people, teams, or services, not only nurse shift change. [Decided] The loop engine is the shared core, and each handoff context is a configuration of it. [Assumed]
+Context
+Parties
+What is distinct
+Status
+Nurse to nurse (shift change)
+Outgoing and incoming nurses
+Scheduled, many patients at once, bedside, same ward
+First context to ship
+Physician to physician (sign-out, on-call, rounds)
+Outgoing and incoming doctors, on-call, consultants
+Fewer patients but higher-stakes plans and contingencies (if X, then Y); often remote or by phone
+Later
+Between departments (ER to ward, ward to theatre or ICU)
+Sending and receiving teams
+The patient physically moves, so ownership moves between teams and no one should be left holding or forgetting the patient
+Later
+Paramedic to ER
+Ambulance crew and ER team
+Before arrival and in motion, time-critical, weak connectivity; a pre-alert (what is coming, ETA, condition) followed by a bedside handover on arrival
+Later, many unknowns
+Consults and escalations (any role)
+Any two clinicians
+Ad hoc, not shift-based; needs a clear owner and an answer
+In v1 (sections 7.4 and 7.5)
+Shared core, configurable edges [Assumed]. The loop lifecycle, ownership, threads, audit, and flags are shared. Each context sets its own template, required fields, default owner, urgency model, and timing.
+Patient-journey view [Assumed]. Loops follow the patient across wards, theatre, and ICU instead of staying on one ward board. This affects the data model and FR-24.
+Pre-hospital link [Open]. Who brings patients to the target ERs, how they alert the ER today, and whether they belong to the hospital are unknown and are learned in Phase 0.
+Sequencing [Decided]. The full scope is the vision. Nurse capabilities are built and tested first, followed by the Ask Oravi agent. Both are tested on hospital visits before doctors, ER staff, paramedics, and other roles are added.
+5. Scope
+In scope for v1 [Decided]: ward board, open-loop lifecycle, loop threads, ownership and handoff sessions, escalation chain, doctor inbox, oversight view, rule-based flags, compiled (non-AI) structured handoff summary with print, audit trail, offline operation, English and Kiswahili. Build order: nurse capabilities first, then the Ask Oravi agent. Both are tested on hospital visits before other roles are added (section 4A).
+Later phases [Assumed]: other handoff contexts (physician sign-out, department-to-department transfers, paramedic pre-alert; see section 4A), the patient-scoped Ask Oravi agent (section 8A), AI-assisted handoff drafts, pattern and risk flags, voice input, photo attachments, integration with existing systems, multi-ward doctor views, analytics.
+Non-goals [Decided]: Oravi is not an EHR or EMR, not a general-purpose chat app, not a diagnostic or treatment-recommending tool in v1, not a billing or claims system, and not a replacement for the patient chart.
+6. Core concept: the open loop
+Loop types [Decided]: (a) Task or pending result, (b) Question or clarification, (c) Escalation, (d) Consult request, (e) Risk flag (rule-raised or manual).
+Urgency [Assumed]: Routine, Urgent, Critical. Names and definitions to be agreed with clinicians.
+Each loop has: patient (bed plus a second identifier), type, urgency, owner (person and role), thread, state, timestamps, and full event history.
+States [Decided]: Raised, Acknowledged, In progress, Resolved, Closed. Reopening is allowed with a reason. Critical loops pass through one extra state, Closed awaiting confirmation (see Critical loops below).
+Ownership rules [Decided]. A loop always has an owner. If the owner is unassigned or goes off shift, it transfers at handoff or defaults to the nurse-in-charge. It never lapses.
+Opening and closing rules [Decided]. Anyone with access to the patient (clinical roles, not administrative roles) can open a thread or loop, and anyone with the same access can close one. Closing always requires a reason: one tap from a short list that depends on the thread type, plus a brief note that is required for 'medication given', 'action taken', and 'other'. Each closure is recorded as resolved or closed without resolution, with who, when, and why. When a thread closes, its opener and owner are notified at once with a one-tap Reopen, and closures of Urgent and Critical items appear in the next handoff as recently closed. Nothing is ever deleted. When someone opens a new thread, Oravi shows open threads on the same patient with similar topics so they can add to one instead of creating a duplicate, and every new thread gets a default owner.
+Critical loops [Decided]. Routine and Urgent loops close instantly with a reason and notify the opener and owner. Critical (STAT) loops also close instantly, but move to Closed, awaiting confirmation until the opener or a senior on duty taps Confirm or Reopen. The confirmation request quotes the closer's reason (for example: Nurse B closed your STAT heparin loop, 'Heparin running at 1000u/hr'). If nobody confirms within a set time, it passes to the next doctor or the nurse-in-charge and appears in the oversight view. Critical must stay rare and strictly defined so these requests stay meaningful.
+Reopen or link [Assumed]. If the same issue recurs soon after closure, the default is to reopen the existing thread so the whole story stays together. If the cause differs or the closure was long ago, the default is a new thread linked to the earlier one. The default window is 24 hours and configurable. When starting, Oravi shows both options along with the earlier closure reason. Both routes count toward Ask Oravi pattern detection.
+Persistence [Decided]. Loops persist across shifts, device changes, and discharge until closed. Discharge requires every open loop to be resolved or explicitly carried forward with an owner.
+7. Functional requirements
+7.1 Ward board and patients
+FR-1 The home screen is a ward board with one row per bed, in a configurable order matching the ward round, showing open-loop count and the most urgent state. [Decided]
+FR-2 Minimal patient record: bed, name or initials, age, sex, admission number, short admitting note, key alerts (free text, for example, allergies). Admit, transfer, and discharge are events. [Decided]
+FR-3 Two patient identifiers are shown on every loop, escalation, and handoff item. [Decided]
+7.2 Loops and threads
+FR-4 Create a loop in two taps or fewer from a short menu of common templates, with sensible defaults for type, urgency, and owner. [Decided]
+FR-5 State transitions follow section 6 and are logged with author and time. [Decided]
+FR-6 Each loop has a thread of append-only messages. Edits show history. Quick-reply chips reduce typing. [Decided]
+FR-7 Role mentions (for example, the doctor on call) resolve to the person currently holding that role. [Decided]
+FR-8 Anyone newly assigned to a loop inherits its full history. [Decided]
+FR-9 Read and acknowledgment are tracked per person. [Decided]
+FR-10 Photo attachments (for example, a chart photo): [Open], deferred pending privacy and storage decisions.
+FR-45 Any clinician with access to a patient can open a thread or loop. Administrative roles cannot. [Decided]
+FR-46 Any clinician with access to a patient can close a thread. Closing requires a reason chosen from a short list that depends on the thread type (for a task or result thread, for example: medication given, result received, doctor reviewed, duplicate or created in error, other), with a brief free-text note required for 'medication given', 'action taken', and 'other'. Chips never carry clinical judgment (for example, 'result received', not 'result normal'). Voice dictation through the device keyboard is supported. [Decided]
+FR-47 Each closure is logged with who, when, why, and whether the issue was resolved or closed without resolution. [Decided]
+FR-48 On closure, the opener and owner are notified with a one-tap Reopen. Closures of Urgent and Critical items appear in the next handoff as recently closed. [Decided]
+FR-49 When a thread is opened, Oravi suggests open threads on the same patient with similar topics, and every new thread receives a default owner. [Assumed]
+FR-50 Closed threads are never deleted. The full open, close, and reopen history stays attached to the thread and feeds the pattern counts used by Ask Oravi. [Decided]
+FR-51 A closed Critical loop enters 'Closed, awaiting confirmation' until the opener or a senior on duty confirms or reopens it. The request quotes the closer's reason. [Decided]
+FR-52 An unconfirmed Critical closure escalates after a configurable time to the next doctor or the nurse-in-charge and appears in the oversight view. [Assumed]
+FR-53 When an issue recurs, the user chooses Reopen or New linked thread. The default is reopen if the topic matches and the closure was within the window (24 hours by default, configurable). Linked threads display the chain. [Assumed]
+7.3 Handoff
+FR-11 A handoff session pairs the outgoing and incoming nurse and walks the board bed by bed. [Decided]
+FR-12 The incoming nurse accepts ownership. Routine loops may be accepted in bulk. Critical loops require individual acceptance. [Decided]
+FR-13 A structured summary per patient (Situation, Background, Assessment, Recommendation layout) is compiled automatically from structured entries and open loops, with no AI in v1. [Decided]
+FR-14 Each bed ends with an explicit, time-stamped, named confirmation: 'nothing pending' or 'N loops transferred'. [Decided]
+FR-15 A one-page printable handover sheet is available for wards and moments where paper is still expected. [Decided]
+FR-16 A completed handoff record is locked. Corrections are appended, never overwritten. [Decided]
+FR-17 Loops raised after a handoff notify the new owner immediately. [Decided]
+7.4 Escalation and notifications
+FR-18 An escalation targets a role and follows a chain (first doctor, next doctor, senior or matron) with configurable timers by urgency. Unanswered escalations are prominent on the board using shape and text as well as color. [Decided]
+FR-19 Acknowledged and Resolved are distinct states. [Decided]
+FR-20 Channels: in-app notification with audible alert, and SMS fallback when data is unavailable. SMS contains no clinical detail, includes a per-escalation reply code, and accepts replies only from the registered number. Feasibility and cost of SMS: [Assumed].
+FR-21 Notifications on lock screens contain no patient information. [Decided]
+7.5 Doctor and oversight views
+FR-22 Doctor inbox: loops addressed to the doctor across patients, sorted by urgency and age, with one-tap reply, accept or decline for consults. [Decided]
+FR-23 Oversight view for the nurse-in-charge or matron: loops open too long, unacknowledged critical loops, unanswered escalations, handoff completeness. [Decided]
+FR-24 Doctors covering several wards: unified view across wards. [Open]
+7.6 Rule-based flags (v1 intelligence)
+FR-25 Flags raised by deterministic rules: overdue task, unacknowledged Critical loop, unanswered escalation, loop open beyond a threshold, bed with no handoff confirmation, discharged patient with open loops, loop without an owner. [Decided]
+FR-26 Thresholds are configurable per ward, with defaults agreed with clinicians. [Assumed]
+FR-27 Every flag states why it fired. It can be snoozed or dismissed only with a reason, which is logged. [Decided]
+FR-28 An alert budget limits interruptive alerts and tiers them by severity to control alert fatigue. [Decided]
+7.7 Accounts, roster, audit, language
+FR-29 Accounts carry cadre and ward assignments. Shared devices support fast user switching with a PIN, auto-lock, and lockout. [Decided]
+FR-30 A simple per-ward roster (who is on, which beds) is maintained inside Oravi, with import from other systems later. [Assumed]
+FR-31 A tamper-evident audit log records loop creation, transitions, handoff acceptance, acknowledgment of critical items, and flag dismissals. It is exportable. [Decided]
+FR-32 English and Kiswahili interface, using the clinical terms wards actually use. [Decided]
+FR-33 Data export in a FHIR-shaped format for hospitals. [Assumed]
+8. Intelligence layer (phased)
+Phase 1, in v1 [Decided]: rules only. See FR-25 to FR-28. Low risk, explainable, immediately useful.
+Phase 2, future [Assumed]: AI-assisted handoff draft. The model reads structured entries and notes and produces a readable SBAR draft. Design:
+The original AI draft is locked and hashed. It is stored for audit and never edited.
+The clinician reviews an editable copy. Each edit is a logged revision with author and diff.
+The submitted version points to one specific revision and is signed by the submitting clinician, who owns the final text.
+Each sentence links to the entries it came from. Deterministic checks verify that every drug, dose, number, and bed in the draft appears in the source data and flag anything unsupported.
+Medication and dose fields require explicit confirmation to discourage rubber-stamping.
+The incoming nurse sees the submitted version labeled as AI-assisted and reviewed by a named person. The raw original is for audit only.
+Requests go through a server component only. Identifiers are minimized or pseudonymized. If the service is unreachable, the compiled template summary is used, and the ward never waits on the cloud.
+Open items: cross-border data-transfer rules, provider retention terms (target zero retention), per-call cost.
+Phase 3, future [Open]: pattern and risk flagging. Only after sufficient validated data, clinical governance, and a regulatory classification check. Output must show evidence, never be the only record, and never recommend treatment without an approved pathway.
+Existing prototype work [Open]. The current prototype includes Claude-based patient reports and High, Medium, Low risk flags. These should be treated as experimental and off by default until validated, and reconciled with this phasing.
+8A. Ask Oravi: the patient-scoped queryable agent
+Purpose [Decided]. What A knows, B and C also know. The patient is the main object. A clinician who opens a patient and asks a question in plain language gets a timestamped report built only from what has been said and logged about that patient inside Oravi, in the speakers' own words, with a one-tap way to reach the person who said it. Nobody is left out of the context because they were not part of a conversation. The promise is zero fabricated quotes, not completeness: the agent reports what is logged in Oravi and always shows what it searched.
+Sources and boundaries
+Source [Decided]. Only Oravi's own record for that patient: handoff logs and previous handoff reports, loops opened and closed, thread messages and conversations from opening to closing, escalations and replies, and clinician-entered notes. No outside data, no general medical knowledge presented as fact about the patient, and no external EHR charting. Extending the agent's knowledge through FHIR or EHR integration is a possible future step and is out of scope for now.
+Patient-scoped [Decided]. A query runs inside one patient's record. The agent never mixes in another patient's information.
+Language of the record [Decided]. Quoted text is the exact wording used, in whatever language it was written, with author, role, date, time, and thread. Example: 'spo2 dropped to 63', Tue 27/10/2026, Nurse A.
+Not a clinician [Decided]. The agent does not diagnose, predict, or recommend treatment. It retrieves, orders, counts, and highlights.
+Visibility [Decided]. Everything said in a patient's threads is visible to anyone with access to that patient, including clinicians who were not in the conversation. Private one-to-one messages are not part of the agent's source. A message sent through a quote's Message button is created as a thread on the patient and therefore becomes part of the record.
+Behavior rules
+Quote, do not paraphrase. The report is assembled from verbatim snippets. Any wording the system adds is minimal, clearly marked as Oravi's, and links to the quotes behind it.
+Show, do not judge. If an entry looks odd (for example 'spo2 dropped to 63' followed minutes later by 'recheck spo2 93'), show both with times and authors. Never decide which is right.
+Say what was not found. If nothing matches, say 'no record in Oravi' (never 'no record exists'), list the search terms and the time range, and state that absence of a mention is not evidence that the event did not happen or that all is well.
+Show coverage. Every answer ends with what was searched: number of messages and threads, and the time span.
+Surface conflicts. If two entries disagree, show both. Do not reconcile them.
+Separate record from observation. Counts and patterns computed by the system (a thread reopened 4 times) are labeled as system counts. Any model-written observation is labeled 'Note from Oravi, not from the record' and cites its evidence.
+Every quote is actionable. Each quote has buttons to message or call the author, or the current owner of the patient if the author is unreachable.
+How the agent is made smart
+'Smart' here means three things: it finds everything relevant, it quotes it faithfully, and it knows when it found nothing. It does not mean clever clinical reasoning. The design below is built for that.
+Patient-scoped retrieval. Every message and event is indexed per patient with metadata (author, role, time, thread, loop state). A query combines keyword search with semantic search so that paraphrases and misspellings are still found. [Assumed]
+A ward lexicon. Build a vocabulary of terms, abbreviations, and local usage from real ward language: urine, UO, passing urine, mkojo; SpO2, sats, oxygen; and so on, across English, Kiswahili, and mixed speech. Grow it from the failures found in testing. [Assumed]
+Time is handled by code, not by the model. Windows such as 'last 8 hours' or 'since Monday' are computed by deterministic code using the system clock. Sorting and counting are also code. The model never does date arithmetic. [Decided]
+Quote-first generation. The model's job is to choose which snippets answer the question and in what order. The final report is built from the original text. [Decided]
+Automatic verification. Before display, check that every quoted string appears exactly in the record, that every number in any model-written text appears in a cited quote, and that every cited author and time match. Any failure blocks the answer or removes the offending line. [Decided]
+Deterministic pattern detectors. Count repeated openings and closings of a thread, repeated escalations on one topic, the same topic raised across several shifts, and long silences on an open concern. These are cheap, explainable, and safe. A model may suggest further possible patterns, but they are labeled and evidenced. [Assumed]
+Long histories. For patients with long records, keep per-shift digests built from verbatim snippets with links to sources, so answers stay fast and traceable. Digests are never a substitute for the record. [Assumed]
+Boundary handling. Questions that ask for a diagnosis, prediction, or treatment get a clear refusal plus the relevant record and a button to ask the doctor in charge. [Decided]
+Learning from use. A 'Something is missing' button on every answer logs the miss for review. Misses feed the lexicon, the detectors, and the test set. [Assumed]
+Model choice [Open]. A strong hosted model through a server component, or a smaller model nearer the ward. Criteria: accuracy on the test set, cost per query, latency, offline behavior, and data-protection obligations (identifier minimization, transfer rules, retention terms).
+Requirements
+FR-34 A clinician can open a patient and ask a question in plain language. The agent answers for that patient only. [Decided]
+FR-35 Answers consist of verbatim quotes with author, role, date, time, and thread, ordered by time. [Decided]
+FR-36 Every answer includes a coverage line stating terms searched, number of messages and threads, and the time span. [Decided]
+FR-37 If nothing is found, the answer says 'no record in Oravi' (never 'no record exists') and states that absence of a mention is not evidence of absence. [Decided]
+FR-38 Each quote offers message and call buttons for its author, with a fallback to the patient's current owner if the author is off shift. A message sent this way is created as a clarification loop anchored to the quoted message. [Assumed]
+FR-39 System-computed patterns (reopen counts, repeated escalations, recurring topics) are shown with timestamps and labeled as system counts. They state counts and show the quotes behind them, never a clinical meaning (a fever thread reopened 3 times is reported as a count with its quotes, not as a sign of infection). Numeric trend statements, such as urine values falling across shifts, wait for a later phase; until then, the values are shown side by side as quotes. Patterns appear in answers when someone asks and as a quiet note on the patient screen. They do not trigger push alerts in v1. [Assumed]
+FR-40 Model-written observations are labeled, cite their quotes, and never include diagnosis, prediction, or treatment advice. [Decided]
+FR-41 The agent understands English, Kiswahili, and mixed-language questions and records, and replies in the language of the question. [Assumed]
+FR-42 Access to the agent follows the same permissions as access to the patient's record. Every query is logged with user, patient, time, and question. [Decided]
+FR-43 The deterministic parts (patient timeline, search, counts) work offline. The natural-language layer needs a connection or ward server and degrades to timeline and search when unavailable. [Assumed]
+FR-44 A 'Something is missing' button on every answer records feedback for review. [Assumed]
+Example questions and answers (illustrative, to be replaced with real ward language)
+Example 1: a trend question. Bed 4, J.K. Asked at Wed 28/10/2026 06:10 by the incoming morning nurse: How has his urine been?
+Oravi answers:
+Mon 26/10, 14:00, Nurse A: 'urine 40 ml/hr'
+Tue 27/10, 04:30, Nurse C: 'urine ok, bag emptied'
+Tue 27/10, 16:00, Nurse B: 'urine 30 ml/hr'
+Tue 27/10, 22:15, Dr Otieno, thread Fluids: 'watch urine closely, tell me if under 30'
+No record in Oravi of urine after Tue 27/10, 22:15 (about 8 hours). Absence of a mention does not mean there was no change.
+Searched: urine, urine output, passing urine, UO, mkojo in 41 messages across 5 threads, Mon 26/10 02:15 to Wed 28/10 06:10.
+Buttons: Message Nurse B | Call Nurse B | Ask Dr Otieno
+Example 2: a shift-start catch-up. Same patient. What should I know about the last 8 hours?
+Oravi answers (Tue 27/10, 22:10 to Wed 28/10, 06:10):
+22:15, Dr Otieno: 'watch urine closely, tell me if under 30'
+01:30, Nurse C: 'spo2 88 on room air, put him back on 2 litres'
+01:45, Nurse C to Dr Otieno (escalation): 'sats 88, back on oxygen, please review'. 02:10, Dr Otieno: 'will come'. Status: acknowledged, not resolved.
+03:40, Nurse C: 'still on 2L, sats 91 at rest'
+System count: 2 loops open for this patient (oxygen review, urine).
+Searched: 23 messages across 4 threads and 1 escalation, Tue 27/10 22:10 to Wed 28/10 06:10.
+Example 3: showing, not judging. Any oxygen problems today?
+Oravi answers:
+Tue 27/10, 11:20, Nurse A: 'spo2 dropped to 63'
+Tue 27/10, 11:26, Nurse A: 'recheck spo2 93, probe was loose'
+Both entries are shown as written. Oravi has not decided which reading applies.
+Buttons: Message Nurse A | Call Nurse A
+Example 4: nothing found. Any mention of allergies?
+Oravi answers: No record in Oravi mentions allergies for this patient. This does not mean there are none. The patient's key alerts field is empty. Admitted by Nurse F on Mon 26/10. Buttons: Message Nurse F | Ask the nurse in charge. Searched: allergy, allergic, reaction, mzio in 41 messages across 5 threads.
+Example 5: a repeating thread. Has anything been raised repeatedly for this patient?
+Oravi answers:
+System count: thread 'Pain control' was opened 4 times and closed 3 times between Fri 23/10 and Wed 28/10.
+Fri 23/10, 09:00, Nurse A (opened): 'pain 7/10 left knee'
+Fri 23/10, 14:00, Dr Otieno (closed): 'pain plan reviewed, giving paracetamol'
+Sun 25/10, 20:30, Nurse B (reopened): 'pain again 8/10'
+Tue 27/10, 03:15, Nurse C (reopened): 'pain not settling, asking for something stronger'
+Note from Oravi, not from the record: pain was raised on 4 of the last 5 days and the thread was reopened after each closure. The messages above support this. You may want to ask whether the pain plan needs review. Button: Ask Dr Otieno
+Example 6: conflicting entries. What is the oxygen plan?
+Oravi answers:
+Tue 27/10, 22:10, Nurse A: 'on 2L nasal prongs, sats 94'
+Wed 28/10, 01:30, Dr Otieno: 'wean to room air if sats stay above 92'
+Wed 28/10, 03:40, Nurse C: 'still on 2L, sats 91 at rest'
+Note from Oravi, not from the record: the latest nurse entry and the doctor's instruction do not clearly line up. Buttons: Ask Dr Otieno | Message Nurse C
+Example 7: a question in Kiswahili. Mkojo wake umekuwaje kwa masaa 24 yaliyopita?
+Oravi answers (in Kiswahili): Nimepata maelezo 2 kuhusu mkojo.
+Jumanne 27/10, 18:20, Nurse D: 'mkojo ni kidogo, 20 ml kwa saa'
+Jumanne 27/10, 23:00, Nurse E: 'mkojo umeongezeka kidogo, 35 ml kwa saa'
+Hakuna maelezo mapya tangu Jumanne 23:00. Kutokuwepo kwa maelezo hakumaanishi hali ni nzuri.
+Buttons: Mtumie ujumbe Nurse E | Piga simu
+Example 8: a question the agent will not answer. Is he going into kidney failure?
+Oravi answers: I cannot diagnose or predict. This is what the record says about urine and anything mentioning kidney, creatinine, or renal: [the urine entries from Example 1; no mention of kidney, creatinine, or renal]. Button: Ask Dr Otieno
+Example 9: tracking a response. Did the doctor ever respond about the blood cross-match? Asked Tue 27/10, 22:00.
+Oravi answers:
+Tue 27/10, 15:40, Nurse B, question to Dr Otieno: 'Hb 6.8, please advise on cross-match for 2 units'
+No reply from a doctor in Oravi. The question was asked 6 hours 20 minutes ago.
+System status: loop 'Cross-match' is raised, not acknowledged.
+Searched: cross-match, crossmatch, blood, group and match in 17 messages across 3 threads.
+Buttons: Message Dr Otieno | Call Dr Otieno | Escalate to the next doctor
+Example 10: blood pressure overnight, with a pattern note. How has his blood pressure been overnight? Asked by a doctor on Tue 27/10, 07:30.
+Oravi answers:
+Mon 26/10, 21:30, Nurse Sarah: 'BP 160/100, gave labetalol as charted'
+Tue 27/10, 02:15, Nurse Sarah: 'Patient complained of headache, BP 175/110'
+Tue 27/10, 04:00, Nurse Sarah: 'BP down to 145/90 after second dose'
+Buttons beside each quote: Message Nurse Sarah | Call Nurse Sarah
+System count: blood pressure escalation threads were opened on 3 consecutive night shifts (nights of Sat 24/10, Sun 25/10, and Mon 26/10).
+Searched: BP, blood pressure, pressure, headache in 28 messages across 4 threads, Sat 24/10 19:00 to Tue 27/10 07:30.
+Quality targets and evaluation
+Quote fidelity. Zero fabricated quotes: 100 percent of quoted text matches the record exactly. This is a hard rule enforced by automatic verification. Oravi does not promise completeness. The agent can miss relevant messages and can only report what was logged in Oravi, so every answer shows what was searched. [Decided]
+Completeness. On a test set of real or simulated ward conversations, the share of relevant messages found. Target set after the first test round. [Assumed]
+Honest absence. When nothing relevant exists, the agent says so. Measured on test questions designed to have no answer. [Assumed]
+Language coverage. Accuracy across English, Kiswahili, and mixed text. [Assumed]
+Usefulness. Share of answers clinicians rate helpful, share of 'Something is missing' reports, and how often the contact button is used. [Assumed]
+Speed. Time to first answer. Target set after the deployment option is chosen. [Open]
+Test set. The example questions in this section, plus many more from hospital visits, become the starting test set.
+Phasing
+Patient timeline, search, and system counts (no AI). Works offline. Candidate for v1. [Open]
+Natural-language questions with quote-first answers. Phase 2. [Assumed]
+Model-suggested patterns and proactive flags built on the patterns. Phase 3, after validation and the regulatory check in section 14. [Open]
+Dependency. The agent is only as complete as what is said and logged inside Oravi. In the first versions, talking about a patient in Oravi must be as easy as messaging about them elsewhere.
+9. Workflow integration and friction requirements
+Entry at existing documentation moments, with chips and defaults. Target: a typical loop is raised in under about ten seconds. [Assumed]
+The ward board mirrors the counter-book layout. Verbal bedside handover continues, supported by the screen. [Decided]
+Parallel running with the paper book during a transition period, with a printed fallback. [Decided]
+No new login routine beyond a PIN. Works offline. English and Kiswahili. [Decided]
+Retiring the counter-book requires ward and matron buy-in and is a rollout dependency, not only a software one. [Decided]
+Mapping to existing assets [Assumed, to reconcile]. The nurse dashboard (patient list, patient detail, task list, Kardex) is complete, and the physician dashboard is in development. Likely mapping: patient list to ward board, task list to loops, Kardex to the compiled handoff summary, physician dashboard to the doctor inbox.
+10. Non-functional requirements
+Offline-first [Decided]. All core actions work with no internet and are persisted locally. Sync runs automatically when a connection exists. Principle: never silently discard a clinical entry. When two entries conflict, both are preserved and flagged for human resolution. Deterministic merge rules are specified in the design document.
+Performance targets [Assumed, to validate on real devices]: board opens in under two seconds on a target device. Local actions confirm instantly. Sync within about ten seconds on a working ward network.
+Devices [Assumed]: Android on entry-level and mid-range phones that clinicians already own or that wards provide. Exact minimum specification to be set after a device survey, not assumed.
+Security. Per-user authentication, role-based access, encryption at rest on device and server and in transit, auto-lock, remote wipe for lost devices, no patient information in notification previews, minimal information in SMS, per-device enrollment.
+Privacy and data protection. Operate in line with the Kenya Data Protection Act, 2019 and obligations under the Digital Health Act, 2023. To confirm with counsel: controller and processor roles, registration, lawful basis and consent, data residency and cross-border transfer, retention periods. [Open]
+Auditability. Tamper-evident (hash-chained) log, with deletion and update of records disabled at the data layer.
+Accessibility and usability. Large tap targets, high contrast, a dark mode for night shifts, status conveyed by shape and text as well as color, glanceable under poor lighting.
+Reliability. Defined behavior for each failure mode in section 13.
+11. Data model overview
+Entities [Assumed]: Facility, Ward, Bed, Patient and Encounter, User, RoleAssignment (time-ranged), Shift, Loop, LoopEvent (append-only), Message, HandoffSession, HandoffAcceptance, Escalation, Flag, AuditEvent, and later DraftDocument and DraftRevision.
+Principles [Decided]: loop state is derived from append-only events. Event identifiers are generated on the client so retries after a dropped connection are idempotent. Role assignments are time-ranged records so 'who was responsible at 02:10?' is a simple query. The model is shaped to map cleanly to FHIR resources even though v1 does not integrate with other systems.
+12. Architecture direction
+Standalone-first, integration-ready [Decided]. Oravi works on a ward with no EMR, while keeping data shapes compatible so a hospital with an existing system can connect later.
+Deployment model [Open]. Options: (A) cloud service with offline-capable clients; (B) a small on-premises device per ward that all phones sync with; (C) hybrid, with a ward device that also syncs to the cloud. Decision criteria: cost per ward, failure modes, support burden, real connectivity, data-protection posture, and ward Wi-Fi behavior. Decide after site visits. Clients are built local-first with a sync interface that does not presume the choice.
+Integration [Assumed]. Later: import patient lists and orders, export FHIR-shaped data. Embedding in existing EMRs through SMART on FHIR or CDS Hooks only where the host system supports it, which must be verified for the systems actually used. Heavier clinical data repository standards such as openEHR are not required for v1. [Open]
+AI-ready seams [Decided]. A single draft-generation interface behind a feature flag: today it is the template compiler, later it may be a model. Every future AI step is marked in design notes.
+Core stack [Decided]. PostgreSQL is the system of record. Drift on SQLite, encrypted with SQLCipher, is the device store. Flutter is the client framework. Firebase Realtime Database is retired as the main store. FCM push notifications stay. Whether to keep Firebase Auth or use Oravi's own login is open.
+Event log as source of truth [Decided]. State (loop status, ownership) is derived from append-only events with client-generated IDs, so retries after a dropped connection are safe.
+Sync layer [Open]. Decided by a time-boxed spike comparing (1) a purpose-built append-only event-log sync with deterministic conflict handling on the backend and (2) PowerSync, evaluating its licensing, self-hosting footprint, and how custom upload and conflict logic is handled.
+Hosting and data residency [Open]. Whether the Digital Health Act 2023, the Data Protection Act 2019, or hospital procurement rules require in-country or on-premise hosting must be verified with counsel, not assumed. If in-country hosting is required, evaluate Nairobi-based providers (for example Safaricom Cloud and Africa Data Centres, whose actual offerings, pricing, and certifications are still to be checked). Self-hostability is kept as an architectural asset for flexibility.
+Ward hub footprint [Assumed]. If an on-premise hub is used: one compiled service plus plain PostgreSQL on a low-power fanless PC, avoiding heavy container stacks.
+Audit integrity [Decided]. Append-only event tables, revoked UPDATE and DELETE grants, a hash chain across events, and periodic signed exports kept off the server. Administrators with database access could still alter data, so the exports are what make tampering detectable.
+Search and embeddings [Assumed]. Keyword plus semantic search (pgvector) within one patient's small record, mainly for synonym and English and Kiswahili paraphrase matching, not scale. Prefer a small self-hosted embedding model to avoid sending patient text to outside APIs, and test it on real Kiswahili ward phrases. Keyword search with the ward lexicon is the fallback.
+Operations [Assumed]. Backups with tested restores, monitoring, upgrades, and key management, using a managed instance nearby where permitted.
+Client robustness [Assumed]. Drift migrations that stay safe when phones run different app versions, and tested background sync and alert behavior on Transsion and Xiaomi phones, which often restrict background apps.
+Detail lives elsewhere [Decided]. This section records decisions, constraints, and open questions. Schemas, hash-chain specifications, migration mechanics, and vendor comparisons belong in a separate technical architecture document.
+13. Safety and failure modes
+Failure
+Impact
+Mitigation
+Item never entered
+Silent gap; false reassurance
+Explicit 'nothing pending' confirmation per bed; stated limitation; training
+Wrong patient
+Harm
+Two identifiers everywhere; confirmation step on Critical items
+Alert fatigue
+Real alerts ignored
+Severity tiers, alert budget, monthly review of dismissal rates
+Escalation unanswered
+Delayed care
+Chain to next doctor then matron; SMS fallback; visible on board
+Rubber-stamp acknowledgments
+False accountability
+Individual acceptance for Critical; audit sampling
+Loop closed in error
+Lost responsibility
+Confirmation on Urgent and Critical; reopen with reason
+Sync conflict
+Divergent records
+Preserve both entries, flag for human resolution
+Server or ward device down
+Loss of shared view
+Local mode with visible banner; paper fallback; reconciliation on recovery
+Device lost or stolen
+Data exposure
+Auto-lock, remote wipe, no patient data in notifications
+Over-reliance on flags or AI
+Automation bias
+Evidence shown, humans own decisions, clear labeling
+14. Regulatory and compliance
+Intended use statement for v1 [Decided]: workflow and communication support. It does not diagnose, recommend treatment, or alter orders. Flag wording is non-diagnostic.
+Classification [Open]. Confirm which Kenyan body regulates software as a device and whether v1 and later phases fall within scope. Re-evaluate before Phase 3 decision support.
+Quality practice [Assumed]. Adopt risk management and requirements traceability in the spirit of ISO 14971 and IEC 62304 without pursuing certification now. Revisit when moving toward decision support.
+Pilot requirements [Open]. Ethical review, hospital agreement, and a data-sharing and data-processing agreement before any patient data is handled.
+Data protection [Open]. See section 10. Items marked 'to confirm' must be verified with counsel or the regulator, not assumed.
+15. Success metrics and validation
+Primary outcome metrics (baselines to be measured in Phase 0; targets set afterward):
+Handoff completeness: share of open loops transferred with explicit acceptance.
+Missed-item rate at handoff (observed and self-reported).
+Time to acknowledge Critical loops.
+Time to first doctor response to an escalation.
+Handoff duration versus baseline.
+Adoption metrics: share of ward handoffs done in Oravi, whether the paper counter-book is retired, weekly active clinicians, effort per loop.
+Safety metrics: near-miss reports, alert dismissal rate, false-flag rate.
+Assumption to test
+Method
+Pass criterion
+Dropped loops are a dominant failure
+Observe and count items dropped across at least 20 handoffs on several wards
+Threshold set before observing
+Nurses will use it instead of the book and WhatsApp
+Two-week parallel run
+Share of items entered; qualitative feedback
+Entry effort is acceptable
+Time-and-motion on loop creation
+Target seconds per loop set with clinicians
+Doctors respond via app and SMS
+Escalation response times
+Median and 90th percentile targets set with doctors
+Ward network and device reality supports the design
+Site survey of Wi-Fi, power, devices
+Written findings drive the deployment decision
+The board is readable day and night
+Usability sessions with 8 to 10 clinicians including night staff
+Task success and error rates
+SMS fallback is feasible and affordable
+Small pilot
+Delivery time and cost per escalation
+Flag thresholds are sensible
+Review flags over two weeks
+Acceptable false-flag and dismissal rates
+16. Rollout plan (no dates committed)
+Phase
+Content
+Exit criteria
+0 Discovery
+Hospital visits covering an ER handover, a ward round, and nurse shift change; fact-finding on paramedic and ambulance services; shadowing, baselines, regulatory and legal confirmations, device and network survey
+Validated problem; deployment option chosen; closure rules drafted
+1 Concept test
+Clickable prototype tested with clinicians
+Clinicians can complete core tasks; major friction removed
+2 Bench MVP
+Board, loops, threads, handoff, escalation, rules, offline sync, tested in a simulated ward
+Meets target performance; failure modes tested
+3 Supervised pilot
+One ward, parallel with paper, under ethical approval
+Adoption and outcome metrics reviewed against thresholds
+4 Expansion
+More wards and facilities; support model
+Sustained use; funded operating model
+5 Intelligence and integration
+AI drafts, pattern flags, EMR integration
+Validated accuracy; regulatory position confirmed
+17. Market and differentiation
+Alternative
+Strength
+Weakness for this problem
+WhatsApp groups
+Free, universal, no training
+No ownership or state, no persistence by issue, privacy risk, buried history
+Paper counter-book and verbal handover
+Familiar, offline
+Lost, unsearchable, no accountability
+Western clinical messaging tools
+Mature
+Assume infrastructure, EMR integration, and pricing that wards lack
+Local EMR and HMIS systems
+Records and reporting
+Not built around cross-shift ownership of open loops; inpatient capabilities to verify. Potential integration partners
+Generic task apps
+Cheap
+No clinical identifiers, escalation, audit, or offline ward fit
+Differentiation [Assumed]: cross-shift ownership of open loops, offline operation, low cost, and fit with local workflow. Plausible moat: a sharp wedge, trust built through co-design with clinicians and matrons, ward-level data and switching cost, and local fit. Features alone and certifications alone are not a moat.
+18. Business model [Open]
+Options: per-ward subscription paid by the hospital, county or national program funding, donor or grant-funded pilots, and later revenue-protection add-ons. Considerations: price must be sustainable for public wards, and a support and replacement model is needed for any hardware.
+19. Risks
+Risk
+Mitigation
+Clinicians do not adopt it
+Co-design, parallel run, minimal entry, matron sponsorship
+Solo capacity
+Narrow v1; phase intelligence and integration
+Regulatory misclassification
+Intended-use statement; early regulator confirmation
+Data protection breach or noncompliance
+Minimization, encryption, legal review, registration
+Hardware and operations burden
+Decide deployment option on evidence; swap-and-replace plan
+Scope creep toward EHR, billing, diagnosis, or building every handoff context at once
+Non-goals list; phase gates; one handoff context at a time
+Overpromising AI
+Phase 2 and 3 gated by validation
+Liability from the audit trail or alerts
+Clear intended use, ownership statement, legal advice
+Funding
+Early conversations on who pays
+20. Open questions
+Resolved in principle: anyone with access to the patient may open or close a thread, with a required reason (section 6). Critical loops need confirmation by the opener or a senior (FR-51). Remaining questions: the confirmation timeout and the reopen window, to be tuned in the pilot.
+Exact urgency levels and their definitions.
+How do doctors participate in practice, and how many wards does each cover?
+Which deployment option, and what does the ward network allow?
+Is SMS fallback feasible and affordable on target networks?
+Are photo attachments allowed, and under what privacy rules?
+How do the existing nurse and physician dashboards reconcile with this model?
+Which existing hospital systems are actually in use on inpatient wards, and what do they support?
+Consent, retention periods, and data ownership with each hospital.
+Where does the roster come from, and who maintains it?
+Pricing and who pays.
+How should the existing Claude-based reports and risk flags be handled until validated?
+Decided: nurse capabilities ship first, then Ask Oravi (section 4A). Remaining: what evidence from the hospital visits would change that order?
+Who are the paramedics bringing patients to the target ERs (hospital staff, county service, private operators), and how do they alert the ER today?
+How do loops follow a patient across wards, theatre, and ICU, and who owns a patient in transit?
+What does a physician sign-out need that a nurse handover does not (plans, contingencies)?
+Does a pre-alert work on the connectivity ambulances have, or does it need a phone call or SMS fallback?
+What does each handoff context need from the existing nurse and physician dashboards?
+Decided in part: Ask Oravi follows the nurse build as the second thing tested on visits. Remaining: does the first version use timeline and search only, and how is patient data protected while it is tested?
+Which model and where does it run (hosted, near the ward, or on device), and what does that mean for offline use, cost, and data protection?
+Who may ask about which patient, and should cross-ward or ward-level questions ever be allowed?
+What should the contact button do when the author is off shift or on leave, and what are the etiquette and cost rules for calls?
+What real ward vocabulary (English, Kiswahili, mixed, abbreviations) should seed the lexicon?
+Which sync approach wins the spike (own event-log sync or PowerSync), and what are the licensing and self-hosting terms?
+Does the law require in-country or on-premise hosting for health data, and which Nairobi-based providers meet the need at what cost?
+Does a self-hosted embedding model handle Kiswahili and mixed speech well enough, or is keyword search with the ward lexicon enough?
+How do Transsion and Xiaomi phones behave for background sync and alerts, and what workarounds are needed?
+With nurses as the only users at first, how are escalations and doctor replies tested end to end (a simulated doctor role, the physician dashboard in development, or SMS)?
+What data may be used when testing Ask Oravi on hospital visits (synthetic or de-identified only, until ethical approval and a data agreement exist)?
+What exactly counts as the complete nurse capability set for the first build, so it has a clear boundary?
+Appendix A. Glossary
+Open loop: an unfinished clinical item with owner, thread, and state. SBAR: Situation, Background, Assessment, Recommendation. I-PASS: a structured handoff framework. FHIR: a standard for exchanging health data. Kardex: a nursing summary of patient care needs. Counter-book: the ward's paper handover and log book.
+Appendix B. Change log
+Version
+Date
+Change
+0.1
+Oct 15, 2026
+First consolidated draft
