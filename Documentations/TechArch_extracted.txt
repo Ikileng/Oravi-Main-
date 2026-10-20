@@ -335,6 +335,7 @@ Patient presence and location
 LoopOpened, LoopAcknowledged, LoopOwnerChanged
 Loop start and ownership
 MessagePosted, MessageEdited
+CallLogged Clinical telephone contact record and mandatory outcome summary note
 Thread content
 LoopClosed, LoopClosureConfirmed, LoopReopened, LoopLinked
 Closure and recurrence

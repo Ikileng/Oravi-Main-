@@ -121,6 +121,8 @@ FR-50 Closed threads are never deleted. The full open, close, and reopen history
 FR-51 A closed Critical loop enters 'Closed, awaiting confirmation' until the opener or a senior on duty confirms or reopens it. The request quotes the closer's reason. [Decided]
 FR-52 An unconfirmed Critical closure escalates after a configurable time to the next doctor or the nurse-in-charge and appears in the oversight view. [Assumed]
 FR-53 When an issue recurs, the user chooses Reopen or New linked thread. The default is reopen if the topic matches and the closure was within the window (24 hours by default, configurable). Linked threads display the chain. [Assumed]
+FR-54 A Call action initiated from a loop thread or message logs a CallLogged event. Upon call completion or dismissal, Oravi prompts for a mandatory one-line outcome note (e.g., 'Agreed to hold dose') which is appended to the loop thread to eliminate unrecorded verbal silos. [Decided]
+FR-55 Clinical roles and cadres are visually color-coded throughout threads and the ward board (e.g., Nurses in clinical Blue, Doctors/Consultants in Pink/Rose, Pharmacy/Lab in distinct hues) so scanning clinicians instantly recognize who authored an entry. [Decided]
 7.3 Handoff
 FR-11 A handoff session pairs the outgoing and incoming nurse and walks the board bed by bed. [Decided]
 FR-12 The incoming nurse accepts ownership. Routine loops may be accepted in bulk. Critical loops require individual acceptance. [Decided]
