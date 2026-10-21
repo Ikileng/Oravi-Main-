@@ -336,3 +336,181 @@ class PatientStateProjection extends Equatable {
         updatedAt,
       ];
 }
+
+
+/// Record of a single bed's review in a handoff session (PRD FR-11 & FR-14).
+class HandoffBedReview extends Equatable {
+  final String bedNumber;
+  final String patientId;
+  final bool nothingPendingConfirmed;
+  final List<String> transferredLoopIds;
+  final DateTime reviewedAt;
+
+  const HandoffBedReview({
+    required this.bedNumber,
+    required this.patientId,
+    required this.nothingPendingConfirmed,
+    this.transferredLoopIds = const [],
+    required this.reviewedAt,
+  });
+
+  @override
+  List<Object?> get props => [
+        bedNumber,
+        patientId,
+        nothingPendingConfirmed,
+        transferredLoopIds,
+        reviewedAt,
+      ];
+}
+
+/// State projection of a shift handoff session (PRD Section 7.3 & FR-11 to FR-16).
+class HandoffSessionProjection extends Equatable {
+  final String handoffSessionId;
+  final String wardId;
+  final String outgoingNurseId;
+  final String incomingNurseId;
+  final DateTime startedAt;
+  final DateTime? completedAt;
+  final bool isLocked;
+  final Map<String, HandoffBedReview> bedReviews;
+  final int totalBedsHandedOver;
+  final int totalLoopsTransferred;
+
+  const HandoffSessionProjection({
+    required this.handoffSessionId,
+    required this.wardId,
+    required this.outgoingNurseId,
+    required this.incomingNurseId,
+    required this.startedAt,
+    this.completedAt,
+    this.isLocked = false,
+    this.bedReviews = const {},
+    this.totalBedsHandedOver = 0,
+    this.totalLoopsTransferred = 0,
+  });
+
+  HandoffSessionProjection copyWith({
+    DateTime? completedAt,
+    bool? isLocked,
+    Map<String, HandoffBedReview>? bedReviews,
+    int? totalBedsHandedOver,
+    int? totalLoopsTransferred,
+  }) {
+    return HandoffSessionProjection(
+      handoffSessionId: handoffSessionId,
+      wardId: wardId,
+      outgoingNurseId: outgoingNurseId,
+      incomingNurseId: incomingNurseId,
+      startedAt: startedAt,
+      completedAt: completedAt ?? this.completedAt,
+      isLocked: isLocked ?? this.isLocked,
+      bedReviews: bedReviews ?? this.bedReviews,
+      totalBedsHandedOver: totalBedsHandedOver ?? this.totalBedsHandedOver,
+      totalLoopsTransferred: totalLoopsTransferred ?? this.totalLoopsTransferred,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        handoffSessionId,
+        wardId,
+        outgoingNurseId,
+        incomingNurseId,
+        startedAt,
+        completedAt,
+        isLocked,
+        bedReviews,
+        totalBedsHandedOver,
+        totalLoopsTransferred,
+      ];
+}
+
+/// Structured SBAR summary per patient compiled automatically from structured entries and open loops (PRD FR-13).
+/// Situation, Background, Assessment, Recommendation layout without AI in v1.
+class SbarSummary extends Equatable {
+  final String situation;
+  final String background;
+  final String assessment;
+  final String recommendation;
+
+  const SbarSummary({
+    required this.situation,
+    required this.background,
+    required this.assessment,
+    required this.recommendation,
+  });
+
+  factory SbarSummary.fromPatientAndLoops({
+    required PatientStateProjection patient,
+    required List<LoopStateProjection> loops,
+  }) {
+    // 1. Situation: Patient identity, location, primary complaint/admitting note
+    final situation =
+        '${patient.nameOrInitials}, ${patient.age}y ${patient.sex} (Bed ${patient.bedNumber}, Adm: ${patient.admissionNumber}). Admitted for: ${patient.shortAdmittingNote}';
+
+    // 2. Background: Clinical flags/alerts and admission timeline
+    final alertsText = patient.keyAlerts.isNotEmpty
+        ? 'Key alerts: ${patient.keyAlerts.join(", ")}.'
+        : 'No specific alert flags recorded.';
+    final background =
+        'Admitted ${patient.admittedAt.toIso8601String().substring(0, 10)}. $alertsText';
+
+    // 3. Assessment: Current pending loops breakdown by urgency
+    final openLoops = loops.where((l) => l.isOpen).toList();
+    final String assessment;
+    if (openLoops.isEmpty) {
+      assessment = 'ALL CLEAR: No open clinical loops pending.';
+    } else {
+      final criticalCount =
+          openLoops.where((l) => l.urgency == LoopUrgency.critical).length;
+      final urgentCount =
+          openLoops.where((l) => l.urgency == LoopUrgency.urgent).length;
+      final routineCount =
+          openLoops.where((l) => l.urgency == LoopUrgency.routine).length;
+
+      final parts = <String>[];
+      if (criticalCount > 0) parts.add('$criticalCount CRITICAL/STAT');
+      if (urgentCount > 0) parts.add('$urgentCount Urgent');
+      if (routineCount > 0) parts.add('$routineCount Routine');
+
+      final titles = openLoops
+          .map((l) => '[${l.urgency.name.toUpperCase()}] ${l.title}')
+          .join('; ');
+      assessment =
+          '${openLoops.length} pending items (${parts.join(", ")}): $titles.';
+    }
+
+    // 4. Recommendation: Action items for the incoming shift
+    final String recommendation;
+    if (openLoops.isEmpty) {
+      recommendation = 'Maintain routine baseline monitoring as charted.';
+    } else {
+      final actionItems = openLoops.map((l) {
+        if (l.urgency == LoopUrgency.critical) {
+          return 'ACTION STAT: Follow up "${l.title}" immediately';
+        } else if (l.urgency == LoopUrgency.urgent) {
+          return 'Prioritize: "${l.title}"';
+        } else {
+          return 'Routine follow up: "${l.title}"';
+        }
+      }).join('; ');
+      recommendation = '$actionItems.';
+    }
+
+    return SbarSummary(
+      situation: situation,
+      background: background,
+      assessment: assessment,
+      recommendation: recommendation,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        situation,
+        background,
+        assessment,
+        recommendation,
+      ];
+}

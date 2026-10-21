@@ -1,3 +1,4 @@
+import 'package:oravi_app/domain/projections/projections.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oravi_app/domain/events/domain_events.dart';
@@ -194,6 +195,145 @@ void main() {
       expect(restored.urgency, LoopUrgency.critical);
       expect(restored.loopType, LoopType.questionOrClarification);
       expect(restored.initialOwnerRole, 'doctor_on_call');
+    });
+  });
+
+  group('M2: Shift Handoff & Kardex SBAR', () {
+    final testPatient = PatientStateProjection(
+      patientId: 'PAT-401',
+      wardId: 'WARD-4B',
+      bedNumber: '1',
+      admissionNumber: 'IP-2026-0891',
+      nameOrInitials: 'Kamau, J.',
+      age: 58,
+      sex: 'M',
+      shortAdmittingNote: 'Decompensated Heart Failure',
+      keyAlerts: const ['Penicillin Allergy', 'Fall Risk'],
+      admittedAt: DateTime.parse('2026-10-18T10:00:00Z'),
+      updatedAt: DateTime.parse('2026-10-18T10:00:00Z'),
+    );
+
+    test('SBAR auto-compilation handles patients with Critical and Routine loops', () {
+      final loops = [
+        LoopStateProjection(
+          loopId: 'LOOP-01',
+          patientId: 'PAT-401',
+          title: 'Repeat Serum Potassium STAT',
+          description: 'Last K+ was 2.8 mmol/L',
+          loopType: LoopType.taskOrPendingResult,
+          urgency: LoopUrgency.critical,
+          state: LoopState.raised,
+          currentOwnerId: 'NURSE-01',
+          currentOwnerRole: 'ward_nurse',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+        LoopStateProjection(
+          loopId: 'LOOP-02',
+          patientId: 'PAT-401',
+          title: 'Daily morning weight chart',
+          description: 'Assess fluid retention',
+          loopType: LoopType.taskOrPendingResult,
+          urgency: LoopUrgency.routine,
+          state: LoopState.raised,
+          currentOwnerId: 'NURSE-01',
+          currentOwnerRole: 'ward_nurse',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      ];
+
+      final sbar = SbarSummary.fromPatientAndLoops(
+        patient: testPatient,
+        loops: loops,
+      );
+
+      // Situation
+      expect(sbar.situation, contains('Kamau, J., 58y M (Bed 1, Adm: IP-2026-0891)'));
+      expect(sbar.situation, contains('Decompensated Heart Failure'));
+
+      // Background
+      expect(sbar.background, contains('Penicillin Allergy, Fall Risk'));
+
+      // Assessment
+      expect(sbar.assessment, contains('1 CRITICAL/STAT'));
+      expect(sbar.assessment, contains('1 Routine'));
+      expect(sbar.assessment, contains('Repeat Serum Potassium STAT'));
+
+      // Recommendation
+      expect(sbar.recommendation, contains('ACTION STAT'));
+    });
+
+    test('SBAR auto-compilation handles ALL CLEAR patients', () {
+      final sbar = SbarSummary.fromPatientAndLoops(
+        patient: testPatient,
+        loops: const [],
+      );
+
+      expect(sbar.assessment, contains('ALL CLEAR: No open clinical loops pending.'));
+      expect(sbar.recommendation, contains('Maintain routine baseline monitoring'));
+    });
+
+    test('Reducer folds Handoff lifecycle into locked HandoffSessionProjection', () {
+      final startedAt = DateTime.parse('2026-10-21T07:00:00Z');
+      final bed1At = DateTime.parse('2026-10-21T07:05:00Z');
+      final bed2At = DateTime.parse('2026-10-21T07:10:00Z');
+      final completedAt = DateTime.parse('2026-10-21T07:15:00Z');
+
+      final events = [
+        HandoffStartedEvent(
+          patientId: 'WARD-4B',
+          authorId: 'NURSE-MWANGI',
+          deviceId: 'DEV-A',
+          clientCreatedAt: startedAt,
+          handoffSessionId: 'SESSION-001',
+          wardId: 'WARD-4B',
+          outgoingNurseId: 'Nurse Mwangi, RN',
+          incomingNurseId: 'Nurse Achieng, RN',
+        ),
+        HandoffBedAcceptedEvent(
+          patientId: 'PAT-401',
+          authorId: 'NURSE-ACHIENG',
+          deviceId: 'DEV-B',
+          clientCreatedAt: bed1At,
+          handoffSessionId: 'SESSION-001',
+          bedNumber: '1',
+          nothingPendingConfirmed: false,
+          transferredLoopIds: ['LOOP-01', 'LOOP-02'],
+        ),
+        HandoffBedAcceptedEvent(
+          patientId: 'PAT-402',
+          authorId: 'NURSE-ACHIENG',
+          deviceId: 'DEV-B',
+          clientCreatedAt: bed2At,
+          handoffSessionId: 'SESSION-001',
+          bedNumber: '2',
+          nothingPendingConfirmed: true,
+          transferredLoopIds: const [],
+        ),
+        HandoffCompletedEvent(
+          patientId: 'WARD-4B',
+          authorId: 'NURSE-ACHIENG',
+          deviceId: 'DEV-B',
+          clientCreatedAt: completedAt,
+          handoffSessionId: 'SESSION-001',
+          totalBedsHandedOver: 2,
+          totalLoopsTransferred: 2,
+        ),
+      ];
+
+      final session = OraviDomainReducer.reduceHandoffEvents(events);
+
+      expect(session, isNotNull);
+      expect(session!.handoffSessionId, 'SESSION-001');
+      expect(session.outgoingNurseId, 'Nurse Mwangi, RN');
+      expect(session.incomingNurseId, 'Nurse Achieng, RN');
+      expect(session.bedReviews.length, 2);
+      expect(session.bedReviews['1']!.transferredLoopIds.length, 2);
+      expect(session.bedReviews['2']!.nothingPendingConfirmed, isTrue);
+      expect(session.isLocked, isTrue);
+      expect(session.totalBedsHandedOver, 2);
+      expect(session.totalLoopsTransferred, 2);
     });
   });
 }
