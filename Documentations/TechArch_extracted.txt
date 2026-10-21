@@ -184,6 +184,19 @@ Push. High-priority FCM data messages, with a notification channel for critical 
 Acknowledgement window. If a device does not acknowledge within the window, the chain moves on: SMS to the same person, then the next doctor, then the nurse-in-charge. Windows are configurable by urgency. [Assumed]
 SMS fallback. Through a local provider (Africa's Talking is a candidate, not yet evaluated). Messages contain no clinical detail, only a ward reference and a reply code, and replies are accepted only from the registered number. Cost and reliability are unverified. [Open]
 Aggressive phone settings. Transsion and Xiaomi phones may stop background apps. The app asks for battery-optimization exemption and guides the user to the manufacturer's autostart setting at first run. A device with no recent heartbeat is shown as unreachable to the escalation logic. [Assumed]
+
+8A. In-app calling
+Decision [Decided]. The Call button places a voice call inside Oravi to any registered Oravi user, without anyone needing to know the other person's phone number. A nurse who does not have a doctor's number taps Call beside their message or loop and reaches them.
+• Technology [Decided]. LiveKit. It is open source (Apache-2.0), self-hostable on a cloud server or a ward server, WebRTC based, and has a Flutter SDK. The same client code works against LiveKit's hosted cloud or a self-hosted server, so hosting stays a deployment choice.
+• Ringing [Assumed]. The server creates the call and sends a high-priority push data message to the callee. The app shows an incoming-call screen through Android's calling mechanisms, including a full-screen notification on a locked screen, so it rings like a phone call.
+• No answer [Assumed]. If the callee is unreachable or does not answer within a set time (about 30 seconds), the caller is offered an urgent message on the loop or the escalation chain. The missed call is recorded and the callee sees it linked to the patient and loop.
+• Logging [Decided]. Each call records who called whom, from which loop or quote, start time, duration, and outcome (answered, missed, declined), taken from LiveKit's server events. After the call, an optional one-line note posts to the loop thread. Audio is never recorded.
+• Network [Assumed]. A self-hosted LiveKit server needs reachable ports and a relay (TURN) for hospital networks that block UDP or isolate devices, with a TCP and TLS fallback. This is tested on real ward Wi-Fi and mobile data.
+• Hosting [Open]. LiveKit runs alongside the backend or on the ward server, following the deployment decision. Voice needs little bandwidth.
+• Privacy [Decided]. No phone numbers are shown. Call metadata becomes part of the audit record. Only enrolled users can call or be called.
+• Fallback to a normal phone call [Open]. Not in v1. A later option is a bridge to a phone number through a SIP gateway.
+Spike criteria [Assumed]. Does the call ring on a locked budget phone after an hour idle, how long does the call take to connect, how is audio quality on Wi-Fi and 3G, does it work through ward network restrictions, and what is the battery cost. Ringing on Transsion and Xiaomi phones is the same risk as alerts in section 8 and is tested together.
+
 9. Client architecture (Flutter)
 Layers [Decided]. Presentation (widgets), application (state management), domain (entities, state machine, reducers, rules, pure Dart with no Flutter imports), and data (Drift database, outbox, sync engine, API client). The domain layer is what the conformance suite tests.
 State management [Open]. Riverpod or Bloc. Pick one and keep it consistent.
