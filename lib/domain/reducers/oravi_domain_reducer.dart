@@ -62,6 +62,22 @@ class OraviDomainReducer {
             messages: [...current.messages, message],
             updatedAt: event.clientCreatedAt,
           );
+        } else if (event is CallLoggedEvent) {
+          final callMessage = ThreadMessage(
+            messageId: event.callId,
+            authorId: event.callerId,
+            authorRole: event.callerRole,
+            deviceId: event.deviceId,
+            content: '📞 Call with ${event.recipientId} (${event.recipientRole}): "${event.outcomeNote}"',
+            createdAt: event.clientCreatedAt,
+            isCallLog: true,
+            callRecipientId: event.recipientId,
+            callRecipientRole: event.recipientRole,
+          );
+          current = current.copyWith(
+            messages: [...current.messages, callMessage],
+            updatedAt: event.clientCreatedAt,
+          );
         } else if (event is MessageEditedEvent) {
           final updatedMessages = current.messages.map((m) {
             if (m.messageId == event.messageId) {

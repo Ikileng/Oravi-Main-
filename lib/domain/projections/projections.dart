@@ -5,6 +5,7 @@ import '../models/loop_enums.dart';
 class ThreadMessage extends Equatable {
   final String messageId;
   final String authorId;
+  final String authorRole;
   final String deviceId;
   final String content;
   final DateTime createdAt;
@@ -12,10 +13,14 @@ class ThreadMessage extends Equatable {
   final String? previousContent;
   final String? quotedMessageId;
   final List<String> roleMentions;
+  final bool isCallLog;
+  final String? callRecipientId;
+  final String? callRecipientRole;
 
   const ThreadMessage({
     required this.messageId,
     required this.authorId,
+    this.authorRole = 'ward_nurse',
     required this.deviceId,
     required this.content,
     required this.createdAt,
@@ -23,6 +28,9 @@ class ThreadMessage extends Equatable {
     this.previousContent,
     this.quotedMessageId,
     this.roleMentions = const [],
+    this.isCallLog = false,
+    this.callRecipientId,
+    this.callRecipientRole,
   });
 
   ThreadMessage copyWith({
@@ -47,6 +55,7 @@ class ThreadMessage extends Equatable {
   List<Object?> get props => [
         messageId,
         authorId,
+        authorRole,
         deviceId,
         content,
         createdAt,
@@ -54,6 +63,9 @@ class ThreadMessage extends Equatable {
         previousContent,
         quotedMessageId,
         roleMentions,
+        isCallLog,
+        callRecipientId,
+        callRecipientRole,
       ];
 }
 

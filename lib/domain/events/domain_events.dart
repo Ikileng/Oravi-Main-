@@ -523,6 +523,84 @@ class MessageEditedEvent extends OraviEvent {
   }
 }
 
+class CallLoggedEvent extends OraviEvent {
+  static const String eventType = 'CallLogged';
+
+  final String callId;
+  final String callerId;
+  final String callerRole;
+  final String recipientId;
+  final String recipientRole;
+  final String outcomeNote; // PRD FR-54: Mandatory summary of verbal agreement
+  final int durationSeconds;
+
+  CallLoggedEvent({
+    super.eventId,
+    required super.patientId,
+    required String super.loopId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+    required this.callId,
+    required this.callerId,
+    required this.callerRole,
+    required this.recipientId,
+    required this.recipientRole,
+    required this.outcomeNote,
+    this.durationSeconds = 0,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'event_id': eventId,
+        'type': type,
+        'patient_id': patientId,
+        'loop_id': loopId,
+        'author_id': authorId,
+        'device_id': deviceId,
+        'client_created_at': clientCreatedAt.toIso8601String(),
+        'server_seq': serverSeq,
+        'server_received_at': serverReceivedAt?.toIso8601String(),
+        'schema_version': schemaVersion,
+        'payload': {
+          'call_id': callId,
+          'caller_id': callerId,
+          'caller_role': callerRole,
+          'recipient_id': recipientId,
+          'recipient_role': recipientRole,
+          'outcome_note': outcomeNote,
+          'duration_seconds': durationSeconds,
+        },
+      };
+
+  factory CallLoggedEvent.fromMap(Map<String, dynamic> map) {
+    final payload = map['payload'] as Map<String, dynamic>;
+    return CallLoggedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      loopId: map['loop_id'],
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      schemaVersion: map['schema_version'] ?? 1,
+      callId: payload['call_id'],
+      callerId: payload['caller_id'],
+      callerRole: payload['caller_role'] ?? 'clinician',
+      recipientId: payload['recipient_id'],
+      recipientRole: payload['recipient_role'] ?? 'clinician',
+      outcomeNote: payload['outcome_note'] ?? '',
+      durationSeconds: payload['duration_seconds'] ?? 0,
+    );
+  }
+}
+
 // ==========================================
 // 4. Closure & Recurrence Events (Appendix A)
 // ==========================================
@@ -1286,6 +1364,8 @@ OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
       return MessagePostedEvent.fromMap(map);
     case MessageEditedEvent.eventType:
       return MessageEditedEvent.fromMap(map);
+    case CallLoggedEvent.eventType:
+      return CallLoggedEvent.fromMap(map);
     case LoopClosedEvent.eventType:
       return LoopClosedEvent.fromMap(map);
     case LoopClosureConfirmedEvent.eventType:

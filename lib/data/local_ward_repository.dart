@@ -184,4 +184,32 @@ class LocalWardRepository {
     );
     appendEvent(event);
   }
+
+  /// Logs telephone contact and mandatory verbal outcome note (PRD FR-54).
+  void logCallOutcome({
+    required String patientId,
+    required String loopId,
+    required String callerId,
+    required String callerRole,
+    required String recipientId,
+    required String recipientRole,
+    required String outcomeNote,
+    required String deviceId,
+    int durationSeconds = 0,
+  }) {
+    final event = CallLoggedEvent(
+      patientId: patientId,
+      loopId: loopId,
+      authorId: callerId,
+      deviceId: deviceId,
+      callId: 'CALL-${DateTime.now().millisecondsSinceEpoch}',
+      callerId: callerId,
+      callerRole: callerRole,
+      recipientId: recipientId,
+      recipientRole: recipientRole,
+      outcomeNote: outcomeNote,
+      durationSeconds: durationSeconds,
+    );
+    appendEvent(event);
+  }
 }

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../domain/models/loop_enums.dart';
 
-/// Clinical UI Theme adhering to PRD Section 10:
+/// Clinical UI Theme adhering to PRD Section 10 & FR-55:
 /// - High contrast for low-light night shifts.
 /// - Clear distinct severity indicators using shape & text as well as color (FR-18 & FR-25).
+/// - Role and Cadre Color Coding (FR-55): Nurses in Blue, Doctors in Pink/Rose, Pharmacy/Lab in distinct hues.
 /// - Large accessible tap targets.
 class ClinicalTheme {
   static const Color background = Color(0xFF0F172A); // Slate 900
@@ -21,6 +22,13 @@ class ClinicalTheme {
   static const Color routineTeal = Color(0xFF0D9488);
   static const Color successGreen = Color(0xFF10B981);
 
+  // Cadre Color Palette (PRD FR-55)
+  static const Color nurseBlue = Color(0xFF38BDF8);      // Sky 400 - Clinical Blue
+  static const Color doctorPink = Color(0xFFF472B6);     // Rose/Pink 400 - Physicians & Consultants
+  static const Color pharmacyEmerald = Color(0xFF34D399);// Emerald 400 - Pharmacy
+  static const Color labAmber = Color(0xFFFBBF24);        // Amber 400 - Laboratory
+  static const Color inChargePurple = Color(0xFFA78BFA);  // Purple 400 - Matron / Nurse-in-charge
+
   static Color urgencyColor(LoopUrgency urgency) {
     switch (urgency) {
       case LoopUrgency.critical:
@@ -30,6 +38,27 @@ class ClinicalTheme {
       case LoopUrgency.routine:
         return routineTeal;
     }
+  }
+
+  /// Returns the standardized cadre color based on role string or clinician name (FR-55)
+  static Color cadreColor(String roleOrName) {
+    final lower = roleOrName.toLowerCase();
+    if (lower.contains('dr') || lower.contains('doctor') || lower.contains('consultant') || lower.contains('medical_officer') || lower.contains('gynaecologist') || lower.contains('physician')) {
+      return doctorPink;
+    }
+    if (lower.contains('nurse') || lower.contains('rn')) {
+      return nurseBlue;
+    }
+    if (lower.contains('pharm') || lower.contains('pharmacist')) {
+      return pharmacyEmerald;
+    }
+    if (lower.contains('lab')) {
+      return labAmber;
+    }
+    if (lower.contains('in_charge') || lower.contains('matron')) {
+      return inChargePurple;
+    }
+    return textSecondary;
   }
 
   static ThemeData get darkTheme {
