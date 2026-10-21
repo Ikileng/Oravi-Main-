@@ -101,6 +101,28 @@ class WardController extends Notifier<int> {
     );
     refresh();
   }
+
+  void logCallOutcome({
+    required String patientId,
+    required String loopId,
+    required String recipientId,
+    required String recipientRole,
+    required String outcomeNote,
+    int durationSeconds = 0,
+  }) {
+    ref.read(localWardRepositoryProvider).logCallOutcome(
+      patientId: patientId,
+      loopId: loopId,
+      callerId: SeededWardData.testNurseId,
+      callerRole: 'ward_nurse',
+      recipientId: recipientId,
+      recipientRole: recipientRole,
+      outcomeNote: outcomeNote,
+      deviceId: SeededWardData.testDeviceId,
+      durationSeconds: durationSeconds,
+    );
+    refresh();
+  }
 }
 
 final wardControllerProvider = NotifierProvider<WardController, int>(WardController.new);

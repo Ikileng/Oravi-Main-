@@ -129,6 +129,45 @@ void main() {
       expect(projection.messages.first.content, 'Normal saline running at 100ml/hr. MAP is 68.');
     });
 
+    test('FR-54: CallLoggedEvent reduces into ThreadMessage with isCallLog and outcome note', () {
+      final events = [
+        LoopOpenedEvent(
+          eventId: '0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60010',
+          patientId: 'PAT-404',
+          loopId: 'LOOP-404',
+          authorId: 'NURSE-MWANGI',
+          deviceId: 'DEV-A',
+          title: 'Check Hemoglobin',
+          description: 'Post-op drop',
+          loopType: LoopType.escalation,
+          urgency: LoopUrgency.urgent,
+          initialOwnerId: 'NURSE-MWANGI',
+          initialOwnerRole: 'ward_nurse',
+        ),
+        CallLoggedEvent(
+          eventId: '0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60011',
+          patientId: 'PAT-404',
+          loopId: 'LOOP-404',
+          authorId: 'NURSE-MWANGI',
+          deviceId: 'DEV-A',
+          callId: 'CALL-001',
+          callerId: 'Nurse Mwangi, RN',
+          callerRole: 'ward_nurse',
+          recipientId: 'Dr. Kimani',
+          recipientRole: 'gynaecologist',
+          outcomeNote: 'Agreed to hold dose until repeat Hb at 16:00',
+        ),
+      ];
+
+      final projection = OraviDomainReducer.reduceLoopEvents(events);
+      expect(projection, isNotNull);
+      expect(projection!.messages.length, 1);
+      final msg = projection.messages.first;
+      expect(msg.isCallLog, isTrue);
+      expect(msg.callRecipientId, 'Dr. Kimani');
+      expect(msg.content, contains('Agreed to hold dose until repeat Hb at 16:00'));
+    });
+
     test('Verifies Event Serialization & Deserialization round-trip', () {
       final original = LoopOpenedEvent(
         eventId: '0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60009',

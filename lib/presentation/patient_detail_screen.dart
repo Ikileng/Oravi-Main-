@@ -6,13 +6,16 @@ import 'providers/ward_providers.dart';
 import 'theme/clinical_theme.dart';
 import 'widgets/close_loop_dialog.dart';
 import 'widgets/create_loop_dialog.dart';
+import 'widgets/log_call_outcome_dialog.dart';
 
 /// Screen displaying all loops (active & recently closed) for a single patient.
 ///
-/// Implements PRD Section 7.2:
+/// Implements PRD Section 7.2, FR-54, and FR-55:
 /// - Loop card list sorted by urgency.
-/// - Inline append-only thread message history.
-/// - 2-tap loop creation and strict closure & reopen flows.
+/// - Inline append-only thread message history with WhatsApp-style formatted timestamps.
+/// - Cadre color-coding (Nurses = Blue, Doctors = Pink, In-Charge = Purple, etc.).
+/// - One-tap Message action (anchors @Mention directly in the loop thread).
+/// - One-tap Call action with mandatory post-call outcome note dialog (FR-54).
 class PatientDetailScreen extends ConsumerStatefulWidget {
   final PatientStateProjection patient;
 
@@ -48,6 +51,40 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
           content: text,
         );
     controller.clear();
+  }
+
+  void _anchorMessageToAuthor(String loopId, String authorName) {
+    final controller = _getReplyController(loopId);
+    final mention = '@$authorName: ';
+    if (!controller.text.startsWith(mention)) {
+      controller.text = '$mention${controller.text}';
+    }
+    controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: controller.text.length),
+    );
+  }
+
+  void _openCallDialog(LoopStateProjection loop, String authorName, String authorRole) {
+    showDialog(
+      context: context,
+      builder: (ctx) => LogCallOutcomeDialog(
+        loop: loop,
+        recipientName: authorName,
+        recipientRole: authorRole,
+      ),
+    );
+  }
+
+  String _formatTimestamp(DateTime dt) {
+    final local = dt.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    final now = DateTime.now();
+
+    if (local.year == now.year && local.month == now.month && local.day == now.day) {
+      return '$hour:$minute • Today';
+    }
+    return '$hour:$minute • ${local.day}/${local.month}';
   }
 
   @override
@@ -146,6 +183,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
 
   Widget _buildLoopCard(LoopStateProjection loop) {
     final urgencyColor = ClinicalTheme.urgencyColor(loop.urgency);
+    final ownerCadreColor = ClinicalTheme.cadreColor(loop.currentOwnerId);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -223,13 +261,21 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                 ),
               ),
 
-            // Owner & Metadata Row
+            // Owner & Metadata Row with Color-Coded Cadre
             Row(
               children: [
-                const Icon(Icons.person_outline, size: 14, color: ClinicalTheme.textMuted),
+                Icon(Icons.person_outline, size: 14, color: ownerCadreColor),
                 const SizedBox(width: 4),
                 Text(
-                  'Owner: ${loop.currentOwnerId} (${loop.currentOwnerRole})',
+                  'Owner: ',
+                  style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted),
+                ),
+                Text(
+                  loop.currentOwnerId,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ownerCadreColor),
+                ),
+                Text(
+                  ' (${loop.currentOwnerRole})',
                   style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted),
                 ),
                 if (loop.reopenCount > 0) ...[
@@ -243,38 +289,99 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             ),
             const Divider(color: ClinicalTheme.border, height: 20),
 
-            // Append-only Thread Messages
+            // Append-only Thread Messages with WhatsApp-style timestamps & Action Buttons (FR-54, FR-55)
             if (loop.messages.isNotEmpty) ...[
               const Text(
                 'Thread History (Append-Only):',
                 style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
-              ...loop.messages.map((msg) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: ClinicalTheme.surfaceElevated,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${msg.authorId}: ',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClinicalTheme.routineTeal),
-                          ),
-                          Expanded(
-                            child: Text(
-                              msg.content,
-                              style: const TextStyle(fontSize: 12, color: ClinicalTheme.textPrimary),
-                            ),
-                          ),
-                        ],
-                      ),
+              ...loop.messages.map((msg) {
+                final authorColor = ClinicalTheme.cadreColor(msg.authorId);
+                final timeFormatted = _formatTimestamp(msg.createdAt);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: msg.isCallLog
+                          ? ClinicalTheme.routineTeal.withValues(alpha: 0.12)
+                          : ClinicalTheme.surfaceElevated,
+                      borderRadius: BorderRadius.circular(8),
+                      border: msg.isCallLog
+                          ? Border.all(color: ClinicalTheme.routineTeal, width: 0.8)
+                          : null,
                     ),
-                  )),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Message Header: Color-coded Author + WhatsApp timestamp + Quick Actions
+                        Row(
+                          children: [
+                            Text(
+                              msg.authorId,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: authorColor,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              timeFormatted,
+                              style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted),
+                            ),
+                            const Spacer(),
+
+                            // One-tap Message button (anchors @reply in thread)
+                            InkWell(
+                              onTap: () => _anchorMessageToAuthor(loop.loopId, msg.authorId),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.reply, size: 13, color: ClinicalTheme.routineTeal),
+                                    SizedBox(width: 2),
+                                    Text('Reply', style: TextStyle(fontSize: 10, color: ClinicalTheme.routineTeal)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+
+                            // One-tap Call button (opens post-call outcome prompt - FR-54)
+                            InkWell(
+                              onTap: () => _openCallDialog(loop, msg.authorId, msg.authorRole),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.call, size: 13, color: ClinicalTheme.successGreen),
+                                    SizedBox(width: 2),
+                                    Text('Call', style: TextStyle(fontSize: 10, color: ClinicalTheme.successGreen)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+
+                        // Message Content
+                        Text(
+                          msg.content,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: msg.isCallLog ? ClinicalTheme.textPrimary : ClinicalTheme.textPrimary,
+                            fontWeight: msg.isCallLog ? FontWeight.w500 : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
               const SizedBox(height: 8),
             ],
 
