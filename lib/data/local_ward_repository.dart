@@ -1,3 +1,4 @@
+import 'database/database.dart';
 import '../domain/events/domain_events.dart';
 import '../domain/events/oravi_event.dart';
 import '../domain/models/loop_enums.dart';
@@ -13,16 +14,38 @@ import 'mock/seeded_ward_data.dart';
 /// - Current patient and loop projections are deterministically computed on-the-fly.
 class LocalWardRepository {
   final List<OraviEvent> _events = [];
+  final OraviLocalDatabase? database;
 
-  LocalWardRepository({bool seedInitialData = true}) {
+  LocalWardRepository({
+    this.database,
+    bool seedInitialData = true,
+  }) {
     if (seedInitialData) {
       _events.addAll(SeededWardData.getInitialEvents());
     }
   }
 
-  /// Appends an event to the local immutable event log and returns the reduced projections.
+  /// Initializes repository from SQLite database, seeding initial ward if empty.
+  Future<void> initialize({bool seedInitialData = true}) async {
+    if (database != null) {
+      final stored = await database!.getAllStoredEvents();
+      if (stored.isEmpty && seedInitialData) {
+        final initial = SeededWardData.getInitialEvents();
+        for (final event in initial) {
+          await database!.appendEventWithOutbox(event);
+          _events.add(event);
+        }
+      } else {
+        _events.clear();
+        _events.addAll(stored);
+      }
+    }
+  }
+
+  /// Appends an event to the local immutable event log and queues to SQLite outbox.
   void appendEvent(OraviEvent event) {
     _events.add(event);
+    database?.appendEventWithOutbox(event);
   }
 
   /// Returns an unmodifiable list of all local events in insertion order.

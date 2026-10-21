@@ -1,12 +1,34 @@
+import '../../data/database/database.dart';
+import '../../data/sync/sync_engine.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/local_ward_repository.dart';
 import '../../data/mock/seeded_ward_data.dart';
 import '../../domain/models/loop_enums.dart';
 import '../../domain/projections/projections.dart';
 
-/// Singleton in-memory local repository provider.
+/// Persistent Drift SQLite local database provider.
+final oraviLocalDatabaseProvider = Provider<OraviLocalDatabase>((ref) {
+  final db = OraviLocalDatabase();
+  ref.onDispose(() => db.close());
+  return db;
+});
+
+/// Outbox Sync Engine provider.
+final syncEngineProvider = Provider<SyncEngine>((ref) {
+  final engine = SyncEngine(ref.watch(oraviLocalDatabaseProvider));
+  ref.onDispose(() => engine.dispose());
+  return engine;
+});
+
+/// Reactive stream provider for sync state and pending outbox count.
+final syncStatusProvider = StreamProvider<SyncStatus>((ref) {
+  return ref.watch(syncEngineProvider).statusStream;
+});
+
+/// Offline-first event-sourced repository backed by SQLite.
 final localWardRepositoryProvider = Provider<LocalWardRepository>((ref) {
-  return LocalWardRepository(seedInitialData: true);
+  final db = ref.watch(oraviLocalDatabaseProvider);
+  return LocalWardRepository(database: db, seedInitialData: true);
 });
 
 /// Notifier that manages ward state versioning and triggers UI updates on mutations.
