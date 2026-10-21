@@ -1,3 +1,4 @@
+import 'handoff_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/mock/seeded_ward_data.dart';
@@ -34,6 +35,15 @@ class WardBoardScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            tooltip: 'Start Shift Handoff (PRD FR-11)',
+            icon: const Icon(Icons.swap_horiz, color: ClinicalTheme.nurseBlue),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const HandoffWizardScreen()),
+              );
+            },
+          ),
+          IconButton(
             tooltip: 'Sync Status (Offline by Default)',
             icon: const Icon(Icons.cloud_off, color: ClinicalTheme.textMuted),
             onPressed: () {
@@ -61,6 +71,31 @@ class WardBoardScreen extends ConsumerWidget {
                 return _WardBedRow(patient: patients[index]);
               },
             ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: const BoxDecoration(
+          color: ClinicalTheme.surface,
+          border: Border(top: BorderSide(color: ClinicalTheme.border)),
+        ),
+        child: SafeArea(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: ClinicalTheme.nurseBlue,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(46),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.swap_horiz),
+            label: const Text('Start Shift Handoff (PRD FR-11)',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const HandoffWizardScreen()),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

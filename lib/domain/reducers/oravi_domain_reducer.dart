@@ -216,4 +216,55 @@ class OraviDomainReducer {
 
     return current;
   }
+
+  /// Reduces a list of handoff events into a [HandoffSessionProjection].
+  static HandoffSessionProjection? reduceHandoffEvents(
+    Iterable<OraviEvent> events, {
+    HandoffSessionProjection? initialProjection,
+  }) {
+    HandoffSessionProjection? current = initialProjection;
+
+    for (final event in events) {
+      if (event is HandoffStartedEvent) {
+        current = HandoffSessionProjection(
+          handoffSessionId: event.handoffSessionId,
+          wardId: event.wardId,
+          outgoingNurseId: event.outgoingNurseId,
+          incomingNurseId: event.incomingNurseId,
+          startedAt: event.clientCreatedAt,
+        );
+      } else if (current != null) {
+        if (event is HandoffBedAcceptedEvent &&
+            event.handoffSessionId == current.handoffSessionId) {
+          final review = HandoffBedReview(
+            bedNumber: event.bedNumber,
+            patientId: event.patientId,
+            nothingPendingConfirmed: event.nothingPendingConfirmed,
+            transferredLoopIds: event.transferredLoopIds,
+            reviewedAt: event.clientCreatedAt,
+          );
+          final updatedReviews =
+              Map<String, HandoffBedReview>.from(current.bedReviews);
+          updatedReviews[event.bedNumber] = review;
+          current = current.copyWith(
+            bedReviews: updatedReviews,
+            totalBedsHandedOver: updatedReviews.length,
+            totalLoopsTransferred: updatedReviews.values
+                .map((r) => r.transferredLoopIds.length)
+                .fold<int>(0, (a, b) => a + b),
+          );
+        } else if (event is HandoffCompletedEvent &&
+            event.handoffSessionId == current.handoffSessionId) {
+          current = current.copyWith(
+            isLocked: true,
+            completedAt: event.clientCreatedAt,
+            totalBedsHandedOver: event.totalBedsHandedOver,
+            totalLoopsTransferred: event.totalLoopsTransferred,
+          );
+        }
+      }
+    }
+
+    return current;
+  }
 }

@@ -212,4 +212,118 @@ class LocalWardRepository {
     );
     appendEvent(event);
   }
+
+  // ==========================================
+  // Shift Handoff Operations (PRD Section 7.3)
+  // ==========================================
+
+  /// Initiates a shift handoff session pairing outgoing and incoming nurse (PRD FR-11).
+  HandoffSessionProjection startHandoffSession({
+    required String wardId,
+    required String outgoingNurseId,
+    required String incomingNurseId,
+    required String authorId,
+    required String deviceId,
+  }) {
+    final sessionId = 'HANDOFF-${DateTime.now().millisecondsSinceEpoch}';
+    final event = HandoffStartedEvent(
+      patientId: wardId,
+      authorId: authorId,
+      deviceId: deviceId,
+      handoffSessionId: sessionId,
+      wardId: wardId,
+      outgoingNurseId: outgoingNurseId,
+      incomingNurseId: incomingNurseId,
+    );
+    appendEvent(event);
+    return getActiveHandoffSession(wardId)!;
+  }
+
+  /// Accepts a bed during a handoff session and transfers open loops (PRD FR-12 & FR-14).
+  void acceptBedInHandoff({
+    required String handoffSessionId,
+    required String wardId,
+    required String bedNumber,
+    required String patientId,
+    required String authorId,
+    required String incomingNurseId,
+    required String deviceId,
+    required bool nothingPendingConfirmed,
+    required List<String> transferredLoopIds,
+  }) {
+    final event = HandoffBedAcceptedEvent(
+      patientId: patientId,
+      authorId: authorId,
+      deviceId: deviceId,
+      handoffSessionId: handoffSessionId,
+      bedNumber: bedNumber,
+      nothingPendingConfirmed: nothingPendingConfirmed,
+      transferredLoopIds: transferredLoopIds,
+    );
+    appendEvent(event);
+
+    // PRD FR-12 & FR-17: Incoming nurse accepts ownership of all transferred loops
+    for (final loopId in transferredLoopIds) {
+      appendEvent(
+        LoopOwnerChangedEvent(
+          patientId: patientId,
+          loopId: loopId,
+          authorId: authorId,
+          deviceId: deviceId,
+          newOwnerId: incomingNurseId,
+          newOwnerRole: 'ward_nurse',
+          transferReason: 'Shift handoff transfer to $incomingNurseId',
+        ),
+      );
+    }
+  }
+
+  /// Finalizes and cryptographically locks a handoff session (PRD FR-14 & FR-16).
+  void completeHandoffSession({
+    required String handoffSessionId,
+    required String wardId,
+    required String authorId,
+    required String deviceId,
+    required int totalBedsHandedOver,
+    required int totalLoopsTransferred,
+  }) {
+    final event = HandoffCompletedEvent(
+      patientId: wardId,
+      authorId: authorId,
+      deviceId: deviceId,
+      handoffSessionId: handoffSessionId,
+      totalBedsHandedOver: totalBedsHandedOver,
+      totalLoopsTransferred: totalLoopsTransferred,
+    );
+    appendEvent(event);
+  }
+
+  /// Returns the current active (unlocked) handoff session for the ward, if one exists.
+  HandoffSessionProjection? getActiveHandoffSession(String wardId) {
+    // Find all handoff events
+    final handoffEvents = _events.where((e) =>
+        e is HandoffStartedEvent ||
+        e is HandoffBedAcceptedEvent ||
+        e is HandoffCompletedEvent);
+
+    // Group events by sessionId
+    final sessionMap = <String, List<OraviEvent>>{};
+    for (final event in handoffEvents) {
+      String? sessionId;
+      if (event is HandoffStartedEvent) sessionId = event.handoffSessionId;
+      if (event is HandoffBedAcceptedEvent) sessionId = event.handoffSessionId;
+      if (event is HandoffCompletedEvent) sessionId = event.handoffSessionId;
+      if (sessionId != null) {
+        sessionMap.putIfAbsent(sessionId, () => []).add(event);
+      }
+    }
+
+    for (final entry in sessionMap.entries.toList().reversed) {
+      final session = OraviDomainReducer.reduceHandoffEvents(entry.value);
+      if (session != null && session.wardId == wardId && !session.isLocked) {
+        return session;
+      }
+    }
+    return null;
+  }
 }

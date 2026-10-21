@@ -123,6 +123,58 @@ class WardController extends Notifier<int> {
     );
     refresh();
   }
+  void startHandoffSession({
+    required String outgoingNurseId,
+    required String incomingNurseId,
+  }) {
+    ref.read(localWardRepositoryProvider).startHandoffSession(
+      wardId: SeededWardData.wardId,
+      outgoingNurseId: outgoingNurseId,
+      incomingNurseId: incomingNurseId,
+      authorId: outgoingNurseId,
+      deviceId: SeededWardData.testDeviceId,
+    );
+    refresh();
+  }
+
+  void acceptBedInHandoff({
+    required String handoffSessionId,
+    required String bedNumber,
+    required String patientId,
+    required String incomingNurseId,
+    required bool nothingPendingConfirmed,
+    required List<String> transferredLoopIds,
+  }) {
+    ref.read(localWardRepositoryProvider).acceptBedInHandoff(
+      handoffSessionId: handoffSessionId,
+      wardId: SeededWardData.wardId,
+      bedNumber: bedNumber,
+      patientId: patientId,
+      authorId: incomingNurseId,
+      incomingNurseId: incomingNurseId,
+      deviceId: SeededWardData.testDeviceId,
+      nothingPendingConfirmed: nothingPendingConfirmed,
+      transferredLoopIds: transferredLoopIds,
+    );
+    refresh();
+  }
+
+  void completeHandoffSession({
+    required String handoffSessionId,
+    required String authorId,
+    required int totalBedsHandedOver,
+    required int totalLoopsTransferred,
+  }) {
+    ref.read(localWardRepositoryProvider).completeHandoffSession(
+      handoffSessionId: handoffSessionId,
+      wardId: SeededWardData.wardId,
+      authorId: authorId,
+      deviceId: SeededWardData.testDeviceId,
+      totalBedsHandedOver: totalBedsHandedOver,
+      totalLoopsTransferred: totalLoopsTransferred,
+    );
+    refresh();
+  }
 }
 
 final wardControllerProvider = NotifierProvider<WardController, int>(WardController.new);
@@ -139,4 +191,12 @@ final patientLoopsProvider = Provider.family<List<LoopStateProjection>, String>(
   ref.watch(wardControllerProvider); // re-evaluate on mutations
   final repo = ref.watch(localWardRepositoryProvider);
   return repo.getLoopsForPatient(patientId);
+});
+
+
+/// Reactive provider yielding the active handoff session for the ward, if any.
+final activeHandoffSessionProvider = Provider<HandoffSessionProjection?>((ref) {
+  ref.watch(wardControllerProvider);
+  final repo = ref.watch(localWardRepositoryProvider);
+  return repo.getActiveHandoffSession(SeededWardData.wardId);
 });

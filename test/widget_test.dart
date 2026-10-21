@@ -46,4 +46,40 @@ void main() {
     expect(find.text('Normal saline running at 100ml/hr. MAP is 68.'), findsNothing); // Bed 1 message was SpO2
     expect(find.textContaining('SpO2 stable at 94% on 2L nasal prongs'), findsOneWidget);
   });
+
+  testWidgets('Tapping Start Shift Handoff opens HandoffWizardScreen and walks through beds', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: OraviApp(),
+      ),
+    );
+
+    // Verify Handoff button on ward board
+    final handoffBtn = find.text('Start Shift Handoff (PRD FR-11)');
+    expect(handoffBtn, findsOneWidget);
+
+    // Tap Handoff button
+    await tester.tap(handoffBtn);
+    await tester.pumpAndSettle();
+
+    // Verify Step 1: Pairing view
+    expect(find.text('SHIFT HANDOFF SESSION'), findsOneWidget);
+    expect(find.text('Shift Handover Protocol'), findsOneWidget);
+    expect(find.text('Begin Bed-by-Bed Walkthrough'), findsOneWidget);
+
+    // Start walkthrough
+    await tester.tap(find.text('Begin Bed-by-Bed Walkthrough'));
+    await tester.pumpAndSettle();
+
+    // Verify Step 2: Bed 1 Walkthrough with SBAR
+    expect(find.textContaining('Bed 1 of 5: Bed 1'), findsOneWidget);
+    expect(find.text('SBAR SUMMARY (Compiled without AI)'), findsOneWidget);
+    expect(find.text('S (Situation)'), findsOneWidget);
+    expect(find.text('B (Background)'), findsOneWidget);
+    expect(find.text('A (Assessment)'), findsOneWidget);
+    expect(find.text('R (Recommendation)'), findsOneWidget);
+
+    // Verify bed confirmation button
+    expect(find.textContaining('Confirm: Transfer'), findsOneWidget);
+  });
 }
