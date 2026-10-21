@@ -123,6 +123,12 @@ FR-52 An unconfirmed Critical closure escalates after a configurable time to the
 FR-53 When an issue recurs, the user chooses Reopen or New linked thread. The default is reopen if the topic matches and the closure was within the window (24 hours by default, configurable). Linked threads display the chain. [Assumed]
 FR-54 A Call action initiated from a loop thread or message logs a CallLogged event. Upon call completion or dismissal, Oravi prompts for a mandatory one-line outcome note (e.g., 'Agreed to hold dose') which is appended to the loop thread to eliminate unrecorded verbal silos. [Decided]
 FR-55 Clinical roles and cadres are visually color-coded throughout threads and the ward board (e.g., Nurses in clinical Blue, Doctors/Consultants in Pink/Rose, Pharmacy/Lab in distinct hues) so scanning clinicians instantly recognize who authored an entry. [Decided]
+
+FR-56 The Call action initiates an in-app VoIP voice call between enrolled hospital users using LiveKit WebRTC, without revealing personal phone numbers. [Decided]
+FR-57 Inbound calls display an incoming-call screen and ring like a phone call via high-priority push data messages, including full-screen notification over locked screens on supported devices. [Assumed]
+FR-58 If a call is unanswered after ~30 seconds or the callee is unreachable, the caller is offered an urgent message on the loop thread or escalation, and a missed-call event is anchored to the patient and loop. [Assumed]
+FR-59 Call audio is strictly real-time and never recorded. Server events record call metadata (caller, callee, loop, timestamp, duration, outcome: answered, missed, declined) for audit logging. [Decided]
+
 7.3 Handoff
 FR-11 A handoff session pairs the outgoing and incoming nurse and walks the board bed by bed. [Decided]
 FR-12 The incoming nurse accepts ownership. Routine loops may be accepted in bulk. Critical loops require individual acceptance. [Decided]
