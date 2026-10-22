@@ -1,8 +1,8 @@
-import '../../domain/models/loop_enums.dart';
+import '../domain/models/loop_enums.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/mock/seeded_ward_data.dart';
-import '../../domain/projections/projections.dart';
+import '../data/mock/seeded_ward_data.dart';
+import '../domain/projections/projections.dart';
 import 'providers/ward_providers.dart';
 
 /// Printable 1-Page Handover Sheet strictly implementing PRD Section 7.3 & FR-15:
