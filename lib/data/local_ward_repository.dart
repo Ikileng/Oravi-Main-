@@ -5,6 +5,10 @@ import '../domain/models/loop_enums.dart';
 import '../domain/projections/projections.dart';
 import '../domain/reducers/oravi_domain_reducer.dart';
 import 'mock/seeded_ward_data.dart';
+import '../domain/search/ward_search_engine.dart';
+import '../domain/timeline/ask_oravi_engine.dart';
+import '../domain/timeline/patient_timeline_entry.dart';
+
 
 /// In-memory offline event-sourced repository implementing the client event-store pattern.
 ///
@@ -348,5 +352,68 @@ class LocalWardRepository {
       }
     }
     return null;
+  }
+
+  // ==========================================
+  // Milestone 4: Ask Oravi Timeline & Search
+  // ==========================================
+
+  /// Returns the complete chronological verbatim timeline for a patient (PRD Section 8A FR-35).
+  List<PatientTimelineEntry> getPatientTimeline(String patientId) {
+    final loops = getLoopsForPatient(patientId);
+    return AskOraviEngine.buildPatientTimeline(
+      events: _events,
+      patientId: patientId,
+      loops: loops,
+    );
+  }
+
+  /// Executes an Ask Oravi query for a patient (PRD Section 8A FR-34 to FR-44).
+  AskOraviResult askOravi({
+    required String patientId,
+    required String queryString,
+    DateTime? since,
+  }) {
+    final patientEvents = _events.where((e) => e.patientId == patientId).toList();
+    final patient = OraviDomainReducer.reducePatientEvents(patientEvents);
+    if (patient == null) {
+      throw StateError('Patient not found for id $patientId');
+    }
+    final loops = getLoopsForPatient(patientId);
+
+    return AskOraviEngine.query(
+      events: _events,
+      patient: patient,
+      loops: loops,
+      queryString: queryString,
+      since: since,
+    );
+  }
+
+  /// Searches across all patients, loops, and timeline entries in a ward (PRD Section 7.1 / 8A).
+  List<WardSearchResult> searchWard({
+    required String wardId,
+    required String query,
+  }) {
+    final patients = getPatientsForWard(wardId);
+    final patientLoopsMap = <String, List<LoopStateProjection>>{};
+    final patientTimelineMap = <String, List<PatientTimelineEntry>>{};
+
+    for (final p in patients) {
+      final loops = getLoopsForPatient(p.patientId);
+      patientLoopsMap[p.patientId] = loops;
+      patientTimelineMap[p.patientId] = AskOraviEngine.buildPatientTimeline(
+        events: _events,
+        patientId: p.patientId,
+        loops: loops,
+      );
+    }
+
+    return WardSearchEngine.searchWard(
+      patients: patients,
+      patientLoopsMap: patientLoopsMap,
+      patientTimelineMap: patientTimelineMap,
+      query: query,
+    );
   }
 }
