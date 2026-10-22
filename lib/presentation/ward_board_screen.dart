@@ -1,3 +1,4 @@
+import '../../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +20,7 @@ class WardBoardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final patients = ref.watch(wardPatientsProvider);
+    final syncStatus = ref.watch(syncStatusProvider).asData?.value ?? const SyncStatus();
 
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
@@ -44,15 +46,27 @@ class WardBoardScreen extends ConsumerWidget {
             },
           ),
           IconButton(
-            tooltip: 'Sync Status (Offline by Default)',
-            icon: const Icon(Icons.cloud_off, color: ClinicalTheme.textMuted),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Offline-first: all clinical entries are safely stored in local event log.'),
-                  duration: Duration(seconds: 3),
-                ),
-              );
+            tooltip: 'Outbox Sync: ${syncStatus.pendingCount} pending',
+            icon: Icon(
+              syncStatus.state == SyncState.syncing
+                  ? Icons.sync
+                  : (syncStatus.pendingCount > 0 ? Icons.cloud_upload : Icons.cloud_done),
+              color: syncStatus.state == SyncState.syncing
+                  ? ClinicalTheme.nurseBlue
+                  : (syncStatus.pendingCount > 0 ? ClinicalTheme.urgentAmber : ClinicalTheme.textMuted),
+            ),
+            onPressed: () async {
+              final synced = await ref.read(syncEngineProvider).syncOutbox();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(synced > 0
+                        ? 'Synced $synced pending event(s) to server.'
+                        : 'Outbox up to date. Local SQLite event log persistent.'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
             },
           ),
         ],

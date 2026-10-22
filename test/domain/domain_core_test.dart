@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:oravi_app/domain/projections/projections.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
@@ -196,6 +197,30 @@ void main() {
       expect(restored.loopType, LoopType.questionOrClarification);
       expect(restored.initialOwnerRole, 'doctor_on_call');
     });
+
+    test('Cross-platform JSON Conformance Fixture validation (Tech Arch Section 4.3)', () {
+      final file = File('test/fixtures/conformance_fixture.json');
+      expect(file.existsSync(), isTrue);
+
+      final jsonStr = file.readAsStringSync();
+      final fixture = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final rawEvents = fixture['events'] as List<dynamic>;
+
+      final events = rawEvents
+          .map((e) => deserializeOraviEvent(e as Map<String, dynamic>))
+          .toList();
+
+      final projection = OraviDomainReducer.reduceLoopEvents(events);
+      expect(projection, isNotNull);
+
+      final expected = fixture['expected_final_state'] as Map<String, dynamic>;
+      expect(projection!.loopId, expected['loop_id']);
+      expect(projection.state.name, expected['state']);
+      expect(projection.messages.length, expected['total_messages']);
+      expect(projection.closureReason?.name, expected['closure_reason']);
+      expect(projection.isOpen, expected['is_open']);
+    });
+
   });
 
   group('M2: Shift Handoff & Kardex SBAR', () {
