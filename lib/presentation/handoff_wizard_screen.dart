@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/mock/seeded_ward_data.dart';
-import '../../domain/models/loop_enums.dart';
-import '../../domain/projections/projections.dart';
+import '../data/mock/seeded_ward_data.dart';
+import '../domain/models/loop_enums.dart';
+import '../domain/projections/projections.dart';
 import 'handover_print_sheet_screen.dart';
 import 'providers/ward_providers.dart';
 import 'theme/clinical_theme.dart';

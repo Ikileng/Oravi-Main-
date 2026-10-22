@@ -1,3 +1,4 @@
+import 'widgets/ask_oravi_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/loop_enums.dart';
@@ -91,45 +92,67 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
   Widget build(BuildContext context) {
     final loops = ref.watch(patientLoopsProvider(widget.patient.patientId));
 
-    return Scaffold(
-      backgroundColor: ClinicalTheme.background,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${widget.patient.bedNumber} — ${widget.patient.nameOrInitials} (${widget.patient.admissionNumber})'),
-            Text(
-              '${widget.patient.age}y / ${widget.patient.sex} • Admitted: ${widget.patient.shortAdmittingNote}',
-              style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-      body: Column(
-        children: [
-          // Alerts Banner if patient has key alerts
-          if (widget.patient.keyAlerts.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: ClinicalTheme.criticalRed, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
-                    style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ),
+    final openLoopsCount = loops.where((l) => l.isOpen).length;
 
-          // Loops List
-          Expanded(
-            child: loops.isEmpty
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: ClinicalTheme.background,
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${widget.patient.bedNumber} — ${widget.patient.nameOrInitials} (${widget.patient.admissionNumber})'),
+              Text(
+                '${widget.patient.age}y / ${widget.patient.sex} • Admitted: ${widget.patient.shortAdmittingNote}',
+                style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          bottom: TabBar(
+            indicatorColor: ClinicalTheme.routineTeal,
+            labelColor: ClinicalTheme.routineTeal,
+            unselectedLabelColor: ClinicalTheme.textSecondary,
+            tabs: [
+              Tab(
+                icon: const Icon(Icons.checklist, size: 18),
+                text: 'Loops ($openLoopsCount)',
+              ),
+              const Tab(
+                icon: Icon(Icons.history_edu, size: 18),
+                text: 'Ask Oravi & Timeline',
+              ),
+            ],
+          ),
+        ),
+        body: Column(
+          children: [
+            // Alerts Banner if patient has key alerts
+            if (widget.patient.keyAlerts.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: ClinicalTheme.criticalRed, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
+                      style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+
+            // TabBarView
+            Expanded(
+              child: TabBarView(
+                children: [
+                  // Tab 1: Loops List
+                  loops.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -165,10 +188,20 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                       return _buildLoopCard(loops[index]);
                     },
                   ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
+
+                  // Tab 2: Ask Oravi & Timeline
+                  AskOraviView(
+                    patient: widget.patient,
+                    onAnchorMessage: (loopId, author) {
+                      _anchorMessageToAuthor(loopId, author);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
         backgroundColor: ClinicalTheme.routineTeal,
         foregroundColor: Colors.white,
         onPressed: () => showDialog(
@@ -178,7 +211,8 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
         icon: const Icon(Icons.add_task),
         label: const Text('Open Loop'),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildLoopCard(LoopStateProjection loop) {

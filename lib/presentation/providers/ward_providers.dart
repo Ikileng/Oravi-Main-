@@ -1,3 +1,5 @@
+import '../../domain/search/ward_search_engine.dart';
+import '../../domain/timeline/patient_timeline_entry.dart';
 import '../../data/database/database.dart';
 import '../../data/sync/sync_engine.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -221,4 +223,39 @@ final activeHandoffSessionProvider = Provider<HandoffSessionProjection?>((ref) {
   ref.watch(wardControllerProvider);
   final repo = ref.watch(localWardRepositoryProvider);
   return repo.getActiveHandoffSession(SeededWardData.wardId);
+});
+
+/// Reactive provider yielding the chronological timeline for a specific patient.
+final patientTimelineProvider = Provider.family<List<PatientTimelineEntry>, String>((ref, patientId) {
+  ref.watch(wardControllerProvider);
+  final repo = ref.watch(localWardRepositoryProvider);
+  return repo.getPatientTimeline(patientId);
+});
+
+/// Reactive provider yielding ward-wide search results across beds, loops, and notes.
+class WardSearchQueryController extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void setQuery(String query) {
+    state = query;
+  }
+
+  void clear() {
+    state = '';
+  }
+}
+
+final wardSearchQueryProvider = NotifierProvider<WardSearchQueryController, String>(WardSearchQueryController.new);
+
+final wardSearchResultsProvider = Provider<List<WardSearchResult>>((ref) {
+  ref.watch(wardControllerProvider);
+  final query = ref.watch(wardSearchQueryProvider);
+  if (query.trim().isEmpty) return [];
+
+  final repo = ref.watch(localWardRepositoryProvider);
+  return repo.searchWard(
+    wardId: SeededWardData.wardId,
+    query: query,
+  );
 });

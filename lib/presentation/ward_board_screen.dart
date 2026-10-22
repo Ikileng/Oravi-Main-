@@ -1,10 +1,11 @@
-import '../../data/sync/sync_engine.dart';
+import 'widgets/ward_search_sheet.dart';
+import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/mock/seeded_ward_data.dart';
-import '../../domain/models/loop_enums.dart';
-import '../../domain/projections/projections.dart';
+import '../data/mock/seeded_ward_data.dart';
+import '../domain/models/loop_enums.dart';
+import '../domain/projections/projections.dart';
 import 'patient_detail_screen.dart';
 import 'providers/ward_providers.dart';
 import 'theme/clinical_theme.dart';
@@ -36,6 +37,18 @@ class WardBoardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Ward Search (Tech Arch Section 9)',
+            icon: const Icon(Icons.search, color: ClinicalTheme.routineTeal),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => const WardSearchSheet(),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Start Shift Handoff (PRD FR-11)',
             icon: const Icon(Icons.swap_horiz, color: ClinicalTheme.nurseBlue),
