@@ -27,8 +27,8 @@ Backend runtime
 Python (FastAPI) to start, revisit for a ward hub
 Assumed
 Hosting and topology
-Cloud, on-premises ward hub, or hybrid; also data residency
-Open
+Docker Compose for on-premises ward server or local cloud VPS; satisfies Kenya Data Protection Act 2019 data residency
+Decided
 Push and alerts
 FCM, with acknowledgement timeouts and SMS fallback
 Assumed
@@ -187,15 +187,18 @@ Aggressive phone settings. Transsion and Xiaomi phones may stop background apps.
 
 8A. In-app calling
 Decision [Decided]. The Call button places a voice call inside Oravi to any registered Oravi user, without anyone needing to know the other person's phone number. A nurse who does not have a doctor's number taps Call beside their message or loop and reaches them.
-• Technology [Decided]. LiveKit. It is open source (Apache-2.0), self-hostable on a cloud server or a ward server, WebRTC based, and has a Flutter SDK. The same client code works against LiveKit's hosted cloud or a self-hosted server, so hosting stays a deployment choice.
-• Ringing [Assumed]. The server creates the call and sends a high-priority push data message to the callee. The app shows an incoming-call screen through Android's calling mechanisms, including a full-screen notification on a locked screen, so it rings like a phone call.
-• No answer [Assumed]. If the callee is unreachable or does not answer within a set time (about 30 seconds), the caller is offered an urgent message on the loop or the escalation chain. The missed call is recorded and the callee sees it linked to the patient and loop.
-• Logging [Decided]. Each call records who called whom, from which loop or quote, start time, duration, and outcome (answered, missed, declined), taken from LiveKit's server events. After the call, an optional one-line note posts to the loop thread. Audio is never recorded.
-• Network [Assumed]. A self-hosted LiveKit server needs reachable ports and a relay (TURN) for hospital networks that block UDP or isolate devices, with a TCP and TLS fallback. This is tested on real ward Wi-Fi and mobile data.
-• Hosting [Open]. LiveKit runs alongside the backend or on the ward server, following the deployment decision. Voice needs little bandwidth.
+• Technology [Decided]. LiveKit. Open-source (Apache-2.0), self-hostable via Docker Compose on a cloud server or a local ward server, WebRTC based, with an official Flutter SDK. The same client code works against LiveKit's hosted cloud or a self-hosted server.
+• Calling bridge and lock screen UI [Assumed]. Handled via flutter_callkit_incoming (or equivalent). On Android, this binds to the Telecom framework (ConnectionService) and full-screen intent notifications (USE_FULL_SCREEN_INTENT) on a high-priority channel, guaranteeing the incoming call displays a full-screen ringing UI over the lock screen. On iOS, it integrates Apple CallKit to display the native system dialer interface.
+• Push and wake-up architecture [Decided]. Dual-channel: high-priority FCM data messages on Android, and Apple PushKit (VoIP push) on iOS. PushKit is mandatory on iOS to wake suspended or terminated apps and immediately trigger CallKit (reportNewIncomingCall), as standard APNs cannot reliably wake apps for real-time ringing.
+• Ringing and late media connect [Decided]. Incoming calls ring purely through local signaling payloads (carrying caller identity, ward, and loop scope). The client does NOT establish a WebRTC connection or join the LiveKit room while ringing; room connection occurs only when the callee actively taps 'Answer' (ACTION_CALL_ACCEPT). This saves bandwidth, eliminates battery drain on unanswered calls, and prevents ringtone audio conflicts.
+• Audio session routing [Decided]. Native audio session handover (AVAudioSession on iOS, AudioManager on Android) cleanly transfers focus from system ringing to the LiveKit WebRTC audio track upon answering, ensuring seamless speaker, earpiece, and Bluetooth headset routing without microphone lockouts.
+• No answer and escalation [Assumed]. If the callee is unreachable or does not answer within a set time (about 30 seconds), the caller is offered an urgent message on the loop or the escalation chain. The missed call is recorded and the callee sees it linked to the patient and loop.
+• Logging [Decided]. Each call records who called whom, from which loop or quote, start time, duration, and outcome (answered, missed, declined), taken from LiveKit server events. After the call, a mandatory outcome note posts to the loop thread (FR-54). Audio is never recorded.
+• Network and TURN [Assumed]. A self-hosted LiveKit server in Docker needs reachable ports and a relay (TURN) for hospital networks that block UDP or isolate client devices, with TCP and TLS fallback. This is tested on real ward Wi-Fi and mobile data.
+• Hosting [Decided]. LiveKit runs as a container within the Docker Compose stack alongside the FastAPI backend and PostgreSQL, on either the local ward server or cloud VPS.
 • Privacy [Decided]. No phone numbers are shown. Call metadata becomes part of the audit record. Only enrolled users can call or be called.
 • Fallback to a normal phone call [Open]. Not in v1. A later option is a bridge to a phone number through a SIP gateway.
-Spike criteria [Assumed]. Does the call ring on a locked budget phone after an hour idle, how long does the call take to connect, how is audio quality on Wi-Fi and 3G, does it work through ward network restrictions, and what is the battery cost. Ringing on Transsion and Xiaomi phones is the same risk as alerts in section 8 and is tested together.
+Spike criteria [Assumed]. Does the call ring on locked budget phones (Transsion/Xiaomi) after an hour idle; does PushKit reliably trigger CallKit on iOS; connection latency upon answering; audio quality on ward Wi-Fi and 3G; traversal through ward network firewalls; and battery impact over a 12-hour shift. Ringing on Transsion and Xiaomi phones is tested together with alerts in section 8.
 
 9. Client architecture (Flutter)
 Layers [Decided]. Presentation (widgets), application (state management), domain (entities, state machine, reducers, rules, pure Dart with no Flutter imports), and data (Drift database, outbox, sync engine, API client). The domain layer is what the conformance suite tests.
@@ -211,6 +214,7 @@ API surface [Assumed]. Authentication and enrollment, sync push and pull, patien
 Jobs [Assumed]. Timers, escalation steps, SMS and push sending, search indexing.
 Migrations [Decided]. Versioned database migrations, always tested against a copy of production-shaped data.
 Environments [Assumed]. Development, staging with synthetic data only, production. Secrets held outside the code.
+Deployment and containerization [Decided]. Docker Compose packages PostgreSQL 16, the FastAPI backend, and the LiveKit WebRTC server into a single reproducible stack. This enables zero-cloud on-premises ward server deployments on hospital hardware (Mini PC/NUC) communicating over local ward Wi-Fi (independent of external internet outages), while adhering to Kenya Data Protection Act 2019 data residency requirements. The identical Compose configuration deploys to a Kenyan cloud VPS when central hosting is preferred. In development, Python services run directly on localhost, containerizing only for integration and staging.
 11. Ask Oravi architecture (second milestone)
 Product behavior is in PRD section 8A. This is how it is built.
 Indexing. On each event append, messages and closure reasons are indexed per patient with keyword search (including typo tolerance) and optionally embeddings. [Assumed]
