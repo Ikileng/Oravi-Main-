@@ -19,6 +19,29 @@ class LLMService:
 
     def __init__(self, store: EventStore):
         self.store = store
+        # Load .env file automatically if present
+        candidate_paths = [
+            ".env",
+            "backend/.env",
+            "../.env",
+            os.path.join(os.path.dirname(__file__), "..", ".env"),
+            os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f_env:
+                        for line in f_env:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                k, v = k.strip(), v.strip().strip('"').strip("'")
+                                if k not in os.environ:
+                                    os.environ[k] = v
+                except Exception:
+                    pass
+                break
+
         self.provider = os.getenv("LLM_PROVIDER", "ollama")
         self.base_url = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
         self.api_key = os.getenv("LLM_API_KEY", "ollama")
