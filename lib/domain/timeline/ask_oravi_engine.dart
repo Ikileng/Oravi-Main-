@@ -62,7 +62,7 @@ class CoverageMetadata {
   }
 }
 
-/// Outcome of a deterministic Ask Oravi query.
+/// Outcome of an Ask Oravi query (deterministic or model-assisted).
 class AskOraviResult {
   final String patientId;
   final String queryString;
@@ -76,6 +76,17 @@ class AskOraviResult {
   final String doctorInChargeId;
   final List<PatientTimelineEntry> allTimelineEntries;
 
+  /// Model-Assisted Observation Note (Milestone 5, PRD Section 8A & Tech Arch Section 11).
+  ///
+  /// Always labeled with: "Note from Oravi, not from the record".
+  /// All numbers and assertions in this note are strictly verified by the
+  /// Verification Harness against the verbatim quotes.
+  final String? observationNote;
+  final bool isModelAssisted;
+  final String? modelProvider;
+  final String? modelName;
+  final bool verificationPassed;
+
   const AskOraviResult({
     required this.patientId,
     required this.queryString,
@@ -88,7 +99,50 @@ class AskOraviResult {
     this.absenceMessage,
     this.doctorInChargeId = 'DOC-OTIENO',
     this.allTimelineEntries = const [],
+    this.observationNote,
+    this.isModelAssisted = false,
+    this.modelProvider,
+    this.modelName,
+    this.verificationPassed = true,
   });
+
+  AskOraviResult copyWith({
+    String? patientId,
+    String? queryString,
+    List<PatientTimelineEntry>? verbatimQuotes,
+    List<SystemPatternCount>? systemPatterns,
+    CoverageMetadata? coverage,
+    bool? isRefusal,
+    String? refusalMessage,
+    bool? isAbsence,
+    String? absenceMessage,
+    String? doctorInChargeId,
+    List<PatientTimelineEntry>? allTimelineEntries,
+    String? observationNote,
+    bool? isModelAssisted,
+    String? modelProvider,
+    String? modelName,
+    bool? verificationPassed,
+  }) {
+    return AskOraviResult(
+      patientId: patientId ?? this.patientId,
+      queryString: queryString ?? this.queryString,
+      verbatimQuotes: verbatimQuotes ?? this.verbatimQuotes,
+      systemPatterns: systemPatterns ?? this.systemPatterns,
+      coverage: coverage ?? this.coverage,
+      isRefusal: isRefusal ?? this.isRefusal,
+      refusalMessage: refusalMessage ?? this.refusalMessage,
+      isAbsence: isAbsence ?? this.isAbsence,
+      absenceMessage: absenceMessage ?? this.absenceMessage,
+      doctorInChargeId: doctorInChargeId ?? this.doctorInChargeId,
+      allTimelineEntries: allTimelineEntries ?? this.allTimelineEntries,
+      observationNote: observationNote ?? this.observationNote,
+      isModelAssisted: isModelAssisted ?? this.isModelAssisted,
+      modelProvider: modelProvider ?? this.modelProvider,
+      modelName: modelName ?? this.modelName,
+      verificationPassed: verificationPassed ?? this.verificationPassed,
+    );
+  }
 }
 
 /// Deterministic offline timeline and search engine for Ask Oravi.

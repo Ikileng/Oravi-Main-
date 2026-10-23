@@ -43,3 +43,24 @@ class SyncPullResponse:
     ward_id: str
     latest_seq: int
     events: List[CanonicalEvent]
+
+@dataclass
+class AskRequest:
+    query: str
+    time_window_hours: Optional[int] = None
+
+@dataclass
+class AskResponse:
+    patient_id: str
+    query: str
+    verbatim_quotes: List[Dict[str, Any]]
+    coverage_summary: str
+    observation_note: Optional[str] = None
+    is_refusal: bool = False
+    refusal_message: Optional[str] = None
+    is_absence: bool = False
+    absence_message: Optional[str] = None
+    doctor_in_charge: str = "DOC-OTIENO"
+    verification_passed: bool = True
+    model_provider: str = "ollama"
+    model_name: str = "qwen2.5:7b"

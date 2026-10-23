@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Query
-from .models import SyncPushRequest, SyncPushResponse, SyncPullResponse
+from .models import SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse
 from .event_store import EventStore
+from .services.llm_service import LLMService
 
 app = FastAPI(
     title="Oravi Ward Sync API",
@@ -9,6 +10,7 @@ app = FastAPI(
 )
 
 store = EventStore()
+llm_service = LLMService(store=store)
 
 @app.get("/health")
 def health_check():
@@ -35,3 +37,12 @@ def sync_pull(
         latest_seq=latest_seq,
         events=events,
     )
+
+@app.post("/api/v1/patients/{patient_id}/ask", response_model=AskResponse)
+def ask_patient_record(patient_id: str, request: AskRequest):
+    result = llm_service.query(
+        patient_id=patient_id,
+        query_text=request.query,
+        time_window_hours=request.time_window_hours,
+    )
+    return AskResponse(**result)

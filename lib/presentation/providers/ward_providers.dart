@@ -2,6 +2,7 @@ import '../../domain/search/ward_search_engine.dart';
 import '../../domain/timeline/patient_timeline_entry.dart';
 import '../../data/database/database.dart';
 import '../../data/sync/sync_engine.dart';
+import '../../data/ask_oravi_model_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/local_ward_repository.dart';
 import '../../data/mock/seeded_ward_data.dart';
@@ -258,4 +259,9 @@ final wardSearchResultsProvider = Provider<List<WardSearchResult>>((ref) {
     wardId: SeededWardData.wardId,
     query: query,
   );
+});
+
+/// Provider for model-assisted Ask Oravi backend service (Milestone 5).
+final askOraviModelServiceProvider = Provider<AskOraviModelService>((ref) {
+  return AskOraviModelService();
 });
