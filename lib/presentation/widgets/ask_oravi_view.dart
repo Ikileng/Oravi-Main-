@@ -39,6 +39,7 @@ class AskOraviView extends ConsumerStatefulWidget {
 class _AskOraviViewState extends ConsumerState<AskOraviView> {
   final TextEditingController _queryController = TextEditingController();
   AskOraviResult? _activeResult;
+  bool _isLoadingModel = false;
 
   final List<String> _suggestedQueries = [
     'Urine / Mkojo',
@@ -61,6 +62,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
 
     _queryController.text = clean;
     final repo = ref.read(localWardRepositoryProvider);
+    // 1. Immediate deterministic local result (zero-latency, 100% offline-ready)
     final result = repo.askOravi(
       patientId: widget.patient.patientId,
       queryString: clean,
@@ -68,6 +70,35 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
 
     setState(() {
       _activeResult = result;
+      _isLoadingModel = true;
+    });
+
+    // 2. Query model-assisted backend in background (Milestone 5)
+    // Silent fallback: if backend is unreachable or times out, local result stays active
+    final modelService = ref.read(askOraviModelServiceProvider);
+    modelService.askPatient(
+      patientId: widget.patient.patientId,
+      query: clean,
+    ).then((resp) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingModel = false;
+        if (resp != null && resp.observationNote != null && resp.verificationPassed) {
+          _activeResult = _activeResult?.copyWith(
+            observationNote: resp.observationNote,
+            isModelAssisted: true,
+            modelProvider: resp.modelProvider,
+            modelName: resp.modelName,
+            verificationPassed: resp.verificationPassed,
+          );
+        }
+      });
+    }).catchError((_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingModel = false;
+        });
+      }
     });
   }
 
@@ -375,6 +406,89 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                   result.absenceMessage!,
                   style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, height: 1.4),
                 ),
+              ],
+            ),
+          ),
+
+        // Model Observation Card (Milestone 5: PRD Section 8A & Tech Arch Section 11)
+        if (result.observationNote != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2C223A),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF8B5CF6), width: 1.2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Note from Oravi, not from the record',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (result.modelName != null)
+                      Text(
+                        '${result.modelName} (${result.modelProvider ?? "local"})',
+                        style: const TextStyle(fontSize: 10, color: Color(0xFFC4B5FD)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  result.observationNote!,
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Row(
+                  children: [
+                    Icon(Icons.verified, size: 12, color: Color(0xFF10B981)),
+                    SizedBox(width: 4),
+                    Text(
+                      'All numbers verified against patient event log quotes below',
+                      style: TextStyle(fontSize: 10, color: Color(0xFF10B981)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+        if (_isLoadingModel)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: ClinicalTheme.surfaceElevated,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.5, color: ClinicalTheme.routineTeal),
+                ),
+                SizedBox(width: 8),
+                Text('Verifying observations with ward model...', style: TextStyle(fontSize: 11, color: ClinicalTheme.textMuted)),
               ],
             ),
           ),
