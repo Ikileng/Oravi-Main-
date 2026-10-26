@@ -1,8 +1,0 @@
-feat(m5): conversational chat and medical issue terminology
-
-- Transform Ask Oravi into persistent conversational clinician-assistant chat
-- Support multi-turn greetings (e.g. Hello -> Hey, how may I help you?)
-- Auto-extract time windows like 'last 8 hours' for synthesized observations
-- Rename 'Loop' to 'Medical Issue' across patient detail and handoff wizard
-- Add persistent input bar with Voice Assistant mic placeholder and send button
-- Render 1-tap Call and Message actions for relevant medical issues and authors
