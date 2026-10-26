@@ -97,14 +97,14 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify TabBar with 'Loops' and 'Ask Oravi & Timeline'
-    expect(find.text('Ask Oravi & Timeline'), findsOneWidget);
+    expect(find.text('Ask Oravi'), findsOneWidget);
 
     // Switch to Ask Oravi & Timeline Tab
-    await tester.tap(find.text('Ask Oravi & Timeline'));
+    await tester.tap(find.text('Ask Oravi'));
     await tester.pumpAndSettle();
 
     // Verify search bar and suggested chips
-    expect(find.textContaining('Ask Oravi or search record'), findsOneWidget);
+    expect(find.textContaining('Message Oravi about this patient'), findsOneWidget);
     expect(find.text('SpO2 / Oxygen'), findsOneWidget);
     expect(find.text('Urine / Mkojo'), findsOneWidget);
     expect(find.text('Blood / Cross-match'), findsOneWidget);

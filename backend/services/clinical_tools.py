@@ -67,15 +67,24 @@ def execute_query_patient_timeline(
 ) -> Dict[str, Any]:
     """
     Deterministic tool execution fetching verbatim patient records from the event store.
+    Supports English & Kiswahili search and time window queries (e.g. 'last 8 hours').
     """
     all_events, _ = store.get_events_since(since_seq=0, limit=1000)
-    # Filter for target patient
     patient_events = [e for e in all_events if e.patient_id == patient_id]
 
-    # Expand search terms
+    # Auto-detect time window from query if not explicitly passed
     topic_lower = topic.lower()
+    tw_match = re.search(r'\b(\d+)\s*(?:hours|hrs|hr)\b', topic_lower)
+    if tw_match and time_window_hours is None:
+        time_window_hours = int(tw_match.group(1))
+
+    is_general_time_summary = any(p in topic_lower for p in [
+        "what do i need to know", "what happened", "summary", "last", "shift", "today", "updates", "issues"
+    ]) and (time_window_hours is not None or "hour" in topic_lower or "shift" in topic_lower or "today" in topic_lower)
+
+    # Expand search terms
     search_terms = set()
-    if topic_lower != "all":
+    if topic_lower != "all" and not is_general_time_summary:
         search_terms.add(topic_lower)
         for key, syns in TOPIC_SYNONYMS.items():
             if key in topic_lower or any(s in topic_lower for s in syns):

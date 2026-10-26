@@ -77,6 +77,24 @@ class LLMService:
         """
         Executes a natural language query with verification harness and fallback.
         """
+        clean_lower = query_text.strip().lower()
+        # 0. Conversational greetings
+        if clean_lower in ["hello", "hi", "hey", "jambo", "habari", "good morning", "good afternoon", "good evening", "how are you", "sasa"]:
+            return {
+                "patient_id": patient_id,
+                "query": query_text,
+                "verbatim_quotes": [],
+                "observation_note": "Hey, how may I help you?",
+                "coverage_summary": "Conversational assistant ready.",
+                "is_refusal": False,
+                "refusal_message": None,
+                "is_absence": False,
+                "absence_message": None,
+                "doctor_in_charge": "DOC-OTIENO",
+                "verification_passed": True,
+                "model_provider": self.provider,
+                "model_name": self.model_name,
+            }
         all_events, _ = self.store.get_events_since(since_seq=0, limit=1000)
         patient_events = [e for e in all_events if e.patient_id == patient_id]
 

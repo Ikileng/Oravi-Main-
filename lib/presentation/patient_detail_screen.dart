@@ -118,11 +118,11 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             tabs: [
               Tab(
                 icon: const Icon(Icons.checklist, size: 18),
-                text: 'Loops ($openLoopsCount)',
+                text: 'Medical Issues ($openLoopsCount)',
               ),
               const Tab(
-                icon: Icon(Icons.history_edu, size: 18),
-                text: 'Ask Oravi & Timeline',
+                icon: Icon(Icons.smart_toy_outlined, size: 18),
+                text: 'Ask Oravi',
               ),
             ],
           ),
@@ -160,7 +160,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                         const Icon(Icons.check_circle_outline, size: 48, color: ClinicalTheme.successGreen),
                         const SizedBox(height: 12),
                         const Text(
-                          'No Open Clinical Loops',
+                          'No Active Medical Issues',
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
                         ),
                         const SizedBox(height: 4),
@@ -176,7 +176,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                             builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
                           ),
                           icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Raise First Loop'),
+                          label: const Text('Raise Medical Issue'),
                         ),
                       ],
                     ),
@@ -209,7 +209,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
           builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
         ),
         icon: const Icon(Icons.add_task),
-        label: const Text('Open Loop'),
+        label: const Text('Raise Medical Issue'),
       ),
     ),
   );
