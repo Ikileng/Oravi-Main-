@@ -593,8 +593,8 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                   ],
                 ),
               )
-            else
-              // Standard message text bubble
+            else if (!(result != null && result.isAbsence && !result.isRefusal))
+              // Standard message text bubble (only shown if not already rendering absence card)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(

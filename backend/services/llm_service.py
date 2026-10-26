@@ -1,20 +1,15 @@
-import json
 import os
+import json
 import urllib.request
-import urllib.error
 from typing import Any, Dict, List, Optional
-from ..event_store import EventStore
-from .clinical_tools import CLINICAL_TOOLS, execute_query_patient_timeline
-from .verification_harness import VerificationHarness, VerificationResult
+from backend.event_store import EventStore
+from backend.services.clinical_tools import execute_query_patient_timeline
+from backend.services.verification_harness import VerificationHarness, VerificationResult
 
 class LLMService:
     """
-    Vendor-agnostic LLM client speaking standard OpenAI-compatible API protocol.
-    Works seamlessly with:
-    - Local Ollama (qwen2.5:7b)
-    - Google Gemini (via OpenAI compatibility endpoint)
-    - Microsoft Azure OpenAI
-    - Cloud OpenAI
+    Local LLM service interfacing with Ollama (Qwen 2.5 7B default) or OpenAI-compatible endpoint.
+    Strictly verifies all synthesized observations against raw event quotes (Tech Arch Section 11).
     """
 
     def __init__(self, store: EventStore):
@@ -56,7 +51,8 @@ class LLMService:
         payload = {
             "model": self.model_name,
             "messages": messages,
-            "temperature": 0.1,
+            "temperature": 0.2,
+            "max_tokens": 120,
         }
         if tools:
             payload["tools"] = tools
@@ -65,12 +61,12 @@ class LLMService:
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
+            # 35s timeout gives local CPU inference breathing room on cold start
+            with urllib.request.urlopen(req, timeout=35.0) as resp:
                 if resp.status == 200:
                     body = resp.read().decode("utf-8")
                     return json.loads(body)
-        except Exception:
-            # Model server unreachable or timed out; fall back seamlessly
+        except Exception as e:
             return None
 
     def query(self, patient_id: str, query_text: str, time_window_hours: Optional[int] = None) -> Dict[str, Any]:
@@ -95,6 +91,7 @@ class LLMService:
                 "model_provider": self.provider,
                 "model_name": self.model_name,
             }
+
         all_events, _ = self.store.get_events_since(since_seq=0, limit=1000)
         patient_events = [e for e in all_events if e.patient_id == patient_id]
 
@@ -110,34 +107,31 @@ class LLMService:
         coverage = deterministic_tool_result["coverage_summary"]
 
         # 2. Check if local Qwen/Ollama model is running
+        record_lines = [q.get("verbatim_text", "") for q in quotes if q.get("verbatim_text")]
+        records_context = "\n".join(record_lines)
+
         system_prompt = (
-            "You are Oravi, an offline clinical assistant for hospital inpatient wards. "
-            "You quote records verbatim and cite the author and time. "
-            "You NEVER diagnose, predict, or prescribe. "
-            "If asked for a diagnosis or treatment, state that you cannot diagnose. "
-            "Output JSON with keys: 'verbatim_quotes' (list), 'observation_note' (string or null)."
+            "You are Oravi, an offline bedside clinical assistant for hospital inpatient wards in Kenya/East Africa. "
+            "Respond directly, naturally, and supportively to the clinician in 2-3 sentences based strictly on the verified patient records. "
+            "When giving a briefing, state the admission reason, limb/dressing status, key alerts, and medical issues status clearly. "
+            "Do not diagnose, predict, or prescribe. State only facts from the record."
         )
 
         model_response = self._call_openai_compatible_api(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Patient: {patient_id}. Question: {query_text}. Available records: {json.dumps(quotes)}"}
+                {"role": "user", "content": f"Verified Patient Records:\n{records_context}\n\nClinician Question: {query_text}"}
             ]
         )
 
-        raw_model_output = {}
+        observation_note = None
         if model_response and "choices" in model_response and model_response["choices"]:
-            content = model_response["choices"][0]["message"].get("content", "")
-            try:
-                raw_model_output = json.loads(content)
-            except Exception:
-                raw_model_output = {"verbatim_quotes": quotes, "observation_note": None}
-        else:
-            # Offline / model unavailable fallback: Use deterministic extraction directly
-            raw_model_output = {
-                "verbatim_quotes": quotes,
-                "observation_note": None,
-            }
+            observation_note = model_response["choices"][0]["message"].get("content", "").strip()
+
+        raw_model_output = {
+            "verbatim_quotes": quotes,
+            "observation_note": observation_note,
+        }
 
         # 3. Pass through the Automatic Verification Harness (Tech Arch Section 11)
         verification: VerificationResult = VerificationHarness.verify(

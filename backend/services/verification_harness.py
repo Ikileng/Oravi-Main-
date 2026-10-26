@@ -54,7 +54,6 @@ class VerificationHarness:
     @classmethod
     def extract_numbers(cls, text: str) -> List[str]:
         """Extracts integers and decimals from a text string."""
-        # Finds standalone numbers like 88, 94, 7.1, 100, 2, excluding pure dates if formatted
         return re.findall(r'\b\d+(?:\.\d+)?\b', text)
 
     @classmethod
@@ -74,24 +73,36 @@ class VerificationHarness:
 
         # 2. Extract and verify quotes against raw SQLite events (Rule 1)
         raw_texts = []
+        authorized_numbers = set()
         for e in raw_patient_events:
-            p = getattr(e, "payload", {}) if hasattr(e, "payload") else e.get("payload", {})
+            p = getattr(e, "payload", {}) if hasattr(e, "payload") else (e.get("payload", {}) if isinstance(e, dict) else {})
             for val in p.values():
-                if isinstance(val, str):
-                    raw_texts.append(val.strip())
+                if isinstance(val, (str, int, float)):
+                    val_str = str(val).strip()
+                    raw_texts.append(val_str)
+                    authorized_numbers.update(cls.extract_numbers(val_str))
 
         claimed_quotes = model_output.get("verbatim_quotes", [])
         verified_quotes = []
 
         for quote in claimed_quotes:
-            q_text = quote.get("verbatim_text", "").strip()
+            if isinstance(quote, str):
+                q_text = quote.strip()
+                quote_obj = {"verbatim_text": q_text, "quote_id": "model-quote", "author_id": "CLINICAL-RECORD"}
+            elif isinstance(quote, dict):
+                q_text = str(quote.get("verbatim_text", "")).strip()
+                quote_obj = quote
+            else:
+                continue
+
             if not q_text:
                 continue
 
             # Check if this exact text is a substring of any raw event text
             matched_raw = any(q_text in raw or raw in q_text for raw in raw_texts)
             if matched_raw:
-                verified_quotes.append(quote)
+                verified_quotes.append(quote_obj)
+                authorized_numbers.update(cls.extract_numbers(q_text))
             else:
                 failures.append(f"Rejected unverified quote: '{q_text}' not in raw event store.")
 
@@ -109,13 +120,7 @@ class VerificationHarness:
         verified_observation = None
 
         if raw_observation:
-            # Build set of all numbers authorized in verified quotes
-            authorized_numbers = set()
-            for q in verified_quotes:
-                authorized_numbers.update(cls.extract_numbers(q.get("verbatim_text", "")))
-
-            # Check sentences in the model observation
-            sentences = re.split(r'(?<=[.!?])\s+', raw_observation.strip())
+            sentences = re.split(r'(?<=[.!?])\s+', str(raw_observation).strip())
             valid_sentences = []
 
             for sent in sentences:

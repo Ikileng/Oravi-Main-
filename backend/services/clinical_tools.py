@@ -1,52 +1,12 @@
 import re
 from typing import Any, Dict, List, Optional
-from ..event_store import EventStore
-from ..models import CanonicalEvent
+from backend.event_store import EventStore
 
-# Standard OpenAI-compatible tool specifications for Qwen / Ollama / Gemini / Azure
-CLINICAL_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "query_patient_timeline",
-            "description": "Retrieves the exact chronological clinical record and verbatim quotes for a patient regarding a specific clinical topic or time window.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "patient_id": {
-                        "type": "string",
-                        "description": "The unique patient identifier, e.g. 'PAT-4B-01' or bed number."
-                    },
-                    "topic": {
-                        "type": "string",
-                        "description": "Clinical topic or term to search for (e.g. 'urine', 'oxygen', 'blood', 'blood_pressure', 'pain', 'allergies', 'all')."
-                    },
-                    "time_window_hours": {
-                        "type": "integer",
-                        "description": "Optional time window in hours to look back, e.g. 8 for 'last 8 hours', 24 for 'last 24 hours'."
-                    }
-                },
-                "required": ["patient_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_ward_summary",
-            "description": "Retrieves the active open loops, urgent items, and bed states across the ward for ward-round briefing.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ward_id": {
-                        "type": "string",
-                        "description": "Ward identifier, e.g. 'WARD-4B'."
-                    }
-                },
-                "required": ["ward_id"]
-            }
-        }
-    }
+# Mandatory diagnostic refusal triggers (matching PRD Section 8A FR-40)
+REFUSAL_TRIGGERS = [
+    "kidney failure", "renal failure", "heart failure", "sepsis", "septic",
+    "dying", "will he survive", "will she survive", "diagnose", "diagnosis",
+    "prognosis", "prescribe", "what medicine should i give"
 ]
 
 # Ward Lexicon synonym mapping (matching PRD Section 8A)
@@ -78,13 +38,18 @@ def execute_query_patient_timeline(
     if tw_match and time_window_hours is None:
         time_window_hours = int(tw_match.group(1))
 
+    is_general_briefing = any(p in topic_lower for p in [
+        "what do i need to know", "what should i know", "know nothing", "tell me about",
+        "brief me", "who is this", "summary", "overview", "catch me up", "status", "orientation"
+    ])
+
     is_general_time_summary = any(p in topic_lower for p in [
         "what do i need to know", "what happened", "summary", "last", "shift", "today", "updates", "issues"
     ]) and (time_window_hours is not None or "hour" in topic_lower or "shift" in topic_lower or "today" in topic_lower)
 
     # Expand search terms
     search_terms = set()
-    if topic_lower != "all" and not is_general_time_summary:
+    if topic_lower != "all" and not is_general_briefing and not is_general_time_summary:
         search_terms.add(topic_lower)
         for key, syns in TOPIC_SYNONYMS.items():
             if key in topic_lower or any(s in topic_lower for s in syns):
@@ -97,7 +62,16 @@ def execute_query_patient_timeline(
         content = ""
         loop_title = ""
 
-        if event.type == "LoopOpened":
+        if event.type == "PatientAdmitted":
+            bed = event.payload.get("bed_number", "")
+            age = event.payload.get("age", "")
+            sex = event.payload.get("sex", "")
+            name = event.payload.get("name_or_initials", "")
+            note = event.payload.get("short_admitting_note", "")
+            alerts = ", ".join(event.payload.get("key_alerts", [])) or "No known allergies"
+            content = f"Admitted to {bed}: {name}, {age}y {sex}. Note: {note}. Key Alerts: {alerts}."
+            loop_title = "Admission Record"
+        elif event.type == "LoopOpened":
             loop_title = event.payload.get("title", "")
             content = f"{loop_title}: {event.payload.get('description', '')}".strip()
         elif event.type == "MessagePosted":
@@ -126,7 +100,7 @@ def execute_query_patient_timeline(
 
         # Check match
         matched = False
-        if not search_terms or topic_lower == "all":
+        if not search_terms or topic_lower == "all" or is_general_briefing or is_general_time_summary:
             matched = True
         else:
             text_lower = f"{content} {loop_title}".lower()
@@ -145,15 +119,15 @@ def execute_query_patient_timeline(
                 "author_id": event.author_id,
                 "timestamp": event.client_created_at,
                 "verbatim_text": content,
-                "loop_id": event.loop_id or "GENERAL",
+                "loop_title": loop_title or "Patient Care Note",
+                "loop_id": event.loop_id,
             })
 
-    coverage_line = f"Searched: {', '.join(sorted(list(search_terms))[:5]) if search_terms else 'all'} in {len(patient_events)} messages across {len(threads) or 1} threads."
+    terms_searched_str = topic if topic != "all" else "all messages"
+    coverage = f"Searched: {terms_searched_str} in {len(quotes)} record(s) across {len(threads) or 1} thread(s)."
 
     return {
-        "patient_id": patient_id,
-        "topic": topic,
         "quotes": quotes,
-        "coverage_summary": coverage_line,
-        "is_empty": len(quotes) == 0,
+        "coverage_summary": coverage,
+        "patient_id": patient_id
     }

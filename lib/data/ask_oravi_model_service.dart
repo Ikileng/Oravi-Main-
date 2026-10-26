@@ -65,10 +65,10 @@ class AskOraviModelService {
   final Future<ModelAskResponse?> Function(String patientId, String query, int? timeWindowHours)? mockHandler;
 
   AskOraviModelService({
-    this.baseUrl = 'http://10.0.2.2:8000',
-    this.timeout = const Duration(seconds: 4),
+    String? baseUrl,
+    this.timeout = const Duration(seconds: 30),
     this.mockHandler,
-  });
+  }) : baseUrl = baseUrl ?? 'http://10.0.96.95:8000';
 
   /// Queries the backend model service with automatic verification.
   ///
