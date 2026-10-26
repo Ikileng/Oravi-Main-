@@ -26,12 +26,14 @@ class PatientDetailScreen extends ConsumerStatefulWidget {
   ConsumerState<PatientDetailScreen> createState() => _PatientDetailScreenState();
 }
 
-class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
+class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with SingleTickerProviderStateMixin {
   final Map<String, TextEditingController> _replyControllers = {};
   Offset? _fabPosition;
+  late final TabController _tabController = TabController(length: 2, vsync: this);
 
   @override
   void dispose() {
+    _tabController.dispose();
     for (final c in _replyControllers.values) {
       c.dispose();
     }
@@ -56,6 +58,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
   }
 
   void _anchorMessageToAuthor(String loopId, String authorName) {
+    _tabController.animateTo(0);
     final controller = _getReplyController(loopId);
     final mention = '@$authorName: ';
     if (!controller.text.startsWith(mention)) {
@@ -95,9 +98,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
 
     final openLoopsCount = loops.where((l) => l.isOpen).length;
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: ClinicalTheme.background,
         appBar: AppBar(
           title: Column(
@@ -113,6 +114,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             ],
           ),
           bottom: TabBar(
+            controller: _tabController,
             indicatorColor: ClinicalTheme.routineTeal,
             labelColor: ClinicalTheme.routineTeal,
             unselectedLabelColor: ClinicalTheme.textSecondary,
@@ -164,6 +166,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
                     // TabBarView
                     Expanded(
                       child: TabBarView(
+                        controller: _tabController,
                         children: [
                           // Tab 1: Loops List
                           loops.isEmpty
@@ -273,8 +276,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             );
           },
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildLoopCard(LoopStateProjection loop) {
