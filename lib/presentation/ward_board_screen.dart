@@ -202,12 +202,15 @@ class _WardBedRow extends ConsumerWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          patient.nameOrInitials,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: ClinicalTheme.textPrimary,
+                        Flexible(
+                          child: Text(
+                            patient.nameOrInitials,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: ClinicalTheme.textPrimary,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 6),

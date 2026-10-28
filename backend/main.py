@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query
 from .models import SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse
 from .event_store import EventStore
 from .services.llm_service import LLMService
+from .seed_data import seed_store_if_empty
 
 app = FastAPI(
     title="Oravi Ward Sync API",
@@ -10,6 +11,7 @@ app = FastAPI(
 )
 
 store = EventStore()
+seed_store_if_empty(store)
 llm_service = LLMService(store=store)
 
 @app.get("/health")

@@ -133,6 +133,12 @@ class TestM5AskVerification(unittest.TestCase):
         self.assertEqual(len(res.verified_quotes), 0)
         self.assertTrue(any("Rejected unverified quote" in fail for fail in res.failure_reasons))
 
+    def test_conversational_greeting_hello(self):
+        llm = LLMService(store=self.store)
+        res = llm.query(patient_id="PAT-4B-01", query_text="Hello")
+        self.assertEqual(res["observation_note"], "Hey, how may I help you?")
+        self.assertTrue(res["verification_passed"])
+
     def test_llm_service_offline_fallback(self):
         # LLMService should execute deterministic fallback gracefully without throwing
         llm = LLMService(store=self.store)

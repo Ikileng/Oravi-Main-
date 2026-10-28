@@ -327,7 +327,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'OPEN LOOPS (${openLoops.length})',
+                    'ACTIVE MEDICAL ISSUES (${openLoops.length})',
                     style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                   if (routineLoops.isNotEmpty)
@@ -502,7 +502,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                     icon: const Icon(Icons.arrow_forward),
                     label: Text(
                       allCriticalAcknowledged
-                          ? 'Confirm: Transfer ${_selectedLoopIds.length} Loop(s) (${patient.bedNumber})'
+                          ? 'Confirm: Transfer ${_selectedLoopIds.length} Issue(s) (${patient.bedNumber})'
                           : 'Acknowledge Critical STAT Loop First',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
@@ -635,7 +635,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                       Text('$totalTransferred',
                           style: const TextStyle(color: ClinicalTheme.urgentAmber, fontSize: 20, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
-                      const Text('Loops Transferred', style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11)),
+                      const Text('Medical Issues Transferred', style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11)),
                     ],
                   ),
                 ),

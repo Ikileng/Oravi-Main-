@@ -99,7 +99,7 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
             children: [
               Icon(Icons.add_circle_outline, color: ClinicalTheme.routineTeal),
               SizedBox(width: 8),
-              Text('Open New Loop (FR-4)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text('Raise Medical Issue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
           content: SingleChildScrollView(
@@ -125,7 +125,7 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 ),
                 const SizedBox(height: 14),
                 const Text(
-                  'Loop Title:',
+                  'Issue Title:',
                   style: TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
@@ -212,7 +212,7 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 foregroundColor: Colors.white,
               ),
               onPressed: () => _submit(ref),
-              child: const Text('Raise Loop'),
+              child: const Text('Raise Medical Issue'),
             ),
           ],
         );

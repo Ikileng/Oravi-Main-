@@ -26,11 +26,14 @@ class PatientDetailScreen extends ConsumerStatefulWidget {
   ConsumerState<PatientDetailScreen> createState() => _PatientDetailScreenState();
 }
 
-class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
+class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with SingleTickerProviderStateMixin {
   final Map<String, TextEditingController> _replyControllers = {};
+  Offset? _fabPosition;
+  late final TabController _tabController = TabController(length: 2, vsync: this);
 
   @override
   void dispose() {
+    _tabController.dispose();
     for (final c in _replyControllers.values) {
       c.dispose();
     }
@@ -55,6 +58,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
   }
 
   void _anchorMessageToAuthor(String loopId, String authorName) {
+    _tabController.animateTo(0);
     final controller = _getReplyController(loopId);
     final mention = '@$authorName: ';
     if (!controller.text.startsWith(mention)) {
@@ -94,9 +98,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
 
     final openLoopsCount = loops.where((l) => l.isOpen).length;
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: ClinicalTheme.background,
         appBar: AppBar(
           title: Column(
@@ -112,107 +114,169 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
             ],
           ),
           bottom: TabBar(
+            controller: _tabController,
             indicatorColor: ClinicalTheme.routineTeal,
             labelColor: ClinicalTheme.routineTeal,
             unselectedLabelColor: ClinicalTheme.textSecondary,
             tabs: [
               Tab(
                 icon: const Icon(Icons.checklist, size: 18),
-                text: 'Loops ($openLoopsCount)',
+                text: 'Medical Issues ($openLoopsCount)',
               ),
               const Tab(
-                icon: Icon(Icons.history_edu, size: 18),
-                text: 'Ask Oravi & Timeline',
+                icon: Icon(Icons.smart_toy_outlined, size: 18),
+                text: 'Ask Oravi',
               ),
             ],
           ),
         ),
-        body: Column(
-          children: [
-            // Alerts Banner if patient has key alerts
-            if (widget.patient.keyAlerts.isNotEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
-                child: Row(
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxW = constraints.maxWidth;
+            final maxH = constraints.maxHeight;
+            // Default position: bottom-right, comfortably positioned
+            final defaultPosition = Offset(
+              (maxW - 200.0).clamp(8.0, maxW),
+              (maxH - 72.0).clamp(8.0, maxH),
+            );
+            final pos = _fabPosition ?? defaultPosition;
+
+            return Stack(
+              children: [
+                Column(
                   children: [
-                    const Icon(Icons.warning_amber_rounded, color: ClinicalTheme.criticalRed, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
-                      style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12, fontWeight: FontWeight.bold),
+                    // Alerts Banner if patient has key alerts
+                    if (widget.patient.keyAlerts.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: ClinicalTheme.criticalRed, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
+                              style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // TabBarView
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          // Tab 1: Loops List
+                          loops.isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.check_circle_outline, size: 48, color: ClinicalTheme.successGreen),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        'No Active Medical Issues',
+                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      const Text(
+                                        'All pending issues are closed or nothing was entered.',
+                                        style: TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(backgroundColor: ClinicalTheme.routineTeal),
+                                        onPressed: () => showDialog(
+                                          context: context,
+                                          builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
+                                        ),
+                                        icon: const Icon(Icons.add, size: 18),
+                                        label: const Text('Raise Medical Issue'),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : ListView.builder(
+                                  padding: const EdgeInsets.all(12),
+                                  itemCount: loops.length,
+                                  itemBuilder: (context, index) {
+                                    return _buildLoopCard(loops[index]);
+                                  },
+                                ),
+
+                          // Tab 2: Ask Oravi & Timeline
+                          AskOraviView(
+                            patient: widget.patient,
+                            onAnchorMessage: (loopId, author) {
+                              _anchorMessageToAuthor(loopId, author);
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
 
-            // TabBarView
-            Expanded(
-              child: TabBarView(
-                children: [
-                  // Tab 1: Loops List
-                  loops.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.check_circle_outline, size: 48, color: ClinicalTheme.successGreen),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No Open Clinical Loops',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
+                // Dynamically Draggable Floating Button: User can move it freely anywhere on the screen
+                Positioned(
+                  left: pos.dx.clamp(8.0, (maxW - 195.0).clamp(8.0, maxW)),
+                  top: pos.dy.clamp(8.0, (maxH - 52.0).clamp(8.0, maxH)),
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        final current = _fabPosition ?? defaultPosition;
+                        final newX = (current.dx + details.delta.dx).clamp(8.0, maxW - 195.0);
+                        final newY = (current.dy + details.delta.dy).clamp(8.0, maxH - 52.0);
+                        _fabPosition = Offset(newX, newY);
+                      });
+                    },
+                    child: Material(
+                      elevation: 6,
+                      shadowColor: Colors.black.withValues(alpha: 0.4),
+                      color: ClinicalTheme.routineTeal,
+                      borderRadius: BorderRadius.circular(28),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(28),
+                        onTap: () => showDialog(
+                          context: context,
+                          builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
                         ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'All pending issues are closed or nothing was entered.',
-                          style: TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: ClinicalTheme.routineTeal),
-                          onPressed: () => showDialog(
-                            context: context,
-                            builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 1),
                           ),
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Raise First Loop'),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.drag_indicator, size: 16, color: Colors.white70),
+                              SizedBox(width: 4),
+                              Icon(Icons.add_task, size: 18, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Raise Medical Issue',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
+                      ),
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: loops.length,
-                    itemBuilder: (context, index) {
-                      return _buildLoopCard(loops[index]);
-                    },
                   ),
-
-                  // Tab 2: Ask Oravi & Timeline
-                  AskOraviView(
-                    patient: widget.patient,
-                    onAnchorMessage: (loopId, author) {
-                      _anchorMessageToAuthor(loopId, author);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
-        floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: ClinicalTheme.routineTeal,
-        foregroundColor: Colors.white,
-        onPressed: () => showDialog(
-          context: context,
-          builder: (ctx) => CreateLoopDialog(patientId: widget.patient.patientId),
-        ),
-        icon: const Icon(Icons.add_task),
-        label: const Text('Open Loop'),
-      ),
-    ),
-  );
+      );
   }
 
   Widget _buildLoopCard(LoopStateProjection loop) {

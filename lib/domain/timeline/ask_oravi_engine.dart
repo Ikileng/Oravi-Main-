@@ -374,15 +374,24 @@ class AskOraviEngine {
         ? allEntries.where((e) => e.timestamp.isAfter(effectiveSince!)).toList()
         : allEntries;
 
-    final isGeneralWindowCatchUp = effectiveSince != null &&
-        (expandedTerms.isEmpty ||
-         lowerQuery.contains('what should i know') ||
-         lowerQuery.contains('catch up') ||
-         lowerQuery.contains('what happened') ||
-         lowerQuery.contains('summary') ||
-         lowerQuery.contains('updates'));
+    final isGeneralBriefing = 
+        lowerQuery.contains('what should i know') ||
+        lowerQuery.contains('what do i need to know') ||
+        lowerQuery.contains('tell me what i need to know') ||
+        lowerQuery.contains('tell me what i need to knkw') ||
+        lowerQuery.contains('know nothing') ||
+        lowerQuery.contains('brief me') ||
+        lowerQuery.contains('catch me up') ||
+        lowerQuery.contains('what happened') ||
+        lowerQuery.contains('summary') ||
+        lowerQuery.contains('overview') ||
+        lowerQuery.contains('who is this patient') ||
+        lowerQuery.contains('updates');
 
-    if (isGeneralWindowCatchUp || expandedTerms.isEmpty) {
+    final isGeneralWindowCatchUp = effectiveSince != null &&
+        (expandedTerms.isEmpty || isGeneralBriefing);
+
+    if (isGeneralBriefing || isGeneralWindowCatchUp || expandedTerms.isEmpty) {
       // If general catch-up question or no specific terms found, return all in window (PRD Example 2)
       matchingQuotes.addAll(allMessagesAndEvents);
     } else {
@@ -479,11 +488,18 @@ class AskOraviEngine {
           ? 'The patient\'s key alerts record notes: ${patient.keyAlerts.join(", ")}.'
           : 'The patient\'s key alerts field is empty.';
 
-      absenceMessage =
-          'No record in Oravi mentions \'$queryString\' for this patient. '
-          'Absence of a mention does not mean there was no change or that all is well. '
-          '$keyAlertsText '
-          'Admitted with primary note: "${patient.shortAdmittingNote}".';
+      if (isGeneralBriefing) {
+        absenceMessage =
+            '${patient.nameOrInitials} (${patient.bedNumber}) was admitted: "${patient.shortAdmittingNote}". '
+            '$keyAlertsText '
+            'There are currently no active medical issues or open loops for this patient.';
+      } else {
+        absenceMessage =
+            'No record in Oravi mentions \'$queryString\' for this patient. '
+            'Absence of a mention does not mean there was no change or that all is well. '
+            '$keyAlertsText '
+            'Admitted with primary note: "${patient.shortAdmittingNote}".';
+      }
     }
 
     // Determine primary doctor for quick action button
