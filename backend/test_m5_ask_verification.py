@@ -8,7 +8,7 @@ from backend.services.llm_service import LLMService
 
 class TestM5AskVerification(unittest.TestCase):
     def setUp(self):
-        self.store = EventStore()
+        self.store = EventStore(db_path=":memory:")
         # Seed test events
         self.events = [
             CanonicalEvent(
@@ -57,6 +57,9 @@ class TestM5AskVerification(unittest.TestCase):
             ),
         ]
         self.store.append_events(self.events)
+
+    def tearDown(self):
+        self.store.close()
 
     def test_kiswahili_and_synonym_retrieval(self):
         # Querying 'mkojo' should retrieve urine output event
