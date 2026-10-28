@@ -832,7 +832,14 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             ],
 
             // Absence Notice (FR-37)
-            if (result != null && result.isAbsence && !result.isRefusal && !msg.isLoading) ...[
+            // Rule: Only show the yellow absence notice on targeted keyword search if the model has NOT provided an observation note.
+            // When Qwen provides a verified observation note, the response is NOT an absence, preventing contradictory UI.
+            if (result != null &&
+                result.isAbsence &&
+                !result.isRefusal &&
+                !msg.isLoading &&
+                !msg.isModelAssisted &&
+                result.observationNote == null) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(10),
