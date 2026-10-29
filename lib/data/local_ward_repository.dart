@@ -52,6 +52,15 @@ class LocalWardRepository {
     database?.appendEventWithOutbox(event);
   }
 
+  /// Reloads events from SQLite storage (e.g. after remote pull sync).
+  Future<void> reloadFromDatabase() async {
+    if (database != null) {
+      final stored = await database!.getAllStoredEvents();
+      _events.clear();
+      _events.addAll(stored);
+    }
+  }
+
   /// Returns an unmodifiable list of all local events in insertion order.
   List<OraviEvent> getAllEvents() => List.unmodifiable(_events);
 

@@ -18,7 +18,16 @@ final oraviLocalDatabaseProvider = Provider<OraviLocalDatabase>((ref) {
 
 /// Outbox Sync Engine provider.
 final syncEngineProvider = Provider<SyncEngine>((ref) {
-  final engine = SyncEngine(ref.watch(oraviLocalDatabaseProvider));
+  final db = ref.watch(oraviLocalDatabaseProvider);
+  final repo = ref.watch(localWardRepositoryProvider);
+  final engine = SyncEngine(
+    db,
+    onRemoteEventsReceived: () async {
+      await repo.reloadFromDatabase();
+      ref.read(wardControllerProvider.notifier).refresh();
+    },
+  );
+  engine.startPeriodicSync(interval: const Duration(seconds: 10));
   ref.onDispose(() => engine.dispose());
   return engine;
 });

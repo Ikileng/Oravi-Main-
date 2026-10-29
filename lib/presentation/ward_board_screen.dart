@@ -26,13 +26,42 @@ class WardBoardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('ORAVI — WARD BOARD'),
-            Text(
-              '${SeededWardData.wardName} • Offline Mode',
-              style: TextStyle(fontSize: 11, color: ClinicalTheme.routineTeal, fontWeight: FontWeight.normal),
+            const Text('ORAVI — WARD BOARD'),
+            Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: syncStatus.state == SyncState.syncing
+                        ? ClinicalTheme.urgentAmber
+                        : (syncStatus.state == SyncState.offline
+                            ? Colors.grey
+                            : ClinicalTheme.successGreen),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  syncStatus.state == SyncState.syncing
+                      ? '${SeededWardData.wardName} • Syncing (${syncStatus.pendingCount})...'
+                      : (syncStatus.state == SyncState.offline
+                          ? '${SeededWardData.wardName} • Offline Cache'
+                          : '${SeededWardData.wardName} • Synced'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: syncStatus.state == SyncState.syncing
+                        ? ClinicalTheme.urgentAmber
+                        : (syncStatus.state == SyncState.offline
+                            ? ClinicalTheme.textMuted
+                            : ClinicalTheme.routineTeal),
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -69,13 +98,17 @@ class WardBoardScreen extends ConsumerWidget {
                   : (syncStatus.pendingCount > 0 ? ClinicalTheme.urgentAmber : ClinicalTheme.textMuted),
             ),
             onPressed: () async {
-              final synced = await ref.read(syncEngineProvider).syncOutbox();
+              final result = await ref.read(syncEngineProvider).syncAll();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(synced > 0
-                        ? 'Synced $synced pending event(s) to server.'
-                        : 'Outbox up to date. Local SQLite event log persistent.'),
+                    content: Text(result.success
+                        ? (result.pushedCount > 0 || result.pulledCount > 0
+                            ? 'Synced: ${result.pushedCount} pushed, ${result.pulledCount} pulled from server.'
+                            : 'Outbox & Ward Board are up to date.')
+                        : (result.error?.contains('SocketException') == true
+                            ? 'Ward server unreachable. Operating in offline cache mode.'
+                            : 'Sync issue: ${result.error}')),
                     duration: const Duration(seconds: 2),
                   ),
                 );
