@@ -174,8 +174,11 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
   }
 
   /// Returns the highest server sequence stored in the local SQLite database.
+  /// Ignores any legacy epoch-millisecond mock sequences (>= 1,000,000,000).
   Future<int> getHighestServerSeq() async {
-    final query = selectOnly(localEvents)..addColumns([localEvents.serverSeq.max()]);
+    final query = selectOnly(localEvents)
+      ..where(localEvents.serverSeq.isSmallerThanValue(1000000000))
+      ..addColumns([localEvents.serverSeq.max()]);
     final result = await query.map((row) => row.read(localEvents.serverSeq.max())).getSingleOrNull();
     return result ?? 0;
   }
@@ -218,8 +221,8 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
             ),
           );
           inserted++;
-        } else if (existing.serverSeq == null && serverSeq != null) {
-          // Update serverSeq and serverReceivedAt if previously local-only
+        } else if ((existing.serverSeq == null || existing.serverSeq! >= 1000000000) && serverSeq != null) {
+          // Update serverSeq and serverReceivedAt if previously local-only or mock timestamp
           await (update(localEvents)..where((t) => t.eventId.equals(eventId))).write(
             LocalEventsCompanion(
               serverSeq: Value(serverSeq),
