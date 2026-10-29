@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/mock/seeded_ward_data.dart';
 import '../domain/models/loop_enums.dart';
+import '../domain/models/staff_profile.dart';
 import '../domain/projections/projections.dart';
 import 'patient_detail_screen.dart';
 import 'providers/ward_providers.dart';
+import 'providers/auth_providers.dart';
+import 'lockscreen/digital_id_lockscreen.dart';
 import 'theme/clinical_theme.dart';
 
 /// The core clinical home screen strictly implementing PRD Section 7.1:
@@ -115,6 +118,46 @@ class WardBoardScreen extends ConsumerWidget {
               }
             },
           ),
+          Consumer(
+            builder: (context, ref, _) {
+              final authStaff = ref.watch(authenticatedStaffProvider);
+              if (authStaff == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: InkWell(
+                  onTap: () => _showLockDialog(context, ref, authStaff),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircleAvatar(
+                          radius: 12,
+                          backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.3),
+                          child: Text(
+                            authStaff.initials,
+                            style: const TextStyle(
+                              color: Color(0xFF38BDF8),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.lock_outline, size: 14, color: Color(0xFF94A3B8)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
       body: patients.isEmpty
@@ -155,6 +198,57 @@ class WardBoardScreen extends ConsumerWidget {
             },
           ),
         ),
+      ),
+    );
+  }
+
+  void _showLockDialog(BuildContext context, WidgetRef ref, StaffProfile staff) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.3),
+              child: Text(
+                staff.initials,
+                style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                staff.name,
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Role: ${staff.formattedRole} • Staff ID: ${staff.staffId}\n\nWould you like to lock this station or switch to another nurse?',
+          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
+            icon: const Icon(Icons.lock, size: 16, color: Colors.white),
+            label: const Text('Lock Station', style: TextStyle(color: Colors.white)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(authControllerProvider.notifier).logout();
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const DigitalIdLockscreen()),
+                (route) => false,
+              );
+            },
+          ),
+        ],
       ),
     );
   }

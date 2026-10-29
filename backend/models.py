@@ -64,3 +64,40 @@ class AskResponse:
     verification_passed: bool = True
     model_provider: str = "ollama"
     model_name: str = "qwen2.5:7b"
+
+
+@dataclass
+class StaffProfile:
+    staff_id: str
+    name: str
+    role: str
+    ward_id: str
+    avatar_color: str
+    initials: str
+    is_active: bool = True
+
+@dataclass
+class StaffLoginRequest:
+    staff_id: str
+    pin: str
+
+@dataclass
+class StaffLoginResponse:
+    success: bool
+    staff: Optional[StaffProfile] = None
+    token: Optional[str] = None
+    error: Optional[str] = None
+
+@dataclass
+class CreateStaffRequest:
+    staff_id: str
+    name: str
+    role: str
+    ward_id: str
+    pin: str
+    avatar_color: Optional[str] = None
+
+@dataclass
+class StaffListResponse:
+    ward_id: str
+    staff: List[StaffProfile]
