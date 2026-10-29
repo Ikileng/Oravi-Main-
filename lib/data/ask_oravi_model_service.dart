@@ -60,15 +60,44 @@ class ModelAskResponse {
 /// 2. Zero-failure guarantee: silently falls back if backend is offline or times out (>4s).
 /// 3. Injectable HTTP client for fast, deterministic unit testing.
 class AskOraviModelService {
-  final String baseUrl;
+  static const List<String> defaultCandidateUrls = [
+    'http://127.0.0.1:8000',
+    'http://172.16.20.186:8000',
+    'http://10.0.96.95:8000',
+  ];
+
+  final List<String> candidateUrls;
+  String _activeBaseUrl;
+  String get baseUrl => _activeBaseUrl;
   final Duration timeout;
   final Future<ModelAskResponse?> Function(String patientId, String query, int? timeWindowHours)? mockHandler;
 
   AskOraviModelService({
     String? baseUrl,
+    List<String>? candidateUrls,
     this.timeout = const Duration(seconds: 30),
     this.mockHandler,
-  }) : baseUrl = baseUrl ?? 'http://10.0.96.95:8000';
+  })  : candidateUrls = candidateUrls ??
+            (baseUrl != null ? [baseUrl, ...defaultCandidateUrls] : defaultCandidateUrls),
+        _activeBaseUrl = baseUrl ?? defaultCandidateUrls.first;
+
+  Future<T> _executeWithFallback<T>(Future<T> Function(String base) request) async {
+    final ordered = [
+      _activeBaseUrl,
+      ...candidateUrls.where((u) => u != _activeBaseUrl),
+    ];
+    dynamic lastError;
+    for (final base in ordered) {
+      try {
+        final result = await request(base);
+        _activeBaseUrl = base;
+        return result;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? Exception('All candidate servers unreachable');
+  }
 
   /// Queries the backend model service with automatic verification.
   ///
@@ -84,33 +113,37 @@ class AskOraviModelService {
     }
 
     try {
-      final client = HttpClient()..connectionTimeout = timeout;
-      final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-      final uri = Uri.parse('$cleanBase/api/v1/patients/$patientId/ask');
+      return await _executeWithFallback((base) async {
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        try {
+          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+          final uri = Uri.parse('$cleanBase/api/v1/patients/$patientId/ask');
 
-      final request = await client.postUrl(uri).timeout(timeout);
-      request.headers.contentType = ContentType.json;
+          final request = await client.postUrl(uri).timeout(timeout);
+          request.headers.contentType = ContentType.json;
 
-      final bodyMap = <String, dynamic>{
-        'query': query,
-      };
-      if (timeWindowHours != null) {
-        bodyMap['time_window_hours'] = timeWindowHours;
-      }
+          final bodyMap = <String, dynamic>{
+            'query': query,
+          };
+          if (timeWindowHours != null) {
+            bodyMap['time_window_hours'] = timeWindowHours;
+          }
 
-      final payload = jsonEncode(bodyMap);
+          final payload = jsonEncode(bodyMap);
 
-      request.write(payload);
-      final response = await request.close().timeout(timeout);
+          request.write(payload);
+          final response = await request.close().timeout(timeout);
 
-      if (response.statusCode == 200) {
-        final body = await response.transform(utf8.decoder).join();
-        final json = jsonDecode(body) as Map<String, dynamic>;
-        client.close();
-        return ModelAskResponse.fromJson(json);
-      }
-      client.close();
-      return null;
+          if (response.statusCode == 200) {
+            final body = await response.transform(utf8.decoder).join();
+            final json = jsonDecode(body) as Map<String, dynamic>;
+            return ModelAskResponse.fromJson(json);
+          }
+          throw Exception('Backend returned HTTP ${response.statusCode}');
+        } finally {
+          client.close();
+        }
+      });
     } catch (_) {
       // 100% Silent Fallback: Zero UI interruption on network or backend unavailability
       return null;

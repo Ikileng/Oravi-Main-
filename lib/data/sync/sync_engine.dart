@@ -57,7 +57,15 @@ class SyncResult {
 /// - Tech Arch Section 10: Multi-Device Synchronization & Idempotency
 class SyncEngine {
   final OraviLocalDatabase _db;
-  final String baseUrl;
+  static const List<String> defaultCandidateUrls = [
+    'http://127.0.0.1:8000',
+    'http://172.16.20.186:8000',
+    'http://10.0.96.95:8000',
+  ];
+
+  final List<String> candidateUrls;
+  String _activeBaseUrl;
+  String get baseUrl => _activeBaseUrl;
   final String wardId;
   final String deviceId;
   final Duration timeout;
@@ -76,19 +84,40 @@ class SyncEngine {
 
   SyncEngine(
     this._db, {
-    this.baseUrl = 'http://10.0.96.95:8000',
+    String? baseUrl,
+    List<String>? candidateUrls,
     this.wardId = 'WARD-4B',
     this.deviceId = 'PHONE-WARD4B-SHARED',
     this.timeout = const Duration(seconds: 10),
     this.mockPushHandler,
     this.mockPullHandler,
     this.onRemoteEventsReceived,
-  }) {
+  })  : candidateUrls = candidateUrls ??
+            (baseUrl != null ? [baseUrl, ...defaultCandidateUrls] : defaultCandidateUrls),
+        _activeBaseUrl = baseUrl ?? defaultCandidateUrls.first {
     _statusController.add(_currentStatus);
   }
 
   Stream<SyncStatus> get statusStream => _statusController.stream;
   SyncStatus get currentStatus => _currentStatus;
+
+  Future<T> _executeWithFallback<T>(Future<T> Function(String base) request) async {
+    final ordered = [
+      _activeBaseUrl,
+      ...candidateUrls.where((u) => u != _activeBaseUrl),
+    ];
+    dynamic lastError;
+    for (final base in ordered) {
+      try {
+        final result = await request(base);
+        _activeBaseUrl = base;
+        return result;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? Exception('All candidate servers unreachable');
+  }
 
   /// Starts the periodic background sync loop (every 10 seconds by default).
   void startPeriodicSync({Duration interval = const Duration(seconds: 10)}) {
@@ -132,23 +161,27 @@ class SyncEngine {
       if (mockPushHandler != null) {
         data = await mockPushHandler!(payload);
       } else {
-        final client = HttpClient()..connectionTimeout = timeout;
-        final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-        final uri = Uri.parse('$cleanBase/api/v1/sync/push');
+        data = await _executeWithFallback((base) async {
+          final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+          try {
+            final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+            final uri = Uri.parse('$cleanBase/api/v1/sync/push');
 
-        final request = await client.postUrl(uri).timeout(timeout);
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(payload));
+            final request = await client.postUrl(uri).timeout(timeout);
+            request.headers.contentType = ContentType.json;
+            request.write(jsonEncode(payload));
 
-        final response = await request.close().timeout(timeout);
-        if (response.statusCode == 200) {
-          final body = await response.transform(utf8.decoder).join();
-          data = jsonDecode(body) as Map<String, dynamic>;
-          client.close();
-        } else {
-          client.close();
-          throw Exception('Server rejected sync push: HTTP ${response.statusCode}');
-        }
+            final response = await request.close().timeout(timeout);
+            if (response.statusCode == 200) {
+              final body = await response.transform(utf8.decoder).join();
+              return jsonDecode(body) as Map<String, dynamic>;
+            } else {
+              throw Exception('Server rejected sync push: HTTP ${response.statusCode}');
+            }
+          } finally {
+            client.close();
+          }
+        });
       }
 
       final acks = (data['acks'] as List<dynamic>?) ?? [];
@@ -176,22 +209,26 @@ class SyncEngine {
     if (mockPullHandler != null) {
       data = await mockPullHandler!(sinceSeq);
     } else {
-      final client = HttpClient()..connectionTimeout = timeout;
-      final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-      final uri = Uri.parse('$cleanBase/api/v1/sync/pull?ward_id=$wardId&since_seq=$sinceSeq&limit=100');
+      data = await _executeWithFallback((base) async {
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        try {
+          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+          final uri = Uri.parse('$cleanBase/api/v1/sync/pull?ward_id=$wardId&since_seq=$sinceSeq&limit=100');
 
-      final request = await client.getUrl(uri).timeout(timeout);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+          final request = await client.getUrl(uri).timeout(timeout);
+          request.headers.set(HttpHeaders.acceptHeader, 'application/json');
 
-      final response = await request.close().timeout(timeout);
-      if (response.statusCode == 200) {
-        final body = await response.transform(utf8.decoder).join();
-        data = jsonDecode(body) as Map<String, dynamic>;
-        client.close();
-      } else {
-        client.close();
-        throw Exception('Server rejected sync pull: HTTP ${response.statusCode}');
-      }
+          final response = await request.close().timeout(timeout);
+          if (response.statusCode == 200) {
+            final body = await response.transform(utf8.decoder).join();
+            return jsonDecode(body) as Map<String, dynamic>;
+          } else {
+            throw Exception('Server rejected sync pull: HTTP ${response.statusCode}');
+          }
+        } finally {
+          client.close();
+        }
+      });
     }
 
     final rawEvents = (data['events'] as List<dynamic>?) ?? [];
