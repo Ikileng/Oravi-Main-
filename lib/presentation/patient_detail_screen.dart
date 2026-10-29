@@ -60,7 +60,8 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with 
   void _anchorMessageToAuthor(String loopId, String authorName) {
     _tabController.animateTo(0);
     final controller = _getReplyController(loopId);
-    final mention = '@$authorName: ';
+    final displayName = ClinicalTheme.formatAuthorDisplayName(authorName);
+    final mention = '@$displayName: ';
     if (!controller.text.startsWith(mention)) {
       controller.text = '$mention${controller.text}';
     }
@@ -74,7 +75,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with 
       context: context,
       builder: (ctx) => LogCallOutcomeDialog(
         loop: loop,
-        recipientName: authorName,
+        recipientName: ClinicalTheme.formatAuthorDisplayName(authorName),
         recipientRole: authorRole,
       ),
     );
@@ -369,7 +370,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with 
                   style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted),
                 ),
                 Text(
-                  loop.currentOwnerId,
+                  ClinicalTheme.formatAuthorDisplayName(loop.currentOwnerId),
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ownerCadreColor),
                 ),
                 Text(
@@ -418,7 +419,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> with 
                         Row(
                           children: [
                             Text(
-                              msg.authorId,
+                              ClinicalTheme.formatAuthorDisplayName(msg.authorId),
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,

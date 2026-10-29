@@ -40,13 +40,16 @@ class ClinicalTheme {
     }
   }
 
-  /// Returns the standardized cadre color based on role string or clinician name (FR-55)
+  /// Returns the standardized cadre color based on role string, staff ID, or clinician name (FR-55)
   static Color cadreColor(String roleOrName) {
     final lower = roleOrName.toLowerCase();
-    if (lower.contains('dr') || lower.contains('doctor') || lower.contains('consultant') || lower.contains('medical_officer') || lower.contains('gynaecologist') || lower.contains('physician')) {
+    if (lower.startsWith('doc-') || lower.contains('dr') || lower.contains('doctor') || lower.contains('consultant') || lower.contains('medical_officer') || lower.contains('physician')) {
       return doctorPink;
     }
-    if (lower.contains('nurse') || lower.contains('rn')) {
+    if (lower == 'nur-402' || lower.contains('in_charge') || lower.contains('charge') || lower.contains('matron') || lower.contains('sister')) {
+      return inChargePurple;
+    }
+    if (lower.startsWith('nur-') || lower.contains('nurse') || lower.contains('rn')) {
       return nurseBlue;
     }
     if (lower.contains('pharm') || lower.contains('pharmacist')) {
@@ -55,10 +58,62 @@ class ClinicalTheme {
     if (lower.contains('lab')) {
       return labAmber;
     }
-    if (lower.contains('in_charge') || lower.contains('matron')) {
-      return inChargePurple;
-    }
     return textSecondary;
+  }
+
+  /// Formats author identity to uppercase clinical display name (e.g. "NURSE NJERI", "DR. KAMAU")
+  static String formatAuthorDisplayName(String authorId) {
+    final trimmed = authorId.trim();
+
+    // Canonical Ward 4B staff mapping
+    switch (trimmed.toUpperCase()) {
+      case 'NUR-401':
+        return 'NURSE WANJIKU';
+      case 'NUR-402':
+        return 'SISTER ACHIENG';
+      case 'NUR-403':
+        return 'NURSE NJERI';
+      case 'DOC-401':
+        return 'DR. KAMAU';
+      case 'NUR-404':
+        return 'NURSE OTIENO';
+      case 'NUR-405':
+        return 'NURSE MUTHONI';
+      case 'DOC-OTIENO':
+        return 'DR. OTIENO';
+      case 'NURSE-01':
+      case 'NURSE-02':
+        return 'WARD NURSE';
+    }
+
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('doc-') || lower.startsWith('dr') || lower.startsWith('doctor-')) {
+      final clean = trimmed
+          .replaceAll(RegExp(r'^(doctor|doc|dr)[\.\s\-_]*', caseSensitive: false), '')
+          .replaceAll(',', '')
+          .trim();
+      final parts = clean.split(RegExp(r'[\s\-_]+'));
+      final lastName = parts.isNotEmpty ? parts.last.toUpperCase() : 'DOCTOR';
+      return 'DR. $lastName';
+    } else if (lower.contains('in_charge') || lower.contains('charge') || lower.contains('matron') || lower.contains('sister')) {
+      final clean = trimmed
+          .replaceAll(RegExp(r'(in_charge|charge|matron|sister)[\s\-_]*', caseSensitive: false), '')
+          .replaceAll(',', '')
+          .trim();
+      final parts = clean.split(RegExp(r'[\s\-_]+'));
+      final candidate = parts.isNotEmpty ? parts.last.toUpperCase() : 'IN-CHARGE';
+      return 'SISTER $candidate';
+    } else if (lower.contains('nurse') || lower.contains('rn') || lower.startsWith('nur')) {
+      final clean = trimmed
+          .replaceAll(RegExp(r'(nurse|rn|nur)[\s\-_]*', caseSensitive: false), '')
+          .replaceAll(',', '')
+          .trim();
+      final parts = clean.split(RegExp(r'[\s\-_]+'));
+      final candidate = parts.isNotEmpty ? parts.last.toUpperCase() : 'NURSE';
+      return 'NURSE $candidate';
+    }
+
+    return trimmed.toUpperCase();
   }
 
   static ThemeData get darkTheme {

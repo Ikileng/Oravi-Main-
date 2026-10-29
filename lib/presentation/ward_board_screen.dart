@@ -3,7 +3,6 @@ import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/mock/seeded_ward_data.dart';
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
 import '../domain/projections/projections.dart';
@@ -29,15 +28,21 @@ class WardBoardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(
+        titleSpacing: 12,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('ORAVI — WARD BOARD'),
+            const Text(
+              'ORAVI 4B',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 7,
-                  height: 7,
+                  width: 6,
+                  height: 6,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: syncStatus.state == SyncState.syncing
@@ -47,13 +52,13 @@ class WardBoardScreen extends ConsumerWidget {
                             : ClinicalTheme.successGreen),
                   ),
                 ),
-                const SizedBox(width: 5),
+                const SizedBox(width: 4),
                 Text(
                   syncStatus.state == SyncState.syncing
-                      ? '${SeededWardData.wardName} • Syncing (${syncStatus.pendingCount})...'
+                      ? 'Syncing (${syncStatus.pendingCount})...'
                       : (syncStatus.state == SyncState.offline
-                          ? '${SeededWardData.wardName} • Offline Cache'
-                          : '${SeededWardData.wardName} • Synced'),
+                          ? 'Offline Cache'
+                          : 'Synced'),
                   style: TextStyle(
                     fontSize: 11,
                     color: syncStatus.state == SyncState.syncing
@@ -327,32 +332,30 @@ class _WardBedRow extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(
+                        if (patient.nameOrInitials.isNotEmpty)
+                          Text(
                             patient.nameOrInitials,
-                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: ClinicalTheme.textPrimary,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
                         Text(
                           '(${patient.admissionNumber})',
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             color: ClinicalTheme.textMuted,
                             fontFamily: 'monospace',
                           ),
                         ),
-                        const SizedBox(width: 6),
                         Text(
                           '${patient.age}y/${patient.sex}',
-                          style: const TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+                          style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
                         ),
                       ],
                     ),
