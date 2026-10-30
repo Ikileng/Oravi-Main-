@@ -142,31 +142,30 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         children: [
           // Subheader: Shift info & Gertrude Date Stamping
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             color: const Color(0xFF1E293B),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: ClinicalTheme.successGreen,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'DAY SHIFT (07:00 – 19:00)',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
-                    ),
-                  ],
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: ClinicalTheme.successGreen,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-                Text(
-                  'DATE: 30/10/26 • WARD MGR: ${roster.wardManager}',
-                  style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted, fontFamily: 'monospace'),
+                const SizedBox(width: 5),
+                const Text(
+                  'DAY SHIFT',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
+                ),
+                const Spacer(),
+                Flexible(
+                  child: Text(
+                    'DATE: 30/10/26 • MGR: ${roster.wardManager}',
+                    style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted, fontFamily: 'monospace'),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -174,7 +173,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
           // Gertrude Table Header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: const BoxDecoration(
               color: Color(0xFF0F172A),
               border: Border(bottom: BorderSide(color: Color(0xFF334155), width: 1)),
@@ -182,11 +181,11 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             child: const Row(
               children: [
                 SizedBox(
-                  width: 44,
+                  width: 38,
                   child: Text('ROOM', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted)),
                 ),
                 SizedBox(
-                  width: 56,
+                  width: 48,
                   child: Text('PATIENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted)),
                 ),
                 Expanded(
@@ -195,11 +194,13 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 Expanded(
                   flex: 4,
-                  child: Text('NURSE (DAY / NIGHT)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted)),
+                  child: Text('NURSE (DAY/NGT)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted), overflow: TextOverflow.ellipsis),
                 ),
                 SizedBox(
-                  width: 48,
-                  child: Text('STATUS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted)),
+                  width: 44,
+                  child: Center(
+                    child: Text('STATUS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted)),
+                  ),
                 ),
               ],
             ),
@@ -222,12 +223,12 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                     color: isSelected
                         ? ClinicalTheme.nurseBlue.withValues(alpha: 0.15)
                         : (i % 2 == 0 ? Colors.transparent : const Color(0xFF0B132B).withValues(alpha: 0.4)),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     child: Row(
                       children: [
                         // Room Number
                         SizedBox(
-                          width: 44,
+                          width: 38,
                           child: Text(
                             b.bedNumber,
                             style: TextStyle(
@@ -240,7 +241,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
                         // Patient Initials
                         SizedBox(
-                          width: 56,
+                          width: 48,
                           child: Text(
                             b.patientInitials.isNotEmpty ? b.patientInitials : '—',
                             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ClinicalTheme.textPrimary),
@@ -288,9 +289,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
                         // Status Badge
                         SizedBox(
-                          width: 48,
+                          width: 44,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
                             decoration: BoxDecoration(
                               color: isAccepted
                                   ? ClinicalTheme.successGreen.withValues(alpha: 0.2)
