@@ -1,6 +1,9 @@
 import 'widgets/ward_search_sheet.dart';
 import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
+import 'whiteboard/digital_whiteboard_screen.dart';
+import 'widgets/ward_selection_dialog.dart';
+import 'providers/whiteboard_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/loop_enums.dart';
@@ -33,9 +36,24 @@ class WardBoardScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'ORAVI 4B',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            InkWell(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => const WardSelectionDialog(),
+                );
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'ORAVI — ${ref.watch(selectedWardProvider).name.split(' ').first.toUpperCase()}',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_drop_down, color: ClinicalTheme.nurseBlue, size: 18),
+                ],
+              ),
             ),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -74,6 +92,15 @@ class WardBoardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Digital Shift Whiteboard (Gertrude\'s Board)',
+            icon: const Icon(Icons.dashboard_customize_outlined, color: ClinicalTheme.nurseBlue),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DigitalWhiteboardScreen()),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Ward Search (Tech Arch Section 9)',
             icon: const Icon(Icons.search, color: ClinicalTheme.routineTeal),
