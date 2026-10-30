@@ -101,3 +101,33 @@ class CreateStaffRequest:
 class StaffListResponse:
     ward_id: str
     staff: List[StaffProfile]
+
+
+@dataclass
+class HospitalWardModel:
+    ward_id: str
+    name: str
+    bed_count: int
+    bed_numbers: List[str]
+    department: str
+    description: str
+
+@dataclass
+class ShiftAllocationModel:
+    allocation_id: str
+    ward_id: str
+    shift_type: str
+    date: str
+    published_by: str
+    published_at: str
+    bed_assignments: List[Dict[str, Any]]
+    support_roster: Dict[str, Any]
+
+@dataclass
+class AllocationConflictCheckResponse:
+    has_conflict: bool
+    conflict_ward_id: Optional[str] = None
+    conflict_ward_name: Optional[str] = None
+    conflict_nurse_id: Optional[str] = None
+    conflict_shift_type: Optional[str] = None
+    message: Optional[str] = None
