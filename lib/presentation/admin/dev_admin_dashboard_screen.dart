@@ -108,7 +108,7 @@ class DevUsersNotifier extends Notifier<List<DevUserItem>> {
   }
 
   void addUser(DevUserItem user) {
-    state = [...state, user];
+    state = [user, ...state];
 
     // Map role to clinical domain role
     String domainRole = 'ward_nurse';
@@ -381,20 +381,24 @@ class _DevAdminDashboardScreenState
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text(
-              'Dev Admin Dashboard',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            SizedBox(height: 2),
-            Text(
-              'Manage users, hospital data and system settings',
-              style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-            ),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text(
+                'Dev Admin Dashboard',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              SizedBox(height: 2),
+              Text(
+                'Manage users, hospital data and system settings',
+                style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
+        const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
@@ -403,6 +407,7 @@ class _DevAdminDashboardScreenState
             border: Border.all(color: const Color(0xFF1E2E4E)),
           ),
           child: const Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.calendar_month_outlined, size: 12, color: Color(0xFF38BDF8)),
               SizedBox(width: 4),
@@ -827,37 +832,166 @@ class _DevAdminDashboardScreenState
           ),
           const Divider(color: Color(0xFF162540), height: 1),
 
-          // Scrollable Table for horizontal fidelity
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: 580,
-              child: Column(
-                children: [
-                  // Table Header
-                  Container(
-                    color: const Color(0xFF0F1A30),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    child: const Row(
-                      children: [
-                        SizedBox(width: 140, child: Text('Name', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                        SizedBox(width: 130, child: Text('Email', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                        SizedBox(width: 90, child: Text('Role', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                        SizedBox(width: 65, child: Text('Status', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                        SizedBox(width: 95, child: Text('Last Login', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                        SizedBox(width: 50, child: Text('Actions', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                      ],
-                    ),
-                  ),
-                  const Divider(color: Color(0xFF162540), height: 1),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 550;
 
-                  // Rows
-                  ...users.map((user) => _buildUserRow(user)),
+              if (isNarrow) {
+                // Mobile-optimized direct view: no horizontal scrolling needed!
+                return Column(
+                  children: [
+                    // Header
+                    Container(
+                      color: const Color(0xFF0F1A30),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      child: const Row(
+                        children: [
+                          Expanded(child: Text('Staff / Account', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                          SizedBox(width: 75, child: Text('Role', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                          SizedBox(width: 55, child: Text('Status', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                          SizedBox(width: 32, child: Text('Act', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                        ],
+                      ),
+                    ),
+                    const Divider(color: Color(0xFF162540), height: 1),
+                    ...users.map((user) => _buildMobileUserRow(user)),
+                  ],
+                );
+              }
+
+              // Wide desktop / tablet view
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: 620,
+                  child: Column(
+                    children: [
+                      Container(
+                        color: const Color(0xFF0F1A30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        child: const Row(
+                          children: [
+                            SizedBox(width: 140, child: Text('Name', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                            SizedBox(width: 130, child: Text('Email', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                            SizedBox(width: 90, child: Text('Role', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                            SizedBox(width: 65, child: Text('Status', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                            SizedBox(width: 95, child: Text('Last Login', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                            SizedBox(width: 50, child: Text('Actions', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
+                          ],
+                        ),
+                      ),
+                      const Divider(color: Color(0xFF162540), height: 1),
+                      ...users.map((user) => _buildUserRow(user)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileUserRow(DevUserItem user) {
+    Color roleBg = const Color(0xFF0284C7).withValues(alpha: 0.2);
+    Color roleText = const Color(0xFF38BDF8);
+    if (user.role == 'Doctor') {
+      roleBg = const Color(0xFFA855F7).withValues(alpha: 0.2);
+      roleText = const Color(0xFFC084FC);
+    } else if (user.role == 'Ward Manager') {
+      roleBg = const Color(0xFFEA580C).withValues(alpha: 0.2);
+      roleText = const Color(0xFFFB923C);
+    } else if (user.role == 'Administrator') {
+      roleBg = const Color(0xFF475569).withValues(alpha: 0.3);
+      roleText = const Color(0xFF94A3B8);
+    }
+
+    return InkWell(
+      onTap: () => _showUserActionModal(user),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0xFF162540), width: 0.8)),
+        ),
+        child: Row(
+          children: [
+            // Name + Subtitle (ID & PIN)
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.name,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: user.isActive ? Colors.white : const Color(0xFF64748B),
+                      decoration: user.isActive ? null : TextDecoration.lineThrough,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'PIN: ${user.pin} · ID: ${user.staffId}',
+                    style: const TextStyle(fontSize: 9, color: Color(0xFF64748B)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
-          ),
-        ],
+
+            // Role Badge
+            SizedBox(
+              width: 75,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: roleBg, borderRadius: BorderRadius.circular(10)),
+                  child: Text(
+                    user.role,
+                    style: TextStyle(fontSize: 8.5, color: roleText, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+
+            // Status Badge
+            SizedBox(
+              width: 55,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: user.isActive ? const Color(0xFF064E3B) : const Color(0xFF450A0A),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    user.isActive ? 'Active' : 'Locked',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      color: user.isActive ? const Color(0xFF34D399) : const Color(0xFFFCA5A5),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // Actions Button
+            SizedBox(
+              width: 32,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.more_vert, size: 16, color: Color(0xFF94A3B8)),
+                onPressed: () => _showUserActionModal(user),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -947,9 +1081,13 @@ class _DevAdminDashboardScreenState
           // Actions (...) Button
           SizedBox(
             width: 50,
-            child: IconButton(
-              icon: const Icon(Icons.more_horiz, size: 16, color: Color(0xFF94A3B8)),
-              onPressed: () => _showUserActionModal(user),
+            child: InkWell(
+              onTap: () => _showUserActionModal(user),
+              borderRadius: BorderRadius.circular(6),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Icon(Icons.more_horiz, size: 18, color: Color(0xFF94A3B8)),
+              ),
             ),
           ),
         ],
