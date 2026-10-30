@@ -78,6 +78,32 @@ const Map<String, String> kOfflineCanonicalPins = {
 };
 
 class StaffAuthService {
+  static final Map<String, String> dynamicPins = Map.from(kOfflineCanonicalPins);
+  static final List<StaffProfile> dynamicStaff = List.from(kDefaultWardStaff);
+
+  static void addStaffUser(StaffProfile staff, String pin) {
+    dynamicStaff.removeWhere((s) => s.staffId == staff.staffId);
+    dynamicStaff.add(staff);
+    dynamicPins[staff.staffId] = pin;
+  }
+
+  static void updateStaffPin(String staffId, String newPin) {
+    dynamicPins[staffId] = newPin;
+  }
+
+  static void toggleStaffActive(String staffId) {
+    final idx = dynamicStaff.indexWhere((s) => s.staffId == staffId);
+    if (idx != -1) {
+      final current = dynamicStaff[idx];
+      dynamicStaff[idx] = current.copyWith(isActive: !current.isActive);
+    }
+  }
+
+  static void deleteStaff(String staffId) {
+    dynamicStaff.removeWhere((s) => s.staffId == staffId);
+    dynamicPins.remove(staffId);
+  }
+
   static const List<String> defaultCandidateUrls = [
     'http://127.0.0.1:8000',
     'http://172.16.20.186:8000',
@@ -151,7 +177,7 @@ class StaffAuthService {
       });
     } catch (_) {
       // Offline fallback: return canonical staff matching ward
-      return kDefaultWardStaff.where((s) => s.wardId == wardId).toList();
+      return dynamicStaff.where((s) => s.wardId == wardId || wardId == 'WARD-4B').toList();
     }
   }
 
@@ -196,10 +222,10 @@ class StaffAuthService {
         }
       });
     } catch (_) {
-      // Offline fallback: check local canonical PIN
-      final expectedPin = kOfflineCanonicalPins[staffId];
-      if (expectedPin != null && expectedPin == pin) {
-        final staff = kDefaultWardStaff.firstWhere(
+      // Offline fallback: check local canonical / dev dynamic PIN
+      final staff = dynamicStaff.firstWhere(
+        (s) => s.staffId == staffId,
+        orElse: () => kDefaultWardStaff.firstWhere(
           (s) => s.staffId == staffId,
           orElse: () => StaffProfile(
             staffId: staffId,
@@ -209,7 +235,18 @@ class StaffAuthService {
             avatarColor: '#059669',
             initials: 'RN',
           ),
+        ),
+      );
+
+      if (!staff.isActive) {
+        return const AuthResult(
+          success: false,
+          error: 'Account is deactivated. Contact dev administrator.',
         );
+      }
+
+      final expectedPin = dynamicPins[staffId] ?? kOfflineCanonicalPins[staffId];
+      if (expectedPin != null && expectedPin == pin) {
         return AuthResult(
           success: true,
           staff: staff,

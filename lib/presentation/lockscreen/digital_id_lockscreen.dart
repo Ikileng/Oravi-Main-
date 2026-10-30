@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/staff_profile.dart';
 import '../providers/auth_providers.dart';
 import '../ward_board_screen.dart';
+import '../admin/dev_admin_dashboard_screen.dart';
 
 /// Digital ID Lockscreen with 4-Digit Quick PIN Unlock (Milestone 7).
 /// Implements clinical bedside authentication with zero role selection.
@@ -109,6 +110,46 @@ class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
                             ],
                           ),
                         ],
+                      ),
+                      const Spacer(),
+                      // One-tap button on login screen to access Dev Admin Dashboard
+                      InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const DevAdminDashboardScreen()),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.8), width: 1.2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF0284C7).withValues(alpha: 0.2),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.admin_panel_settings_outlined, size: 14, color: Color(0xFF38BDF8)),
+                              SizedBox(width: 5),
+                              Text(
+                                'Dev Admin',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF38BDF8),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
