@@ -2,27 +2,80 @@ import secrets
 from fastapi import FastAPI, Query, HTTPException, status
 from .models import (
     SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
-    StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile
+    StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile,
+    HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse
 )
 from .event_store import EventStore
 from .staff_store import StaffStore
+from .ward_store import WardStore
 from .services.llm_service import LLMService
 from .seed_data import seed_store_if_empty
 
 app = FastAPI(
     title="Oravi Ward Sync and Clinical Auth API",
     description="Offline-first clinical event stream, hash chain and Digital ID authentication backend",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 store = EventStore()
 seed_store_if_empty(store)
 staff_store = StaffStore()
+ward_store = WardStore()
 llm_service = LLMService(store=store)
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "oravi-backend", "version": "0.2.0"}
+    return {"status": "ok", "service": "oravi-backend", "version": "0.3.0"}
+
+# --- Hospital Wards & Shift Allocation Endpoints ---
+
+@app.get("/api/v1/wards")
+def get_hospital_wards():
+    """Returns the pre-configured hospital ward catalog (Jacaranda, Edna, Kilimanjaro, 4B)"""
+    return [w.__dict__ for w in ward_store.get_all_wards()]
+
+@app.get("/api/v1/allocations/check-conflict", response_model=AllocationConflictCheckResponse)
+def check_shift_conflict(
+    nurse_id: str = Query(..., description="Staff ID of the nurse to check"),
+    date: str = Query(..., description="Shift date in YYYY-MM-DD format"),
+    shift_type: str = Query(..., description="'day' or 'night'"),
+    target_ward_id: str = Query(..., description="Ward attempting to allocate this nurse")
+):
+    """
+    Prevents cross-ward double booking. 
+    Returns explicit clinical warning if nurse is already active elsewhere.
+    """
+    return ward_store.check_nurse_shift_conflict(
+        nurse_id=nurse_id,
+        date=date,
+        shift_type=shift_type,
+        target_ward_id=target_ward_id
+    )
+
+@app.post("/api/v1/allocations/publish")
+def publish_allocation(allocation: ShiftAllocationModel):
+    """Publishes shift allocation matrix and saves canonical ward assignments."""
+    success = ward_store.publish_shift_allocation(allocation)
+    return {"success": success, "allocation_id": allocation.allocation_id}
+
+@app.get("/api/v1/nurses/{nurse_id}/active-shift")
+def get_nurse_active_shift(
+    nurse_id: str,
+    date: str = Query(..., description="Shift date YYYY-MM-DD"),
+    shift_type: str = Query(..., description="'day' or 'night'")
+):
+    """Returns the active shift and assigned beds for a given nurse."""
+    active = ward_store.get_nurse_active_shift(nurse_id=nurse_id, date=date, shift_type=shift_type)
+    return {"active_shift": active}
+
+@app.post("/api/v1/allocations/{allocation_id}/accept")
+def accept_allocation_beds(allocation_id: str, payload: dict):
+    nurse_id = payload.get("nurse_id")
+    beds = payload.get("beds", [])
+    if not nurse_id or not beds:
+        raise HTTPException(status_code=400, detail="nurse_id and beds are required")
+    updated = ward_store.accept_shift_beds(allocation_id=allocation_id, nurse_id=nurse_id, beds=beds)
+    return {"success": True, "accepted_count": updated}
 
 # --- Clinical Staff & Authentication Endpoints ---
 

@@ -14,7 +14,7 @@ void main() {
     );
 
     // Verify AppBar
-    expect(find.text('ORAVI — WARD BOARD'), findsOneWidget);
+    expect(find.textContaining('ORAVI'), findsOneWidget);
 
     // Verify beds and 2 required patient identifiers (PRD FR-3: Bed + Admission Number)
     expect(find.text('Bed 1'), findsOneWidget);

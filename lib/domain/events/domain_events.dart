@@ -1344,6 +1344,218 @@ class FlagDismissedEvent extends OraviEvent {
   }
 }
 
+
+// ==========================================
+// 7. Milestone 8: Multi-Ward Digital Whiteboard & Shift Allocation Events
+// ==========================================
+
+class ShiftAllocationPublishedEvent extends OraviEvent {
+  static const String eventType = 'ShiftAllocationPublished';
+
+  final String allocationId;
+  final String wardId;
+  final String shiftType; // 'day' | 'night'
+  final String date; // 'YYYY-MM-DD'
+  final List<Map<String, dynamic>> bedAssignments;
+  final Map<String, dynamic> supportRoster;
+
+  ShiftAllocationPublishedEvent({
+    super.eventId,
+    required super.patientId, // Canonical 'ward-{wardId}' or system patient ID
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+    required this.allocationId,
+    required this.wardId,
+    required this.shiftType,
+    required this.date,
+    required this.bedAssignments,
+    required this.supportRoster,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'event_id': eventId,
+        'type': type,
+        'patient_id': patientId,
+        'author_id': authorId,
+        'device_id': deviceId,
+        'client_created_at': clientCreatedAt.toIso8601String(),
+        'server_seq': serverSeq,
+        'server_received_at': serverReceivedAt?.toIso8601String(),
+        'schema_version': schemaVersion,
+        'prev_hash': prevHash,
+        'hash': hash,
+        'payload': {
+          'allocation_id': allocationId,
+          'ward_id': wardId,
+          'shift_type': shiftType,
+          'date': date,
+          'bed_assignments': bedAssignments,
+          'support_roster': supportRoster,
+        },
+      };
+
+  factory ShiftAllocationPublishedEvent.fromMap(Map<String, dynamic> map) {
+    final payload = map['payload'] as Map<String, dynamic>;
+    return ShiftAllocationPublishedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      schemaVersion: map['schema_version'] ?? 1,
+      allocationId: payload['allocation_id'],
+      wardId: payload['ward_id'],
+      shiftType: payload['shift_type'],
+      date: payload['date'],
+      bedAssignments: List<Map<String, dynamic>>.from(payload['bed_assignments'] ?? []),
+      supportRoster: Map<String, dynamic>.from(payload['support_roster'] ?? {}),
+    );
+  }
+}
+
+class ShiftAllocationAcceptedEvent extends OraviEvent {
+  static const String eventType = 'ShiftAllocationAccepted';
+
+  final String allocationId;
+  final String wardId;
+  final String nurseId;
+  final List<String> acceptedBeds;
+
+  ShiftAllocationAcceptedEvent({
+    super.eventId,
+    required super.patientId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+    required this.allocationId,
+    required this.wardId,
+    required this.nurseId,
+    required this.acceptedBeds,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'event_id': eventId,
+        'type': type,
+        'patient_id': patientId,
+        'author_id': authorId,
+        'device_id': deviceId,
+        'client_created_at': clientCreatedAt.toIso8601String(),
+        'server_seq': serverSeq,
+        'server_received_at': serverReceivedAt?.toIso8601String(),
+        'schema_version': schemaVersion,
+        'prev_hash': prevHash,
+        'hash': hash,
+        'payload': {
+          'allocation_id': allocationId,
+          'ward_id': wardId,
+          'nurse_id': nurseId,
+          'accepted_beds': acceptedBeds,
+        },
+      };
+
+  factory ShiftAllocationAcceptedEvent.fromMap(Map<String, dynamic> map) {
+    final payload = map['payload'] as Map<String, dynamic>;
+    return ShiftAllocationAcceptedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      schemaVersion: map['schema_version'] ?? 1,
+      allocationId: payload['allocation_id'],
+      wardId: payload['ward_id'],
+      nurseId: payload['nurse_id'],
+      acceptedBeds: List<String>.from(payload['accepted_beds'] ?? []),
+    );
+  }
+}
+
+class ShiftAllocationDisputedEvent extends OraviEvent {
+  static const String eventType = 'ShiftAllocationDisputed';
+
+  final String allocationId;
+  final String wardId;
+  final String nurseId;
+  final String bedNumber;
+  final String disputeReason;
+
+  ShiftAllocationDisputedEvent({
+    super.eventId,
+    required super.patientId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+    required this.allocationId,
+    required this.wardId,
+    required this.nurseId,
+    required this.bedNumber,
+    required this.disputeReason,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'event_id': eventId,
+        'type': type,
+        'patient_id': patientId,
+        'author_id': authorId,
+        'device_id': deviceId,
+        'client_created_at': clientCreatedAt.toIso8601String(),
+        'server_seq': serverSeq,
+        'server_received_at': serverReceivedAt?.toIso8601String(),
+        'schema_version': schemaVersion,
+        'prev_hash': prevHash,
+        'hash': hash,
+        'payload': {
+          'allocation_id': allocationId,
+          'ward_id': wardId,
+          'nurse_id': nurseId,
+          'bed_number': bedNumber,
+          'dispute_reason': disputeReason,
+        },
+      };
+
+  factory ShiftAllocationDisputedEvent.fromMap(Map<String, dynamic> map) {
+    final payload = map['payload'] as Map<String, dynamic>;
+    return ShiftAllocationDisputedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      schemaVersion: map['schema_version'] ?? 1,
+      allocationId: payload['allocation_id'],
+      wardId: payload['ward_id'],
+      nurseId: payload['nurse_id'],
+      bedNumber: payload['bed_number'],
+      disputeReason: payload['dispute_reason'],
+    );
+  }
+}
+
 /// Generic factory to deserialize any canonical event map into its specific type.
 OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
   final type = map['type'] as String;
@@ -1390,6 +1602,12 @@ OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
       return FlagRaisedEvent.fromMap(map);
     case FlagDismissedEvent.eventType:
       return FlagDismissedEvent.fromMap(map);
+    case ShiftAllocationPublishedEvent.eventType:
+      return ShiftAllocationPublishedEvent.fromMap(map);
+    case ShiftAllocationAcceptedEvent.eventType:
+      return ShiftAllocationAcceptedEvent.fromMap(map);
+    case ShiftAllocationDisputedEvent.eventType:
+      return ShiftAllocationDisputedEvent.fromMap(map);
     default:
       throw UnsupportedError('Unknown event type: $type');
   }

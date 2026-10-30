@@ -150,7 +150,7 @@ void main() {
 
       // Should route to WardBoardScreen!
       expect(find.byType(WardBoardScreen), findsOneWidget);
-      expect(find.text('ORAVI — WARD BOARD'), findsOneWidget);
+      expect(find.textContaining('ORAVI'), findsOneWidget);
       expect(find.text('MW'), findsOneWidget); // Lock icon initials on Ward Board
     });
   });

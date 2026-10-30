@@ -20,6 +20,26 @@ class StaffProfile extends Equatable {
     this.isActive = true,
   });
 
+  StaffProfile copyWith({
+    String? staffId,
+    String? name,
+    String? role,
+    String? wardId,
+    String? avatarColor,
+    String? initials,
+    bool? isActive,
+  }) {
+    return StaffProfile(
+      staffId: staffId ?? this.staffId,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      wardId: wardId ?? this.wardId,
+      avatarColor: avatarColor ?? this.avatarColor,
+      initials: initials ?? this.initials,
+      isActive: isActive ?? this.isActive,
+    );
+  }
+
   bool get isWardNurse => role == 'ward_nurse';
   bool get isChargeNurse => role == 'charge_nurse';
   bool get isDoctorOnCall => role == 'doctor_on_call';
