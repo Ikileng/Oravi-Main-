@@ -1,3 +1,4 @@
+import 'auth_providers.dart';
 import '../../domain/search/ward_search_engine.dart';
 import '../../domain/timeline/patient_timeline_entry.dart';
 import '../../data/database/database.dart';
@@ -18,7 +19,16 @@ final oraviLocalDatabaseProvider = Provider<OraviLocalDatabase>((ref) {
 
 /// Outbox Sync Engine provider.
 final syncEngineProvider = Provider<SyncEngine>((ref) {
-  final engine = SyncEngine(ref.watch(oraviLocalDatabaseProvider));
+  final db = ref.watch(oraviLocalDatabaseProvider);
+  final repo = ref.watch(localWardRepositoryProvider);
+  final engine = SyncEngine(
+    db,
+    onRemoteEventsReceived: () async {
+      await repo.reloadFromDatabase();
+      ref.read(wardControllerProvider.notifier).refresh();
+    },
+  );
+  engine.startPeriodicSync(interval: const Duration(seconds: 10));
   ref.onDispose(() => engine.dispose());
   return engine;
 });
@@ -43,6 +53,8 @@ class WardController extends Notifier<int> {
     state++;
   }
 
+  String get _currentAuthorId => ref.read(authenticatedStaffProvider)?.staffId ?? SeededWardData.testNurseId;
+
   void postMessage({
     required String patientId,
     required String loopId,
@@ -51,7 +63,7 @@ class WardController extends Notifier<int> {
     ref.read(localWardRepositoryProvider).postMessage(
       patientId: patientId,
       loopId: loopId,
-      authorId: SeededWardData.testNurseId,
+      authorId: _currentAuthorId,
       deviceId: SeededWardData.testDeviceId,
       content: content,
     );
@@ -67,13 +79,13 @@ class WardController extends Notifier<int> {
   }) {
     ref.read(localWardRepositoryProvider).openLoop(
       patientId: patientId,
-      authorId: SeededWardData.testNurseId,
+      authorId: _currentAuthorId,
       deviceId: SeededWardData.testDeviceId,
       title: title,
       description: description,
       loopType: loopType,
       urgency: urgency,
-      initialOwnerId: SeededWardData.testNurseId,
+      initialOwnerId: _currentAuthorId,
       initialOwnerRole: 'ward_nurse',
     );
     refresh();
@@ -89,7 +101,7 @@ class WardController extends Notifier<int> {
     ref.read(localWardRepositoryProvider).closeLoop(
       patientId: patientId,
       loopId: loopId,
-      authorId: SeededWardData.testNurseId,
+      authorId: _currentAuthorId,
       deviceId: SeededWardData.testDeviceId,
       reasonCode: reasonCode,
       freeTextNote: freeTextNote,
@@ -105,7 +117,7 @@ class WardController extends Notifier<int> {
     ref.read(localWardRepositoryProvider).confirmCriticalClosure(
       patientId: patientId,
       loopId: loopId,
-      authorId: SeededWardData.testNurseId,
+      authorId: _currentAuthorId,
       deviceId: SeededWardData.testDeviceId,
       confirmedByRole: 'ward_in_charge',
     );
@@ -120,7 +132,7 @@ class WardController extends Notifier<int> {
     ref.read(localWardRepositoryProvider).reopenLoop(
       patientId: patientId,
       loopId: loopId,
-      authorId: SeededWardData.testNurseId,
+      authorId: _currentAuthorId,
       deviceId: SeededWardData.testDeviceId,
       reopenReason: reopenReason,
     );

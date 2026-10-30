@@ -474,7 +474,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       context: context,
       builder: (ctx) => LogCallOutcomeDialog(
         loop: loop,
-        recipientName: entry.authorId,
+        recipientName: ClinicalTheme.formatAuthorDisplayName(entry.authorId),
         recipientRole: entry.authorRole,
       ),
     );
@@ -1127,7 +1127,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  entry.authorId,
+                  ClinicalTheme.formatAuthorDisplayName(entry.authorId),
                   style: TextStyle(color: cadreColor, fontWeight: FontWeight.bold, fontSize: 10),
                 ),
               ),

@@ -3,11 +3,13 @@ import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/mock/seeded_ward_data.dart';
 import '../domain/models/loop_enums.dart';
+import '../domain/models/staff_profile.dart';
 import '../domain/projections/projections.dart';
 import 'patient_detail_screen.dart';
 import 'providers/ward_providers.dart';
+import 'providers/auth_providers.dart';
+import 'lockscreen/digital_id_lockscreen.dart';
 import 'theme/clinical_theme.dart';
 
 /// The core clinical home screen strictly implementing PRD Section 7.1:
@@ -26,13 +28,48 @@ class WardBoardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(
-        title: const Column(
+        titleSpacing: 12,
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('ORAVI — WARD BOARD'),
-            Text(
-              '${SeededWardData.wardName} • Offline Mode',
-              style: TextStyle(fontSize: 11, color: ClinicalTheme.routineTeal, fontWeight: FontWeight.normal),
+            const Text(
+              'ORAVI 4B',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: syncStatus.state == SyncState.syncing
+                        ? ClinicalTheme.urgentAmber
+                        : (syncStatus.state == SyncState.offline
+                            ? Colors.grey
+                            : ClinicalTheme.successGreen),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  syncStatus.state == SyncState.syncing
+                      ? 'Syncing (${syncStatus.pendingCount})...'
+                      : (syncStatus.state == SyncState.offline
+                          ? 'Offline Cache'
+                          : 'Synced'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: syncStatus.state == SyncState.syncing
+                        ? ClinicalTheme.urgentAmber
+                        : (syncStatus.state == SyncState.offline
+                            ? ClinicalTheme.textMuted
+                            : ClinicalTheme.routineTeal),
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -69,17 +106,61 @@ class WardBoardScreen extends ConsumerWidget {
                   : (syncStatus.pendingCount > 0 ? ClinicalTheme.urgentAmber : ClinicalTheme.textMuted),
             ),
             onPressed: () async {
-              final synced = await ref.read(syncEngineProvider).syncOutbox();
+              final result = await ref.read(syncEngineProvider).syncAll();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(synced > 0
-                        ? 'Synced $synced pending event(s) to server.'
-                        : 'Outbox up to date. Local SQLite event log persistent.'),
+                    content: Text(result.success
+                        ? (result.pushedCount > 0 || result.pulledCount > 0
+                            ? 'Synced: ${result.pushedCount} pushed, ${result.pulledCount} pulled from server.'
+                            : 'Outbox & Ward Board are up to date.')
+                        : (result.error?.contains('SocketException') == true
+                            ? 'Ward server unreachable. Operating in offline cache mode.'
+                            : 'Sync issue: ${result.error}')),
                     duration: const Duration(seconds: 2),
                   ),
                 );
               }
+            },
+          ),
+          Consumer(
+            builder: (context, ref, _) {
+              final authStaff = ref.watch(authenticatedStaffProvider);
+              if (authStaff == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: InkWell(
+                  onTap: () => _showLockDialog(context, ref, authStaff),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircleAvatar(
+                          radius: 12,
+                          backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.3),
+                          child: Text(
+                            authStaff.initials,
+                            style: const TextStyle(
+                              color: Color(0xFF38BDF8),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.lock_outline, size: 14, color: Color(0xFF94A3B8)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
             },
           ),
         ],
@@ -122,6 +203,57 @@ class WardBoardScreen extends ConsumerWidget {
             },
           ),
         ),
+      ),
+    );
+  }
+
+  void _showLockDialog(BuildContext context, WidgetRef ref, StaffProfile staff) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.3),
+              child: Text(
+                staff.initials,
+                style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                staff.name,
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Role: ${staff.formattedRole} • Staff ID: ${staff.staffId}\n\nWould you like to lock this station or switch to another nurse?',
+          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
+            icon: const Icon(Icons.lock, size: 16, color: Colors.white),
+            label: const Text('Lock Station', style: TextStyle(color: Colors.white)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(authControllerProvider.notifier).logout();
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const DigitalIdLockscreen()),
+                (route) => false,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -200,32 +332,30 @@ class _WardBedRow extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(
+                        if (patient.nameOrInitials.isNotEmpty)
+                          Text(
                             patient.nameOrInitials,
-                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: ClinicalTheme.textPrimary,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
                         Text(
                           '(${patient.admissionNumber})',
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             color: ClinicalTheme.textMuted,
                             fontFamily: 'monospace',
                           ),
                         ),
-                        const SizedBox(width: 6),
                         Text(
                           '${patient.age}y/${patient.sex}',
-                          style: const TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+                          style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
                         ),
                       ],
                     ),

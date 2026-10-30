@@ -172,6 +172,68 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
       updates: {outbox},
     );
   }
+
+  /// Returns the highest server sequence stored in the local SQLite database.
+  /// Ignores any legacy epoch-millisecond mock sequences (>= 1,000,000,000).
+  Future<int> getHighestServerSeq() async {
+    final query = selectOnly(localEvents)
+      ..where(localEvents.serverSeq.isSmallerThanValue(1000000000))
+      ..addColumns([localEvents.serverSeq.max()]);
+    final result = await query.map((row) => row.read(localEvents.serverSeq.max())).getSingleOrNull();
+    return result ?? 0;
+  }
+
+  /// Inserts or updates events pulled from the server into the local SQLite database.
+  /// Remote events are NOT enqueued to the outbox because they already originate from the server.
+  Future<int> insertRemoteEvents(List<Map<String, dynamic>> remoteEvents) {
+    return transaction(() async {
+      int inserted = 0;
+      for (final raw in remoteEvents) {
+        final eventId = raw['event_id'] as String;
+        final type = raw['type'] as String;
+        final patientId = raw['patient_id'] as String;
+        final authorId = raw['author_id'] as String;
+        final deviceId = raw['device_id'] as String;
+        final clientCreatedAt = DateTime.parse(raw['client_created_at'] as String);
+        final loopId = raw['loop_id'] as String?;
+        final serverSeq = raw['server_seq'] as int?;
+        final serverReceivedAt = raw['server_received_at'] != null
+            ? DateTime.parse(raw['server_received_at'] as String)
+            : null;
+        final schemaVersion = raw['schema_version'] as int? ?? 1;
+        final payload = raw['payload'] as Map<String, dynamic>? ?? {};
+
+        final existing = await (select(localEvents)..where((t) => t.eventId.equals(eventId))).getSingleOrNull();
+        if (existing == null) {
+          await into(localEvents).insert(
+            LocalEventsCompanion(
+              eventId: Value(eventId),
+              eventType: Value(type),
+              patientId: Value(patientId),
+              loopId: Value(loopId),
+              authorId: Value(authorId),
+              deviceId: Value(deviceId),
+              clientCreatedAt: Value(clientCreatedAt),
+              serverSeq: Value(serverSeq),
+              serverReceivedAt: Value(serverReceivedAt),
+              schemaVersion: Value(schemaVersion),
+              payloadJson: Value(jsonEncode(payload)),
+            ),
+          );
+          inserted++;
+        } else if ((existing.serverSeq == null || existing.serverSeq! >= 1000000000) && serverSeq != null) {
+          // Update serverSeq and serverReceivedAt if previously local-only or mock timestamp
+          await (update(localEvents)..where((t) => t.eventId.equals(eventId))).write(
+            LocalEventsCompanion(
+              serverSeq: Value(serverSeq),
+              serverReceivedAt: Value(serverReceivedAt),
+            ),
+          );
+        }
+      }
+      return inserted;
+    });
+  }
 }
 
 LazyDatabase _openConnection() {

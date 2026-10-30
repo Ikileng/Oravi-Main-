@@ -1,4 +1,5 @@
 import 'package:oravi_app/presentation/widgets/ward_search_sheet.dart';
+import 'package:oravi_app/presentation/ward_board_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +9,7 @@ void main() {
   testWidgets('Oravi Ward Board loads beds and displays patient identifiers', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: OraviApp(),
+        child: OraviApp(home: WardBoardScreen()),
       ),
     );
 
@@ -34,7 +35,7 @@ void main() {
   testWidgets('Tapping a bed row opens PatientDetailScreen with loops', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: OraviApp(),
+        child: OraviApp(home: WardBoardScreen()),
       ),
     );
 
@@ -52,7 +53,7 @@ void main() {
   testWidgets('Tapping Start Shift Handoff opens HandoffWizardScreen and walks through beds', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: OraviApp(),
+        child: OraviApp(home: WardBoardScreen()),
       ),
     );
 
@@ -88,7 +89,7 @@ void main() {
   testWidgets('M4: Tapping Ask Oravi & Timeline tab renders search, suggested chips, and queries', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: OraviApp(),
+        child: OraviApp(home: WardBoardScreen()),
       ),
     );
 
@@ -128,7 +129,7 @@ void main() {
   testWidgets('M4: Ward Search Sheet filters beds by term and navigates to patient', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: OraviApp(),
+        child: OraviApp(home: WardBoardScreen()),
       ),
     );
 

@@ -75,3 +75,9 @@ GoogleService-Info.plist
 firebase_options_*.dart
 
 devtools_options.yaml
+
+# Database files
+*.db
+*.sqlite
+*.db-shm
+*.db-wal

@@ -4,7 +4,10 @@ from .models import CanonicalEvent
 
 class TestSyncEngineBackend(unittest.TestCase):
     def setUp(self):
-        self.store = EventStore()
+        self.store = EventStore(db_path=":memory:")
+
+    def tearDown(self):
+        self.store.close()
 
     def test_append_assigns_sequential_seq_and_sha256_hash(self):
         events = [
