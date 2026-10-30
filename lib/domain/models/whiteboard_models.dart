@@ -43,6 +43,8 @@ class WhiteboardBedAssignment {
 class WardSupportRoster {
   final String wardManager;
   final String teamLeader;
+  final String dutyLeader;
+  final String dischargeNurse;
   final String shiftLeader;
   final String inchargeNurseDay;
   final String inchargeNurseNight;
@@ -57,6 +59,8 @@ class WardSupportRoster {
   const WardSupportRoster({
     this.wardManager = 'CAPRICE A',
     this.teamLeader = '',
+    this.dutyLeader = '',
+    this.dischargeNurse = '',
     this.shiftLeader = '',
     this.inchargeNurseDay = 'SISTER ACHIENG',
     this.inchargeNurseNight = '',
@@ -72,6 +76,8 @@ class WardSupportRoster {
   Map<String, dynamic> toMap() => {
         'ward_manager': wardManager,
         'team_leader': teamLeader,
+        'duty_leader': dutyLeader,
+        'discharge_nurse': dischargeNurse,
         'shift_leader': shiftLeader,
         'incharge_nurse_day': inchargeNurseDay,
         'incharge_nurse_night': inchargeNurseNight,
@@ -88,6 +94,8 @@ class WardSupportRoster {
     return WardSupportRoster(
       wardManager: map['ward_manager'] as String? ?? '',
       teamLeader: map['team_leader'] as String? ?? '',
+      dutyLeader: map['duty_leader'] as String? ?? '',
+      dischargeNurse: map['discharge_nurse'] as String? ?? '',
       shiftLeader: map['shift_leader'] as String? ?? '',
       inchargeNurseDay: map['incharge_nurse_day'] as String? ?? '',
       inchargeNurseNight: map['incharge_nurse_night'] as String? ?? '',

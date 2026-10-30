@@ -1,5 +1,4 @@
 import 'widgets/ward_search_sheet.dart';
-import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_selection_dialog.dart';
@@ -26,74 +25,35 @@ class WardBoardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final patients = ref.watch(wardPatientsProvider);
-    final syncStatus = ref.watch(syncStatusProvider).asData?.value ?? const SyncStatus();
 
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(
         titleSpacing: 12,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
-              onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => const WardSelectionDialog(),
-                );
-              },
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'ORAVI — ${ref.watch(selectedWardProvider).name.split(' ').first.toUpperCase()}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.arrow_drop_down, color: ClinicalTheme.nurseBlue, size: 18),
-                ],
+        title: InkWell(
+          onTap: () {
+            showDialog(
+              context: context,
+              builder: (_) => const WardSelectionDialog(),
+            );
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  "ORAVI · ${ref.watch(selectedWardProvider).name.split(' ').first.toUpperCase()}",
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: syncStatus.state == SyncState.syncing
-                        ? ClinicalTheme.urgentAmber
-                        : (syncStatus.state == SyncState.offline
-                            ? Colors.grey
-                            : ClinicalTheme.successGreen),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  syncStatus.state == SyncState.syncing
-                      ? 'Syncing (${syncStatus.pendingCount})...'
-                      : (syncStatus.state == SyncState.offline
-                          ? 'Offline Cache'
-                          : 'Synced'),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: syncStatus.state == SyncState.syncing
-                        ? ClinicalTheme.urgentAmber
-                        : (syncStatus.state == SyncState.offline
-                            ? ClinicalTheme.textMuted
-                            : ClinicalTheme.routineTeal),
-                    fontWeight: FontWeight.normal,
-                  ),
-                ),
-              ],
-            ),
-          ],
+              const Icon(Icons.arrow_drop_down, color: ClinicalTheme.nurseBlue, size: 18),
+            ],
+          ),
         ),
         actions: [
           IconButton(
-            tooltip: 'Digital Shift Whiteboard (Gertrude\'s Board)',
+            tooltip: 'Ward Board & Nurse Allocation',
             icon: const Icon(Icons.dashboard_customize_outlined, color: ClinicalTheme.nurseBlue),
             onPressed: () {
               Navigator.of(context).push(
@@ -120,34 +80,6 @@ class WardBoardScreen extends ConsumerWidget {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const HandoffWizardScreen()),
               );
-            },
-          ),
-          IconButton(
-            tooltip: 'Outbox Sync: ${syncStatus.pendingCount} pending',
-            icon: Icon(
-              syncStatus.state == SyncState.syncing
-                  ? Icons.sync
-                  : (syncStatus.pendingCount > 0 ? Icons.cloud_upload : Icons.cloud_done),
-              color: syncStatus.state == SyncState.syncing
-                  ? ClinicalTheme.nurseBlue
-                  : (syncStatus.pendingCount > 0 ? ClinicalTheme.urgentAmber : ClinicalTheme.textMuted),
-            ),
-            onPressed: () async {
-              final result = await ref.read(syncEngineProvider).syncAll();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(result.success
-                        ? (result.pushedCount > 0 || result.pulledCount > 0
-                            ? 'Synced: ${result.pushedCount} pushed, ${result.pulledCount} pulled from server.'
-                            : 'Outbox & Ward Board are up to date.')
-                        : (result.error?.contains('SocketException') == true
-                            ? 'Ward server unreachable. Operating in offline cache mode.'
-                            : 'Sync issue: ${result.error}')),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
             },
           ),
           Consumer(
@@ -201,9 +133,67 @@ class WardBoardScreen extends ConsumerWidget {
             )
           : ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              itemCount: patients.length,
+              itemCount: patients.length + 1,
               itemBuilder: (context, index) {
-                return _WardBedRow(patient: patients[index]);
+                if (index == 0) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.4)),
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const DigitalWhiteboardScreen()),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0284C7).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.dashboard_customize, color: Color(0xFF38BDF8), size: 20),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Ward Management & Nurse Allocation',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Tap to view Beds 1–10, Doctors & Nurse assignments',
+                                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.arrow_forward_ios, color: Color(0xFF38BDF8), size: 14),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                return _WardBedRow(patient: patients[index - 1]);
               },
             ),
       bottomNavigationBar: Container(

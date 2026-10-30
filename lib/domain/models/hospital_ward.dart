@@ -39,6 +39,14 @@ class HospitalWard {
 /// Gertrude's & regional hospital canonical catalog of wards
 const List<HospitalWard> kDefaultHospitalWards = [
   HospitalWard(
+    wardId: 'ward-3',
+    name: 'Ward 3',
+    bedCount: 10,
+    bedNumbers: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
+    department: 'General Inpatient',
+    description: 'Jaramanda Hospital · Ward 3',
+  ),
+  HospitalWard(
     wardId: 'ward-jacaranda',
     name: 'Jacaranda Ward (Pediatrics)',
     bedCount: 12,
