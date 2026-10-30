@@ -43,12 +43,81 @@ class Outbox extends Table {
   DateTimeColumn get createdAt => dateTime()();
 }
 
-@DriftDatabase(tables: [LocalEvents, Outbox])
+/// Persistent local staff directory table for offline authentication and role identification.
+class LocalStaff extends Table {
+  TextColumn get staffId => text()();
+  TextColumn get name => text()();
+  TextColumn get role => text()(); // ward_nurse, doctor_on_call, charge_nurse, admin
+  TextColumn get wardId => text().withDefault(const Constant('WARD-4B'))();
+  TextColumn get pin => text()();
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  TextColumn get avatarColor => text().withDefault(const Constant('#0284C7'))();
+  TextColumn get initials => text()();
+  TextColumn get email => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {staffId};
+}
+
+/// Persistent digital whiteboard bed shift allocations.
+class LocalWhiteboardAssignments extends Table {
+  TextColumn get bedNumber => text()();
+  TextColumn get patientName => text()();
+  TextColumn get ageGender => text().nullable()();
+  TextColumn get diagnosis => text().nullable()();
+  TextColumn get assignedNurse => text()();
+  TextColumn get bay => text()(); // Bay A, Bay B, Bay C, Side Rooms
+  TextColumn get shiftDate => text()(); // YYYY-MM-DD
+  TextColumn get shiftType => text()(); // day, night
+
+  @override
+  Set<Column> get primaryKey => {bedNumber, shiftDate, shiftType};
+}
+
+/// Persistent support roster contacts (In-Charge, Float Nurse, HCAs, Doctors).
+class LocalSupportRosters extends Table {
+  TextColumn get wardId => text()();
+  TextColumn get shiftDate => text()();
+  TextColumn get shiftType => text()();
+  TextColumn get inChargeName => text()();
+  TextColumn get inChargePhone => text().nullable()();
+  TextColumn get inChargeRole => text().nullable()();
+  TextColumn get floatNurseName => text()();
+  TextColumn get floatNursePhone => text().nullable()();
+  TextColumn get floatNurseRole => text().nullable()();
+  TextColumn get hcasJson => text()(); // serialized List<SupportContact>
+  TextColumn get doctorsJson => text()(); // serialized List<SupportContact>
+
+  @override
+  Set<Column> get primaryKey => {wardId, shiftDate, shiftType};
+}
+
+@DriftDatabase(tables: [
+  LocalEvents,
+  Outbox,
+  LocalStaff,
+  LocalWhiteboardAssignments,
+  LocalSupportRosters,
+])
 class OraviLocalDatabase extends _$OraviLocalDatabase {
   OraviLocalDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) async {
+          await m.createAll();
+        },
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.createTable(localStaff);
+            await m.createTable(localWhiteboardAssignments);
+            await m.createTable(localSupportRosters);
+          }
+        },
+      );
 
   // Insert event to local log and enqueue to outbox in single atomic transaction
   Future<void> appendEventWithOutbox(OraviEvent event) {
@@ -233,6 +302,88 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
       }
       return inserted;
     });
+  }
+
+  // ==========================================
+  // STAFF DIRECTORY PERSISTENCE
+  // ==========================================
+  Future<List<LocalStaffData>> getAllStaff() {
+    return select(localStaff).get();
+  }
+
+  Stream<List<LocalStaffData>> watchAllStaff() {
+    return select(localStaff).watch();
+  }
+
+  Future<void> upsertStaff(LocalStaffCompanion entry) {
+    return into(localStaff).insertOnConflictUpdate(entry);
+  }
+
+  Future<int> deleteStaff(String staffId) {
+    return (delete(localStaff)..where((t) => t.staffId.equals(staffId))).go();
+  }
+
+  Future<int> updateStaffPin(String staffId, String newPin) {
+    return (update(localStaff)..where((t) => t.staffId.equals(staffId))).write(
+      LocalStaffCompanion(pin: Value(newPin)),
+    );
+  }
+
+  Future<void> toggleStaffActive(String staffId) async {
+    final user = await (select(localStaff)..where((t) => t.staffId.equals(staffId))).getSingleOrNull();
+    if (user != null) {
+      await (update(localStaff)..where((t) => t.staffId.equals(staffId))).write(
+        LocalStaffCompanion(isActive: Value(!user.isActive)),
+      );
+    }
+  }
+
+  // ==========================================
+  // WHITEBOARD ALLOCATIONS PERSISTENCE
+  // ==========================================
+  Future<List<LocalWhiteboardAssignment>> getWhiteboardAssignments(String shiftDate, String shiftType) {
+    return (select(localWhiteboardAssignments)
+          ..where((t) => t.shiftDate.equals(shiftDate) & t.shiftType.equals(shiftType)))
+        .get();
+  }
+
+  Stream<List<LocalWhiteboardAssignment>> watchWhiteboardAssignments(String shiftDate, String shiftType) {
+    return (select(localWhiteboardAssignments)
+          ..where((t) => t.shiftDate.equals(shiftDate) & t.shiftType.equals(shiftType)))
+        .watch();
+  }
+
+  Future<void> saveWhiteboardAssignments(List<LocalWhiteboardAssignmentsCompanion> entries) {
+    return transaction(() async {
+      for (final entry in entries) {
+        await into(localWhiteboardAssignments).insertOnConflictUpdate(entry);
+      }
+    });
+  }
+
+  // ==========================================
+  // SUPPORT ROSTER PERSISTENCE
+  // ==========================================
+  Future<LocalSupportRoster?> getSupportRoster(String wardId, String shiftDate, String shiftType) {
+    return (select(localSupportRosters)
+          ..where((t) =>
+              t.wardId.equals(wardId) &
+              t.shiftDate.equals(shiftDate) &
+              t.shiftType.equals(shiftType)))
+        .getSingleOrNull();
+  }
+
+  Stream<LocalSupportRoster?> watchSupportRoster(String wardId, String shiftDate, String shiftType) {
+    return (select(localSupportRosters)
+          ..where((t) =>
+              t.wardId.equals(wardId) &
+              t.shiftDate.equals(shiftDate) &
+              t.shiftType.equals(shiftType)))
+        .watchSingleOrNull();
+  }
+
+  Future<void> saveSupportRoster(LocalSupportRostersCompanion roster) {
+    return into(localSupportRosters).insertOnConflictUpdate(roster);
   }
 }
 

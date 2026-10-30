@@ -1154,16 +1154,1825 @@ class OutboxCompanion extends UpdateCompanion<OutboxData> {
   }
 }
 
+class $LocalStaffTable extends LocalStaff
+    with TableInfo<$LocalStaffTable, LocalStaffData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalStaffTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _staffIdMeta = const VerificationMeta(
+    'staffId',
+  );
+  @override
+  late final GeneratedColumn<String> staffId = GeneratedColumn<String>(
+    'staff_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _roleMeta = const VerificationMeta('role');
+  @override
+  late final GeneratedColumn<String> role = GeneratedColumn<String>(
+    'role',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _wardIdMeta = const VerificationMeta('wardId');
+  @override
+  late final GeneratedColumn<String> wardId = GeneratedColumn<String>(
+    'ward_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('WARD-4B'),
+  );
+  static const VerificationMeta _pinMeta = const VerificationMeta('pin');
+  @override
+  late final GeneratedColumn<String> pin = GeneratedColumn<String>(
+    'pin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isActiveMeta = const VerificationMeta(
+    'isActive',
+  );
+  @override
+  late final GeneratedColumn<bool> isActive = GeneratedColumn<bool>(
+    'is_active',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_active" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _avatarColorMeta = const VerificationMeta(
+    'avatarColor',
+  );
+  @override
+  late final GeneratedColumn<String> avatarColor = GeneratedColumn<String>(
+    'avatar_color',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('#0284C7'),
+  );
+  static const VerificationMeta _initialsMeta = const VerificationMeta(
+    'initials',
+  );
+  @override
+  late final GeneratedColumn<String> initials = GeneratedColumn<String>(
+    'initials',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _emailMeta = const VerificationMeta('email');
+  @override
+  late final GeneratedColumn<String> email = GeneratedColumn<String>(
+    'email',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    staffId,
+    name,
+    role,
+    wardId,
+    pin,
+    isActive,
+    avatarColor,
+    initials,
+    email,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_staff';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalStaffData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('staff_id')) {
+      context.handle(
+        _staffIdMeta,
+        staffId.isAcceptableOrUnknown(data['staff_id']!, _staffIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_staffIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('role')) {
+      context.handle(
+        _roleMeta,
+        role.isAcceptableOrUnknown(data['role']!, _roleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_roleMeta);
+    }
+    if (data.containsKey('ward_id')) {
+      context.handle(
+        _wardIdMeta,
+        wardId.isAcceptableOrUnknown(data['ward_id']!, _wardIdMeta),
+      );
+    }
+    if (data.containsKey('pin')) {
+      context.handle(
+        _pinMeta,
+        pin.isAcceptableOrUnknown(data['pin']!, _pinMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pinMeta);
+    }
+    if (data.containsKey('is_active')) {
+      context.handle(
+        _isActiveMeta,
+        isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta),
+      );
+    }
+    if (data.containsKey('avatar_color')) {
+      context.handle(
+        _avatarColorMeta,
+        avatarColor.isAcceptableOrUnknown(
+          data['avatar_color']!,
+          _avatarColorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('initials')) {
+      context.handle(
+        _initialsMeta,
+        initials.isAcceptableOrUnknown(data['initials']!, _initialsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_initialsMeta);
+    }
+    if (data.containsKey('email')) {
+      context.handle(
+        _emailMeta,
+        email.isAcceptableOrUnknown(data['email']!, _emailMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {staffId};
+  @override
+  LocalStaffData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalStaffData(
+      staffId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}staff_id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      role: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}role'],
+      )!,
+      wardId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ward_id'],
+      )!,
+      pin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pin'],
+      )!,
+      isActive: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_active'],
+      )!,
+      avatarColor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}avatar_color'],
+      )!,
+      initials: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}initials'],
+      )!,
+      email: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}email'],
+      ),
+    );
+  }
+
+  @override
+  $LocalStaffTable createAlias(String alias) {
+    return $LocalStaffTable(attachedDatabase, alias);
+  }
+}
+
+class LocalStaffData extends DataClass implements Insertable<LocalStaffData> {
+  final String staffId;
+  final String name;
+  final String role;
+  final String wardId;
+  final String pin;
+  final bool isActive;
+  final String avatarColor;
+  final String initials;
+  final String? email;
+  const LocalStaffData({
+    required this.staffId,
+    required this.name,
+    required this.role,
+    required this.wardId,
+    required this.pin,
+    required this.isActive,
+    required this.avatarColor,
+    required this.initials,
+    this.email,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['staff_id'] = Variable<String>(staffId);
+    map['name'] = Variable<String>(name);
+    map['role'] = Variable<String>(role);
+    map['ward_id'] = Variable<String>(wardId);
+    map['pin'] = Variable<String>(pin);
+    map['is_active'] = Variable<bool>(isActive);
+    map['avatar_color'] = Variable<String>(avatarColor);
+    map['initials'] = Variable<String>(initials);
+    if (!nullToAbsent || email != null) {
+      map['email'] = Variable<String>(email);
+    }
+    return map;
+  }
+
+  LocalStaffCompanion toCompanion(bool nullToAbsent) {
+    return LocalStaffCompanion(
+      staffId: Value(staffId),
+      name: Value(name),
+      role: Value(role),
+      wardId: Value(wardId),
+      pin: Value(pin),
+      isActive: Value(isActive),
+      avatarColor: Value(avatarColor),
+      initials: Value(initials),
+      email: email == null && nullToAbsent
+          ? const Value.absent()
+          : Value(email),
+    );
+  }
+
+  factory LocalStaffData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalStaffData(
+      staffId: serializer.fromJson<String>(json['staffId']),
+      name: serializer.fromJson<String>(json['name']),
+      role: serializer.fromJson<String>(json['role']),
+      wardId: serializer.fromJson<String>(json['wardId']),
+      pin: serializer.fromJson<String>(json['pin']),
+      isActive: serializer.fromJson<bool>(json['isActive']),
+      avatarColor: serializer.fromJson<String>(json['avatarColor']),
+      initials: serializer.fromJson<String>(json['initials']),
+      email: serializer.fromJson<String?>(json['email']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'staffId': serializer.toJson<String>(staffId),
+      'name': serializer.toJson<String>(name),
+      'role': serializer.toJson<String>(role),
+      'wardId': serializer.toJson<String>(wardId),
+      'pin': serializer.toJson<String>(pin),
+      'isActive': serializer.toJson<bool>(isActive),
+      'avatarColor': serializer.toJson<String>(avatarColor),
+      'initials': serializer.toJson<String>(initials),
+      'email': serializer.toJson<String?>(email),
+    };
+  }
+
+  LocalStaffData copyWith({
+    String? staffId,
+    String? name,
+    String? role,
+    String? wardId,
+    String? pin,
+    bool? isActive,
+    String? avatarColor,
+    String? initials,
+    Value<String?> email = const Value.absent(),
+  }) => LocalStaffData(
+    staffId: staffId ?? this.staffId,
+    name: name ?? this.name,
+    role: role ?? this.role,
+    wardId: wardId ?? this.wardId,
+    pin: pin ?? this.pin,
+    isActive: isActive ?? this.isActive,
+    avatarColor: avatarColor ?? this.avatarColor,
+    initials: initials ?? this.initials,
+    email: email.present ? email.value : this.email,
+  );
+  LocalStaffData copyWithCompanion(LocalStaffCompanion data) {
+    return LocalStaffData(
+      staffId: data.staffId.present ? data.staffId.value : this.staffId,
+      name: data.name.present ? data.name.value : this.name,
+      role: data.role.present ? data.role.value : this.role,
+      wardId: data.wardId.present ? data.wardId.value : this.wardId,
+      pin: data.pin.present ? data.pin.value : this.pin,
+      isActive: data.isActive.present ? data.isActive.value : this.isActive,
+      avatarColor: data.avatarColor.present
+          ? data.avatarColor.value
+          : this.avatarColor,
+      initials: data.initials.present ? data.initials.value : this.initials,
+      email: data.email.present ? data.email.value : this.email,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalStaffData(')
+          ..write('staffId: $staffId, ')
+          ..write('name: $name, ')
+          ..write('role: $role, ')
+          ..write('wardId: $wardId, ')
+          ..write('pin: $pin, ')
+          ..write('isActive: $isActive, ')
+          ..write('avatarColor: $avatarColor, ')
+          ..write('initials: $initials, ')
+          ..write('email: $email')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    staffId,
+    name,
+    role,
+    wardId,
+    pin,
+    isActive,
+    avatarColor,
+    initials,
+    email,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalStaffData &&
+          other.staffId == this.staffId &&
+          other.name == this.name &&
+          other.role == this.role &&
+          other.wardId == this.wardId &&
+          other.pin == this.pin &&
+          other.isActive == this.isActive &&
+          other.avatarColor == this.avatarColor &&
+          other.initials == this.initials &&
+          other.email == this.email);
+}
+
+class LocalStaffCompanion extends UpdateCompanion<LocalStaffData> {
+  final Value<String> staffId;
+  final Value<String> name;
+  final Value<String> role;
+  final Value<String> wardId;
+  final Value<String> pin;
+  final Value<bool> isActive;
+  final Value<String> avatarColor;
+  final Value<String> initials;
+  final Value<String?> email;
+  final Value<int> rowid;
+  const LocalStaffCompanion({
+    this.staffId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.role = const Value.absent(),
+    this.wardId = const Value.absent(),
+    this.pin = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.avatarColor = const Value.absent(),
+    this.initials = const Value.absent(),
+    this.email = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalStaffCompanion.insert({
+    required String staffId,
+    required String name,
+    required String role,
+    this.wardId = const Value.absent(),
+    required String pin,
+    this.isActive = const Value.absent(),
+    this.avatarColor = const Value.absent(),
+    required String initials,
+    this.email = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : staffId = Value(staffId),
+       name = Value(name),
+       role = Value(role),
+       pin = Value(pin),
+       initials = Value(initials);
+  static Insertable<LocalStaffData> custom({
+    Expression<String>? staffId,
+    Expression<String>? name,
+    Expression<String>? role,
+    Expression<String>? wardId,
+    Expression<String>? pin,
+    Expression<bool>? isActive,
+    Expression<String>? avatarColor,
+    Expression<String>? initials,
+    Expression<String>? email,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (staffId != null) 'staff_id': staffId,
+      if (name != null) 'name': name,
+      if (role != null) 'role': role,
+      if (wardId != null) 'ward_id': wardId,
+      if (pin != null) 'pin': pin,
+      if (isActive != null) 'is_active': isActive,
+      if (avatarColor != null) 'avatar_color': avatarColor,
+      if (initials != null) 'initials': initials,
+      if (email != null) 'email': email,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalStaffCompanion copyWith({
+    Value<String>? staffId,
+    Value<String>? name,
+    Value<String>? role,
+    Value<String>? wardId,
+    Value<String>? pin,
+    Value<bool>? isActive,
+    Value<String>? avatarColor,
+    Value<String>? initials,
+    Value<String?>? email,
+    Value<int>? rowid,
+  }) {
+    return LocalStaffCompanion(
+      staffId: staffId ?? this.staffId,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      wardId: wardId ?? this.wardId,
+      pin: pin ?? this.pin,
+      isActive: isActive ?? this.isActive,
+      avatarColor: avatarColor ?? this.avatarColor,
+      initials: initials ?? this.initials,
+      email: email ?? this.email,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (staffId.present) {
+      map['staff_id'] = Variable<String>(staffId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (role.present) {
+      map['role'] = Variable<String>(role.value);
+    }
+    if (wardId.present) {
+      map['ward_id'] = Variable<String>(wardId.value);
+    }
+    if (pin.present) {
+      map['pin'] = Variable<String>(pin.value);
+    }
+    if (isActive.present) {
+      map['is_active'] = Variable<bool>(isActive.value);
+    }
+    if (avatarColor.present) {
+      map['avatar_color'] = Variable<String>(avatarColor.value);
+    }
+    if (initials.present) {
+      map['initials'] = Variable<String>(initials.value);
+    }
+    if (email.present) {
+      map['email'] = Variable<String>(email.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalStaffCompanion(')
+          ..write('staffId: $staffId, ')
+          ..write('name: $name, ')
+          ..write('role: $role, ')
+          ..write('wardId: $wardId, ')
+          ..write('pin: $pin, ')
+          ..write('isActive: $isActive, ')
+          ..write('avatarColor: $avatarColor, ')
+          ..write('initials: $initials, ')
+          ..write('email: $email, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalWhiteboardAssignmentsTable extends LocalWhiteboardAssignments
+    with
+        TableInfo<$LocalWhiteboardAssignmentsTable, LocalWhiteboardAssignment> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalWhiteboardAssignmentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _bedNumberMeta = const VerificationMeta(
+    'bedNumber',
+  );
+  @override
+  late final GeneratedColumn<String> bedNumber = GeneratedColumn<String>(
+    'bed_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _patientNameMeta = const VerificationMeta(
+    'patientName',
+  );
+  @override
+  late final GeneratedColumn<String> patientName = GeneratedColumn<String>(
+    'patient_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ageGenderMeta = const VerificationMeta(
+    'ageGender',
+  );
+  @override
+  late final GeneratedColumn<String> ageGender = GeneratedColumn<String>(
+    'age_gender',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _diagnosisMeta = const VerificationMeta(
+    'diagnosis',
+  );
+  @override
+  late final GeneratedColumn<String> diagnosis = GeneratedColumn<String>(
+    'diagnosis',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _assignedNurseMeta = const VerificationMeta(
+    'assignedNurse',
+  );
+  @override
+  late final GeneratedColumn<String> assignedNurse = GeneratedColumn<String>(
+    'assigned_nurse',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bayMeta = const VerificationMeta('bay');
+  @override
+  late final GeneratedColumn<String> bay = GeneratedColumn<String>(
+    'bay',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shiftDateMeta = const VerificationMeta(
+    'shiftDate',
+  );
+  @override
+  late final GeneratedColumn<String> shiftDate = GeneratedColumn<String>(
+    'shift_date',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shiftTypeMeta = const VerificationMeta(
+    'shiftType',
+  );
+  @override
+  late final GeneratedColumn<String> shiftType = GeneratedColumn<String>(
+    'shift_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    bedNumber,
+    patientName,
+    ageGender,
+    diagnosis,
+    assignedNurse,
+    bay,
+    shiftDate,
+    shiftType,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_whiteboard_assignments';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalWhiteboardAssignment> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('bed_number')) {
+      context.handle(
+        _bedNumberMeta,
+        bedNumber.isAcceptableOrUnknown(data['bed_number']!, _bedNumberMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bedNumberMeta);
+    }
+    if (data.containsKey('patient_name')) {
+      context.handle(
+        _patientNameMeta,
+        patientName.isAcceptableOrUnknown(
+          data['patient_name']!,
+          _patientNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_patientNameMeta);
+    }
+    if (data.containsKey('age_gender')) {
+      context.handle(
+        _ageGenderMeta,
+        ageGender.isAcceptableOrUnknown(data['age_gender']!, _ageGenderMeta),
+      );
+    }
+    if (data.containsKey('diagnosis')) {
+      context.handle(
+        _diagnosisMeta,
+        diagnosis.isAcceptableOrUnknown(data['diagnosis']!, _diagnosisMeta),
+      );
+    }
+    if (data.containsKey('assigned_nurse')) {
+      context.handle(
+        _assignedNurseMeta,
+        assignedNurse.isAcceptableOrUnknown(
+          data['assigned_nurse']!,
+          _assignedNurseMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_assignedNurseMeta);
+    }
+    if (data.containsKey('bay')) {
+      context.handle(
+        _bayMeta,
+        bay.isAcceptableOrUnknown(data['bay']!, _bayMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bayMeta);
+    }
+    if (data.containsKey('shift_date')) {
+      context.handle(
+        _shiftDateMeta,
+        shiftDate.isAcceptableOrUnknown(data['shift_date']!, _shiftDateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shiftDateMeta);
+    }
+    if (data.containsKey('shift_type')) {
+      context.handle(
+        _shiftTypeMeta,
+        shiftType.isAcceptableOrUnknown(data['shift_type']!, _shiftTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shiftTypeMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {bedNumber, shiftDate, shiftType};
+  @override
+  LocalWhiteboardAssignment map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalWhiteboardAssignment(
+      bedNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bed_number'],
+      )!,
+      patientName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}patient_name'],
+      )!,
+      ageGender: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}age_gender'],
+      ),
+      diagnosis: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}diagnosis'],
+      ),
+      assignedNurse: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}assigned_nurse'],
+      )!,
+      bay: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bay'],
+      )!,
+      shiftDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shift_date'],
+      )!,
+      shiftType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shift_type'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalWhiteboardAssignmentsTable createAlias(String alias) {
+    return $LocalWhiteboardAssignmentsTable(attachedDatabase, alias);
+  }
+}
+
+class LocalWhiteboardAssignment extends DataClass
+    implements Insertable<LocalWhiteboardAssignment> {
+  final String bedNumber;
+  final String patientName;
+  final String? ageGender;
+  final String? diagnosis;
+  final String assignedNurse;
+  final String bay;
+  final String shiftDate;
+  final String shiftType;
+  const LocalWhiteboardAssignment({
+    required this.bedNumber,
+    required this.patientName,
+    this.ageGender,
+    this.diagnosis,
+    required this.assignedNurse,
+    required this.bay,
+    required this.shiftDate,
+    required this.shiftType,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['bed_number'] = Variable<String>(bedNumber);
+    map['patient_name'] = Variable<String>(patientName);
+    if (!nullToAbsent || ageGender != null) {
+      map['age_gender'] = Variable<String>(ageGender);
+    }
+    if (!nullToAbsent || diagnosis != null) {
+      map['diagnosis'] = Variable<String>(diagnosis);
+    }
+    map['assigned_nurse'] = Variable<String>(assignedNurse);
+    map['bay'] = Variable<String>(bay);
+    map['shift_date'] = Variable<String>(shiftDate);
+    map['shift_type'] = Variable<String>(shiftType);
+    return map;
+  }
+
+  LocalWhiteboardAssignmentsCompanion toCompanion(bool nullToAbsent) {
+    return LocalWhiteboardAssignmentsCompanion(
+      bedNumber: Value(bedNumber),
+      patientName: Value(patientName),
+      ageGender: ageGender == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ageGender),
+      diagnosis: diagnosis == null && nullToAbsent
+          ? const Value.absent()
+          : Value(diagnosis),
+      assignedNurse: Value(assignedNurse),
+      bay: Value(bay),
+      shiftDate: Value(shiftDate),
+      shiftType: Value(shiftType),
+    );
+  }
+
+  factory LocalWhiteboardAssignment.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalWhiteboardAssignment(
+      bedNumber: serializer.fromJson<String>(json['bedNumber']),
+      patientName: serializer.fromJson<String>(json['patientName']),
+      ageGender: serializer.fromJson<String?>(json['ageGender']),
+      diagnosis: serializer.fromJson<String?>(json['diagnosis']),
+      assignedNurse: serializer.fromJson<String>(json['assignedNurse']),
+      bay: serializer.fromJson<String>(json['bay']),
+      shiftDate: serializer.fromJson<String>(json['shiftDate']),
+      shiftType: serializer.fromJson<String>(json['shiftType']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'bedNumber': serializer.toJson<String>(bedNumber),
+      'patientName': serializer.toJson<String>(patientName),
+      'ageGender': serializer.toJson<String?>(ageGender),
+      'diagnosis': serializer.toJson<String?>(diagnosis),
+      'assignedNurse': serializer.toJson<String>(assignedNurse),
+      'bay': serializer.toJson<String>(bay),
+      'shiftDate': serializer.toJson<String>(shiftDate),
+      'shiftType': serializer.toJson<String>(shiftType),
+    };
+  }
+
+  LocalWhiteboardAssignment copyWith({
+    String? bedNumber,
+    String? patientName,
+    Value<String?> ageGender = const Value.absent(),
+    Value<String?> diagnosis = const Value.absent(),
+    String? assignedNurse,
+    String? bay,
+    String? shiftDate,
+    String? shiftType,
+  }) => LocalWhiteboardAssignment(
+    bedNumber: bedNumber ?? this.bedNumber,
+    patientName: patientName ?? this.patientName,
+    ageGender: ageGender.present ? ageGender.value : this.ageGender,
+    diagnosis: diagnosis.present ? diagnosis.value : this.diagnosis,
+    assignedNurse: assignedNurse ?? this.assignedNurse,
+    bay: bay ?? this.bay,
+    shiftDate: shiftDate ?? this.shiftDate,
+    shiftType: shiftType ?? this.shiftType,
+  );
+  LocalWhiteboardAssignment copyWithCompanion(
+    LocalWhiteboardAssignmentsCompanion data,
+  ) {
+    return LocalWhiteboardAssignment(
+      bedNumber: data.bedNumber.present ? data.bedNumber.value : this.bedNumber,
+      patientName: data.patientName.present
+          ? data.patientName.value
+          : this.patientName,
+      ageGender: data.ageGender.present ? data.ageGender.value : this.ageGender,
+      diagnosis: data.diagnosis.present ? data.diagnosis.value : this.diagnosis,
+      assignedNurse: data.assignedNurse.present
+          ? data.assignedNurse.value
+          : this.assignedNurse,
+      bay: data.bay.present ? data.bay.value : this.bay,
+      shiftDate: data.shiftDate.present ? data.shiftDate.value : this.shiftDate,
+      shiftType: data.shiftType.present ? data.shiftType.value : this.shiftType,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalWhiteboardAssignment(')
+          ..write('bedNumber: $bedNumber, ')
+          ..write('patientName: $patientName, ')
+          ..write('ageGender: $ageGender, ')
+          ..write('diagnosis: $diagnosis, ')
+          ..write('assignedNurse: $assignedNurse, ')
+          ..write('bay: $bay, ')
+          ..write('shiftDate: $shiftDate, ')
+          ..write('shiftType: $shiftType')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    bedNumber,
+    patientName,
+    ageGender,
+    diagnosis,
+    assignedNurse,
+    bay,
+    shiftDate,
+    shiftType,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalWhiteboardAssignment &&
+          other.bedNumber == this.bedNumber &&
+          other.patientName == this.patientName &&
+          other.ageGender == this.ageGender &&
+          other.diagnosis == this.diagnosis &&
+          other.assignedNurse == this.assignedNurse &&
+          other.bay == this.bay &&
+          other.shiftDate == this.shiftDate &&
+          other.shiftType == this.shiftType);
+}
+
+class LocalWhiteboardAssignmentsCompanion
+    extends UpdateCompanion<LocalWhiteboardAssignment> {
+  final Value<String> bedNumber;
+  final Value<String> patientName;
+  final Value<String?> ageGender;
+  final Value<String?> diagnosis;
+  final Value<String> assignedNurse;
+  final Value<String> bay;
+  final Value<String> shiftDate;
+  final Value<String> shiftType;
+  final Value<int> rowid;
+  const LocalWhiteboardAssignmentsCompanion({
+    this.bedNumber = const Value.absent(),
+    this.patientName = const Value.absent(),
+    this.ageGender = const Value.absent(),
+    this.diagnosis = const Value.absent(),
+    this.assignedNurse = const Value.absent(),
+    this.bay = const Value.absent(),
+    this.shiftDate = const Value.absent(),
+    this.shiftType = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalWhiteboardAssignmentsCompanion.insert({
+    required String bedNumber,
+    required String patientName,
+    this.ageGender = const Value.absent(),
+    this.diagnosis = const Value.absent(),
+    required String assignedNurse,
+    required String bay,
+    required String shiftDate,
+    required String shiftType,
+    this.rowid = const Value.absent(),
+  }) : bedNumber = Value(bedNumber),
+       patientName = Value(patientName),
+       assignedNurse = Value(assignedNurse),
+       bay = Value(bay),
+       shiftDate = Value(shiftDate),
+       shiftType = Value(shiftType);
+  static Insertable<LocalWhiteboardAssignment> custom({
+    Expression<String>? bedNumber,
+    Expression<String>? patientName,
+    Expression<String>? ageGender,
+    Expression<String>? diagnosis,
+    Expression<String>? assignedNurse,
+    Expression<String>? bay,
+    Expression<String>? shiftDate,
+    Expression<String>? shiftType,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (bedNumber != null) 'bed_number': bedNumber,
+      if (patientName != null) 'patient_name': patientName,
+      if (ageGender != null) 'age_gender': ageGender,
+      if (diagnosis != null) 'diagnosis': diagnosis,
+      if (assignedNurse != null) 'assigned_nurse': assignedNurse,
+      if (bay != null) 'bay': bay,
+      if (shiftDate != null) 'shift_date': shiftDate,
+      if (shiftType != null) 'shift_type': shiftType,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalWhiteboardAssignmentsCompanion copyWith({
+    Value<String>? bedNumber,
+    Value<String>? patientName,
+    Value<String?>? ageGender,
+    Value<String?>? diagnosis,
+    Value<String>? assignedNurse,
+    Value<String>? bay,
+    Value<String>? shiftDate,
+    Value<String>? shiftType,
+    Value<int>? rowid,
+  }) {
+    return LocalWhiteboardAssignmentsCompanion(
+      bedNumber: bedNumber ?? this.bedNumber,
+      patientName: patientName ?? this.patientName,
+      ageGender: ageGender ?? this.ageGender,
+      diagnosis: diagnosis ?? this.diagnosis,
+      assignedNurse: assignedNurse ?? this.assignedNurse,
+      bay: bay ?? this.bay,
+      shiftDate: shiftDate ?? this.shiftDate,
+      shiftType: shiftType ?? this.shiftType,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (bedNumber.present) {
+      map['bed_number'] = Variable<String>(bedNumber.value);
+    }
+    if (patientName.present) {
+      map['patient_name'] = Variable<String>(patientName.value);
+    }
+    if (ageGender.present) {
+      map['age_gender'] = Variable<String>(ageGender.value);
+    }
+    if (diagnosis.present) {
+      map['diagnosis'] = Variable<String>(diagnosis.value);
+    }
+    if (assignedNurse.present) {
+      map['assigned_nurse'] = Variable<String>(assignedNurse.value);
+    }
+    if (bay.present) {
+      map['bay'] = Variable<String>(bay.value);
+    }
+    if (shiftDate.present) {
+      map['shift_date'] = Variable<String>(shiftDate.value);
+    }
+    if (shiftType.present) {
+      map['shift_type'] = Variable<String>(shiftType.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalWhiteboardAssignmentsCompanion(')
+          ..write('bedNumber: $bedNumber, ')
+          ..write('patientName: $patientName, ')
+          ..write('ageGender: $ageGender, ')
+          ..write('diagnosis: $diagnosis, ')
+          ..write('assignedNurse: $assignedNurse, ')
+          ..write('bay: $bay, ')
+          ..write('shiftDate: $shiftDate, ')
+          ..write('shiftType: $shiftType, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalSupportRostersTable extends LocalSupportRosters
+    with TableInfo<$LocalSupportRostersTable, LocalSupportRoster> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalSupportRostersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _wardIdMeta = const VerificationMeta('wardId');
+  @override
+  late final GeneratedColumn<String> wardId = GeneratedColumn<String>(
+    'ward_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shiftDateMeta = const VerificationMeta(
+    'shiftDate',
+  );
+  @override
+  late final GeneratedColumn<String> shiftDate = GeneratedColumn<String>(
+    'shift_date',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shiftTypeMeta = const VerificationMeta(
+    'shiftType',
+  );
+  @override
+  late final GeneratedColumn<String> shiftType = GeneratedColumn<String>(
+    'shift_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _inChargeNameMeta = const VerificationMeta(
+    'inChargeName',
+  );
+  @override
+  late final GeneratedColumn<String> inChargeName = GeneratedColumn<String>(
+    'in_charge_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _inChargePhoneMeta = const VerificationMeta(
+    'inChargePhone',
+  );
+  @override
+  late final GeneratedColumn<String> inChargePhone = GeneratedColumn<String>(
+    'in_charge_phone',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _inChargeRoleMeta = const VerificationMeta(
+    'inChargeRole',
+  );
+  @override
+  late final GeneratedColumn<String> inChargeRole = GeneratedColumn<String>(
+    'in_charge_role',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _floatNurseNameMeta = const VerificationMeta(
+    'floatNurseName',
+  );
+  @override
+  late final GeneratedColumn<String> floatNurseName = GeneratedColumn<String>(
+    'float_nurse_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _floatNursePhoneMeta = const VerificationMeta(
+    'floatNursePhone',
+  );
+  @override
+  late final GeneratedColumn<String> floatNursePhone = GeneratedColumn<String>(
+    'float_nurse_phone',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _floatNurseRoleMeta = const VerificationMeta(
+    'floatNurseRole',
+  );
+  @override
+  late final GeneratedColumn<String> floatNurseRole = GeneratedColumn<String>(
+    'float_nurse_role',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _hcasJsonMeta = const VerificationMeta(
+    'hcasJson',
+  );
+  @override
+  late final GeneratedColumn<String> hcasJson = GeneratedColumn<String>(
+    'hcas_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _doctorsJsonMeta = const VerificationMeta(
+    'doctorsJson',
+  );
+  @override
+  late final GeneratedColumn<String> doctorsJson = GeneratedColumn<String>(
+    'doctors_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    wardId,
+    shiftDate,
+    shiftType,
+    inChargeName,
+    inChargePhone,
+    inChargeRole,
+    floatNurseName,
+    floatNursePhone,
+    floatNurseRole,
+    hcasJson,
+    doctorsJson,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_support_rosters';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalSupportRoster> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('ward_id')) {
+      context.handle(
+        _wardIdMeta,
+        wardId.isAcceptableOrUnknown(data['ward_id']!, _wardIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_wardIdMeta);
+    }
+    if (data.containsKey('shift_date')) {
+      context.handle(
+        _shiftDateMeta,
+        shiftDate.isAcceptableOrUnknown(data['shift_date']!, _shiftDateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shiftDateMeta);
+    }
+    if (data.containsKey('shift_type')) {
+      context.handle(
+        _shiftTypeMeta,
+        shiftType.isAcceptableOrUnknown(data['shift_type']!, _shiftTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shiftTypeMeta);
+    }
+    if (data.containsKey('in_charge_name')) {
+      context.handle(
+        _inChargeNameMeta,
+        inChargeName.isAcceptableOrUnknown(
+          data['in_charge_name']!,
+          _inChargeNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_inChargeNameMeta);
+    }
+    if (data.containsKey('in_charge_phone')) {
+      context.handle(
+        _inChargePhoneMeta,
+        inChargePhone.isAcceptableOrUnknown(
+          data['in_charge_phone']!,
+          _inChargePhoneMeta,
+        ),
+      );
+    }
+    if (data.containsKey('in_charge_role')) {
+      context.handle(
+        _inChargeRoleMeta,
+        inChargeRole.isAcceptableOrUnknown(
+          data['in_charge_role']!,
+          _inChargeRoleMeta,
+        ),
+      );
+    }
+    if (data.containsKey('float_nurse_name')) {
+      context.handle(
+        _floatNurseNameMeta,
+        floatNurseName.isAcceptableOrUnknown(
+          data['float_nurse_name']!,
+          _floatNurseNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_floatNurseNameMeta);
+    }
+    if (data.containsKey('float_nurse_phone')) {
+      context.handle(
+        _floatNursePhoneMeta,
+        floatNursePhone.isAcceptableOrUnknown(
+          data['float_nurse_phone']!,
+          _floatNursePhoneMeta,
+        ),
+      );
+    }
+    if (data.containsKey('float_nurse_role')) {
+      context.handle(
+        _floatNurseRoleMeta,
+        floatNurseRole.isAcceptableOrUnknown(
+          data['float_nurse_role']!,
+          _floatNurseRoleMeta,
+        ),
+      );
+    }
+    if (data.containsKey('hcas_json')) {
+      context.handle(
+        _hcasJsonMeta,
+        hcasJson.isAcceptableOrUnknown(data['hcas_json']!, _hcasJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_hcasJsonMeta);
+    }
+    if (data.containsKey('doctors_json')) {
+      context.handle(
+        _doctorsJsonMeta,
+        doctorsJson.isAcceptableOrUnknown(
+          data['doctors_json']!,
+          _doctorsJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_doctorsJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {wardId, shiftDate, shiftType};
+  @override
+  LocalSupportRoster map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalSupportRoster(
+      wardId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ward_id'],
+      )!,
+      shiftDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shift_date'],
+      )!,
+      shiftType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shift_type'],
+      )!,
+      inChargeName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}in_charge_name'],
+      )!,
+      inChargePhone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}in_charge_phone'],
+      ),
+      inChargeRole: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}in_charge_role'],
+      ),
+      floatNurseName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}float_nurse_name'],
+      )!,
+      floatNursePhone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}float_nurse_phone'],
+      ),
+      floatNurseRole: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}float_nurse_role'],
+      ),
+      hcasJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hcas_json'],
+      )!,
+      doctorsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}doctors_json'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalSupportRostersTable createAlias(String alias) {
+    return $LocalSupportRostersTable(attachedDatabase, alias);
+  }
+}
+
+class LocalSupportRoster extends DataClass
+    implements Insertable<LocalSupportRoster> {
+  final String wardId;
+  final String shiftDate;
+  final String shiftType;
+  final String inChargeName;
+  final String? inChargePhone;
+  final String? inChargeRole;
+  final String floatNurseName;
+  final String? floatNursePhone;
+  final String? floatNurseRole;
+  final String hcasJson;
+  final String doctorsJson;
+  const LocalSupportRoster({
+    required this.wardId,
+    required this.shiftDate,
+    required this.shiftType,
+    required this.inChargeName,
+    this.inChargePhone,
+    this.inChargeRole,
+    required this.floatNurseName,
+    this.floatNursePhone,
+    this.floatNurseRole,
+    required this.hcasJson,
+    required this.doctorsJson,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['ward_id'] = Variable<String>(wardId);
+    map['shift_date'] = Variable<String>(shiftDate);
+    map['shift_type'] = Variable<String>(shiftType);
+    map['in_charge_name'] = Variable<String>(inChargeName);
+    if (!nullToAbsent || inChargePhone != null) {
+      map['in_charge_phone'] = Variable<String>(inChargePhone);
+    }
+    if (!nullToAbsent || inChargeRole != null) {
+      map['in_charge_role'] = Variable<String>(inChargeRole);
+    }
+    map['float_nurse_name'] = Variable<String>(floatNurseName);
+    if (!nullToAbsent || floatNursePhone != null) {
+      map['float_nurse_phone'] = Variable<String>(floatNursePhone);
+    }
+    if (!nullToAbsent || floatNurseRole != null) {
+      map['float_nurse_role'] = Variable<String>(floatNurseRole);
+    }
+    map['hcas_json'] = Variable<String>(hcasJson);
+    map['doctors_json'] = Variable<String>(doctorsJson);
+    return map;
+  }
+
+  LocalSupportRostersCompanion toCompanion(bool nullToAbsent) {
+    return LocalSupportRostersCompanion(
+      wardId: Value(wardId),
+      shiftDate: Value(shiftDate),
+      shiftType: Value(shiftType),
+      inChargeName: Value(inChargeName),
+      inChargePhone: inChargePhone == null && nullToAbsent
+          ? const Value.absent()
+          : Value(inChargePhone),
+      inChargeRole: inChargeRole == null && nullToAbsent
+          ? const Value.absent()
+          : Value(inChargeRole),
+      floatNurseName: Value(floatNurseName),
+      floatNursePhone: floatNursePhone == null && nullToAbsent
+          ? const Value.absent()
+          : Value(floatNursePhone),
+      floatNurseRole: floatNurseRole == null && nullToAbsent
+          ? const Value.absent()
+          : Value(floatNurseRole),
+      hcasJson: Value(hcasJson),
+      doctorsJson: Value(doctorsJson),
+    );
+  }
+
+  factory LocalSupportRoster.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalSupportRoster(
+      wardId: serializer.fromJson<String>(json['wardId']),
+      shiftDate: serializer.fromJson<String>(json['shiftDate']),
+      shiftType: serializer.fromJson<String>(json['shiftType']),
+      inChargeName: serializer.fromJson<String>(json['inChargeName']),
+      inChargePhone: serializer.fromJson<String?>(json['inChargePhone']),
+      inChargeRole: serializer.fromJson<String?>(json['inChargeRole']),
+      floatNurseName: serializer.fromJson<String>(json['floatNurseName']),
+      floatNursePhone: serializer.fromJson<String?>(json['floatNursePhone']),
+      floatNurseRole: serializer.fromJson<String?>(json['floatNurseRole']),
+      hcasJson: serializer.fromJson<String>(json['hcasJson']),
+      doctorsJson: serializer.fromJson<String>(json['doctorsJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'wardId': serializer.toJson<String>(wardId),
+      'shiftDate': serializer.toJson<String>(shiftDate),
+      'shiftType': serializer.toJson<String>(shiftType),
+      'inChargeName': serializer.toJson<String>(inChargeName),
+      'inChargePhone': serializer.toJson<String?>(inChargePhone),
+      'inChargeRole': serializer.toJson<String?>(inChargeRole),
+      'floatNurseName': serializer.toJson<String>(floatNurseName),
+      'floatNursePhone': serializer.toJson<String?>(floatNursePhone),
+      'floatNurseRole': serializer.toJson<String?>(floatNurseRole),
+      'hcasJson': serializer.toJson<String>(hcasJson),
+      'doctorsJson': serializer.toJson<String>(doctorsJson),
+    };
+  }
+
+  LocalSupportRoster copyWith({
+    String? wardId,
+    String? shiftDate,
+    String? shiftType,
+    String? inChargeName,
+    Value<String?> inChargePhone = const Value.absent(),
+    Value<String?> inChargeRole = const Value.absent(),
+    String? floatNurseName,
+    Value<String?> floatNursePhone = const Value.absent(),
+    Value<String?> floatNurseRole = const Value.absent(),
+    String? hcasJson,
+    String? doctorsJson,
+  }) => LocalSupportRoster(
+    wardId: wardId ?? this.wardId,
+    shiftDate: shiftDate ?? this.shiftDate,
+    shiftType: shiftType ?? this.shiftType,
+    inChargeName: inChargeName ?? this.inChargeName,
+    inChargePhone: inChargePhone.present
+        ? inChargePhone.value
+        : this.inChargePhone,
+    inChargeRole: inChargeRole.present ? inChargeRole.value : this.inChargeRole,
+    floatNurseName: floatNurseName ?? this.floatNurseName,
+    floatNursePhone: floatNursePhone.present
+        ? floatNursePhone.value
+        : this.floatNursePhone,
+    floatNurseRole: floatNurseRole.present
+        ? floatNurseRole.value
+        : this.floatNurseRole,
+    hcasJson: hcasJson ?? this.hcasJson,
+    doctorsJson: doctorsJson ?? this.doctorsJson,
+  );
+  LocalSupportRoster copyWithCompanion(LocalSupportRostersCompanion data) {
+    return LocalSupportRoster(
+      wardId: data.wardId.present ? data.wardId.value : this.wardId,
+      shiftDate: data.shiftDate.present ? data.shiftDate.value : this.shiftDate,
+      shiftType: data.shiftType.present ? data.shiftType.value : this.shiftType,
+      inChargeName: data.inChargeName.present
+          ? data.inChargeName.value
+          : this.inChargeName,
+      inChargePhone: data.inChargePhone.present
+          ? data.inChargePhone.value
+          : this.inChargePhone,
+      inChargeRole: data.inChargeRole.present
+          ? data.inChargeRole.value
+          : this.inChargeRole,
+      floatNurseName: data.floatNurseName.present
+          ? data.floatNurseName.value
+          : this.floatNurseName,
+      floatNursePhone: data.floatNursePhone.present
+          ? data.floatNursePhone.value
+          : this.floatNursePhone,
+      floatNurseRole: data.floatNurseRole.present
+          ? data.floatNurseRole.value
+          : this.floatNurseRole,
+      hcasJson: data.hcasJson.present ? data.hcasJson.value : this.hcasJson,
+      doctorsJson: data.doctorsJson.present
+          ? data.doctorsJson.value
+          : this.doctorsJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalSupportRoster(')
+          ..write('wardId: $wardId, ')
+          ..write('shiftDate: $shiftDate, ')
+          ..write('shiftType: $shiftType, ')
+          ..write('inChargeName: $inChargeName, ')
+          ..write('inChargePhone: $inChargePhone, ')
+          ..write('inChargeRole: $inChargeRole, ')
+          ..write('floatNurseName: $floatNurseName, ')
+          ..write('floatNursePhone: $floatNursePhone, ')
+          ..write('floatNurseRole: $floatNurseRole, ')
+          ..write('hcasJson: $hcasJson, ')
+          ..write('doctorsJson: $doctorsJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    wardId,
+    shiftDate,
+    shiftType,
+    inChargeName,
+    inChargePhone,
+    inChargeRole,
+    floatNurseName,
+    floatNursePhone,
+    floatNurseRole,
+    hcasJson,
+    doctorsJson,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalSupportRoster &&
+          other.wardId == this.wardId &&
+          other.shiftDate == this.shiftDate &&
+          other.shiftType == this.shiftType &&
+          other.inChargeName == this.inChargeName &&
+          other.inChargePhone == this.inChargePhone &&
+          other.inChargeRole == this.inChargeRole &&
+          other.floatNurseName == this.floatNurseName &&
+          other.floatNursePhone == this.floatNursePhone &&
+          other.floatNurseRole == this.floatNurseRole &&
+          other.hcasJson == this.hcasJson &&
+          other.doctorsJson == this.doctorsJson);
+}
+
+class LocalSupportRostersCompanion extends UpdateCompanion<LocalSupportRoster> {
+  final Value<String> wardId;
+  final Value<String> shiftDate;
+  final Value<String> shiftType;
+  final Value<String> inChargeName;
+  final Value<String?> inChargePhone;
+  final Value<String?> inChargeRole;
+  final Value<String> floatNurseName;
+  final Value<String?> floatNursePhone;
+  final Value<String?> floatNurseRole;
+  final Value<String> hcasJson;
+  final Value<String> doctorsJson;
+  final Value<int> rowid;
+  const LocalSupportRostersCompanion({
+    this.wardId = const Value.absent(),
+    this.shiftDate = const Value.absent(),
+    this.shiftType = const Value.absent(),
+    this.inChargeName = const Value.absent(),
+    this.inChargePhone = const Value.absent(),
+    this.inChargeRole = const Value.absent(),
+    this.floatNurseName = const Value.absent(),
+    this.floatNursePhone = const Value.absent(),
+    this.floatNurseRole = const Value.absent(),
+    this.hcasJson = const Value.absent(),
+    this.doctorsJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalSupportRostersCompanion.insert({
+    required String wardId,
+    required String shiftDate,
+    required String shiftType,
+    required String inChargeName,
+    this.inChargePhone = const Value.absent(),
+    this.inChargeRole = const Value.absent(),
+    required String floatNurseName,
+    this.floatNursePhone = const Value.absent(),
+    this.floatNurseRole = const Value.absent(),
+    required String hcasJson,
+    required String doctorsJson,
+    this.rowid = const Value.absent(),
+  }) : wardId = Value(wardId),
+       shiftDate = Value(shiftDate),
+       shiftType = Value(shiftType),
+       inChargeName = Value(inChargeName),
+       floatNurseName = Value(floatNurseName),
+       hcasJson = Value(hcasJson),
+       doctorsJson = Value(doctorsJson);
+  static Insertable<LocalSupportRoster> custom({
+    Expression<String>? wardId,
+    Expression<String>? shiftDate,
+    Expression<String>? shiftType,
+    Expression<String>? inChargeName,
+    Expression<String>? inChargePhone,
+    Expression<String>? inChargeRole,
+    Expression<String>? floatNurseName,
+    Expression<String>? floatNursePhone,
+    Expression<String>? floatNurseRole,
+    Expression<String>? hcasJson,
+    Expression<String>? doctorsJson,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (wardId != null) 'ward_id': wardId,
+      if (shiftDate != null) 'shift_date': shiftDate,
+      if (shiftType != null) 'shift_type': shiftType,
+      if (inChargeName != null) 'in_charge_name': inChargeName,
+      if (inChargePhone != null) 'in_charge_phone': inChargePhone,
+      if (inChargeRole != null) 'in_charge_role': inChargeRole,
+      if (floatNurseName != null) 'float_nurse_name': floatNurseName,
+      if (floatNursePhone != null) 'float_nurse_phone': floatNursePhone,
+      if (floatNurseRole != null) 'float_nurse_role': floatNurseRole,
+      if (hcasJson != null) 'hcas_json': hcasJson,
+      if (doctorsJson != null) 'doctors_json': doctorsJson,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalSupportRostersCompanion copyWith({
+    Value<String>? wardId,
+    Value<String>? shiftDate,
+    Value<String>? shiftType,
+    Value<String>? inChargeName,
+    Value<String?>? inChargePhone,
+    Value<String?>? inChargeRole,
+    Value<String>? floatNurseName,
+    Value<String?>? floatNursePhone,
+    Value<String?>? floatNurseRole,
+    Value<String>? hcasJson,
+    Value<String>? doctorsJson,
+    Value<int>? rowid,
+  }) {
+    return LocalSupportRostersCompanion(
+      wardId: wardId ?? this.wardId,
+      shiftDate: shiftDate ?? this.shiftDate,
+      shiftType: shiftType ?? this.shiftType,
+      inChargeName: inChargeName ?? this.inChargeName,
+      inChargePhone: inChargePhone ?? this.inChargePhone,
+      inChargeRole: inChargeRole ?? this.inChargeRole,
+      floatNurseName: floatNurseName ?? this.floatNurseName,
+      floatNursePhone: floatNursePhone ?? this.floatNursePhone,
+      floatNurseRole: floatNurseRole ?? this.floatNurseRole,
+      hcasJson: hcasJson ?? this.hcasJson,
+      doctorsJson: doctorsJson ?? this.doctorsJson,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (wardId.present) {
+      map['ward_id'] = Variable<String>(wardId.value);
+    }
+    if (shiftDate.present) {
+      map['shift_date'] = Variable<String>(shiftDate.value);
+    }
+    if (shiftType.present) {
+      map['shift_type'] = Variable<String>(shiftType.value);
+    }
+    if (inChargeName.present) {
+      map['in_charge_name'] = Variable<String>(inChargeName.value);
+    }
+    if (inChargePhone.present) {
+      map['in_charge_phone'] = Variable<String>(inChargePhone.value);
+    }
+    if (inChargeRole.present) {
+      map['in_charge_role'] = Variable<String>(inChargeRole.value);
+    }
+    if (floatNurseName.present) {
+      map['float_nurse_name'] = Variable<String>(floatNurseName.value);
+    }
+    if (floatNursePhone.present) {
+      map['float_nurse_phone'] = Variable<String>(floatNursePhone.value);
+    }
+    if (floatNurseRole.present) {
+      map['float_nurse_role'] = Variable<String>(floatNurseRole.value);
+    }
+    if (hcasJson.present) {
+      map['hcas_json'] = Variable<String>(hcasJson.value);
+    }
+    if (doctorsJson.present) {
+      map['doctors_json'] = Variable<String>(doctorsJson.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalSupportRostersCompanion(')
+          ..write('wardId: $wardId, ')
+          ..write('shiftDate: $shiftDate, ')
+          ..write('shiftType: $shiftType, ')
+          ..write('inChargeName: $inChargeName, ')
+          ..write('inChargePhone: $inChargePhone, ')
+          ..write('inChargeRole: $inChargeRole, ')
+          ..write('floatNurseName: $floatNurseName, ')
+          ..write('floatNursePhone: $floatNursePhone, ')
+          ..write('floatNurseRole: $floatNurseRole, ')
+          ..write('hcasJson: $hcasJson, ')
+          ..write('doctorsJson: $doctorsJson, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OraviLocalDatabase extends GeneratedDatabase {
   _$OraviLocalDatabase(QueryExecutor e) : super(e);
   $OraviLocalDatabaseManager get managers => $OraviLocalDatabaseManager(this);
   late final $LocalEventsTable localEvents = $LocalEventsTable(this);
   late final $OutboxTable outbox = $OutboxTable(this);
+  late final $LocalStaffTable localStaff = $LocalStaffTable(this);
+  late final $LocalWhiteboardAssignmentsTable localWhiteboardAssignments =
+      $LocalWhiteboardAssignmentsTable(this);
+  late final $LocalSupportRostersTable localSupportRosters =
+      $LocalSupportRostersTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [localEvents, outbox];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    localEvents,
+    outbox,
+    localStaff,
+    localWhiteboardAssignments,
+    localSupportRosters,
+  ];
 }
 
 typedef $$LocalEventsTableCreateCompanionBuilder =
@@ -1746,6 +3555,944 @@ typedef $$OutboxTableProcessedTableManager =
       OutboxData,
       PrefetchHooks Function()
     >;
+typedef $$LocalStaffTableCreateCompanionBuilder =
+    LocalStaffCompanion Function({
+      required String staffId,
+      required String name,
+      required String role,
+      Value<String> wardId,
+      required String pin,
+      Value<bool> isActive,
+      Value<String> avatarColor,
+      required String initials,
+      Value<String?> email,
+      Value<int> rowid,
+    });
+typedef $$LocalStaffTableUpdateCompanionBuilder =
+    LocalStaffCompanion Function({
+      Value<String> staffId,
+      Value<String> name,
+      Value<String> role,
+      Value<String> wardId,
+      Value<String> pin,
+      Value<bool> isActive,
+      Value<String> avatarColor,
+      Value<String> initials,
+      Value<String?> email,
+      Value<int> rowid,
+    });
+
+class $$LocalStaffTableFilterComposer
+    extends Composer<_$OraviLocalDatabase, $LocalStaffTable> {
+  $$LocalStaffTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get staffId => $composableBuilder(
+    column: $table.staffId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get wardId => $composableBuilder(
+    column: $table.wardId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pin => $composableBuilder(
+    column: $table.pin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isActive => $composableBuilder(
+    column: $table.isActive,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get avatarColor => $composableBuilder(
+    column: $table.avatarColor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get initials => $composableBuilder(
+    column: $table.initials,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get email => $composableBuilder(
+    column: $table.email,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalStaffTableOrderingComposer
+    extends Composer<_$OraviLocalDatabase, $LocalStaffTable> {
+  $$LocalStaffTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get staffId => $composableBuilder(
+    column: $table.staffId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get wardId => $composableBuilder(
+    column: $table.wardId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pin => $composableBuilder(
+    column: $table.pin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isActive => $composableBuilder(
+    column: $table.isActive,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get avatarColor => $composableBuilder(
+    column: $table.avatarColor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get initials => $composableBuilder(
+    column: $table.initials,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get email => $composableBuilder(
+    column: $table.email,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalStaffTableAnnotationComposer
+    extends Composer<_$OraviLocalDatabase, $LocalStaffTable> {
+  $$LocalStaffTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get staffId =>
+      $composableBuilder(column: $table.staffId, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get role =>
+      $composableBuilder(column: $table.role, builder: (column) => column);
+
+  GeneratedColumn<String> get wardId =>
+      $composableBuilder(column: $table.wardId, builder: (column) => column);
+
+  GeneratedColumn<String> get pin =>
+      $composableBuilder(column: $table.pin, builder: (column) => column);
+
+  GeneratedColumn<bool> get isActive =>
+      $composableBuilder(column: $table.isActive, builder: (column) => column);
+
+  GeneratedColumn<String> get avatarColor => $composableBuilder(
+    column: $table.avatarColor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get initials =>
+      $composableBuilder(column: $table.initials, builder: (column) => column);
+
+  GeneratedColumn<String> get email =>
+      $composableBuilder(column: $table.email, builder: (column) => column);
+}
+
+class $$LocalStaffTableTableManager
+    extends
+        RootTableManager<
+          _$OraviLocalDatabase,
+          $LocalStaffTable,
+          LocalStaffData,
+          $$LocalStaffTableFilterComposer,
+          $$LocalStaffTableOrderingComposer,
+          $$LocalStaffTableAnnotationComposer,
+          $$LocalStaffTableCreateCompanionBuilder,
+          $$LocalStaffTableUpdateCompanionBuilder,
+          (
+            LocalStaffData,
+            BaseReferences<
+              _$OraviLocalDatabase,
+              $LocalStaffTable,
+              LocalStaffData
+            >,
+          ),
+          LocalStaffData,
+          PrefetchHooks Function()
+        > {
+  $$LocalStaffTableTableManager(_$OraviLocalDatabase db, $LocalStaffTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalStaffTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalStaffTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalStaffTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> staffId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> role = const Value.absent(),
+                Value<String> wardId = const Value.absent(),
+                Value<String> pin = const Value.absent(),
+                Value<bool> isActive = const Value.absent(),
+                Value<String> avatarColor = const Value.absent(),
+                Value<String> initials = const Value.absent(),
+                Value<String?> email = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalStaffCompanion(
+                staffId: staffId,
+                name: name,
+                role: role,
+                wardId: wardId,
+                pin: pin,
+                isActive: isActive,
+                avatarColor: avatarColor,
+                initials: initials,
+                email: email,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String staffId,
+                required String name,
+                required String role,
+                Value<String> wardId = const Value.absent(),
+                required String pin,
+                Value<bool> isActive = const Value.absent(),
+                Value<String> avatarColor = const Value.absent(),
+                required String initials,
+                Value<String?> email = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalStaffCompanion.insert(
+                staffId: staffId,
+                name: name,
+                role: role,
+                wardId: wardId,
+                pin: pin,
+                isActive: isActive,
+                avatarColor: avatarColor,
+                initials: initials,
+                email: email,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalStaffTable, LocalStaffData>(table),
+                  BaseReferences<
+                    _$OraviLocalDatabase,
+                    $LocalStaffTable,
+                    LocalStaffData
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalStaffTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OraviLocalDatabase,
+      $LocalStaffTable,
+      LocalStaffData,
+      $$LocalStaffTableFilterComposer,
+      $$LocalStaffTableOrderingComposer,
+      $$LocalStaffTableAnnotationComposer,
+      $$LocalStaffTableCreateCompanionBuilder,
+      $$LocalStaffTableUpdateCompanionBuilder,
+      (
+        LocalStaffData,
+        BaseReferences<_$OraviLocalDatabase, $LocalStaffTable, LocalStaffData>,
+      ),
+      LocalStaffData,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalWhiteboardAssignmentsTableCreateCompanionBuilder =
+    LocalWhiteboardAssignmentsCompanion Function({
+      required String bedNumber,
+      required String patientName,
+      Value<String?> ageGender,
+      Value<String?> diagnosis,
+      required String assignedNurse,
+      required String bay,
+      required String shiftDate,
+      required String shiftType,
+      Value<int> rowid,
+    });
+typedef $$LocalWhiteboardAssignmentsTableUpdateCompanionBuilder =
+    LocalWhiteboardAssignmentsCompanion Function({
+      Value<String> bedNumber,
+      Value<String> patientName,
+      Value<String?> ageGender,
+      Value<String?> diagnosis,
+      Value<String> assignedNurse,
+      Value<String> bay,
+      Value<String> shiftDate,
+      Value<String> shiftType,
+      Value<int> rowid,
+    });
+
+class $$LocalWhiteboardAssignmentsTableFilterComposer
+    extends Composer<_$OraviLocalDatabase, $LocalWhiteboardAssignmentsTable> {
+  $$LocalWhiteboardAssignmentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get bedNumber => $composableBuilder(
+    column: $table.bedNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get patientName => $composableBuilder(
+    column: $table.patientName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ageGender => $composableBuilder(
+    column: $table.ageGender,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get diagnosis => $composableBuilder(
+    column: $table.diagnosis,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get assignedNurse => $composableBuilder(
+    column: $table.assignedNurse,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bay => $composableBuilder(
+    column: $table.bay,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shiftDate => $composableBuilder(
+    column: $table.shiftDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shiftType => $composableBuilder(
+    column: $table.shiftType,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalWhiteboardAssignmentsTableOrderingComposer
+    extends Composer<_$OraviLocalDatabase, $LocalWhiteboardAssignmentsTable> {
+  $$LocalWhiteboardAssignmentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get bedNumber => $composableBuilder(
+    column: $table.bedNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get patientName => $composableBuilder(
+    column: $table.patientName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ageGender => $composableBuilder(
+    column: $table.ageGender,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get diagnosis => $composableBuilder(
+    column: $table.diagnosis,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get assignedNurse => $composableBuilder(
+    column: $table.assignedNurse,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bay => $composableBuilder(
+    column: $table.bay,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shiftDate => $composableBuilder(
+    column: $table.shiftDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shiftType => $composableBuilder(
+    column: $table.shiftType,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalWhiteboardAssignmentsTableAnnotationComposer
+    extends Composer<_$OraviLocalDatabase, $LocalWhiteboardAssignmentsTable> {
+  $$LocalWhiteboardAssignmentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get bedNumber =>
+      $composableBuilder(column: $table.bedNumber, builder: (column) => column);
+
+  GeneratedColumn<String> get patientName => $composableBuilder(
+    column: $table.patientName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ageGender =>
+      $composableBuilder(column: $table.ageGender, builder: (column) => column);
+
+  GeneratedColumn<String> get diagnosis =>
+      $composableBuilder(column: $table.diagnosis, builder: (column) => column);
+
+  GeneratedColumn<String> get assignedNurse => $composableBuilder(
+    column: $table.assignedNurse,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get bay =>
+      $composableBuilder(column: $table.bay, builder: (column) => column);
+
+  GeneratedColumn<String> get shiftDate =>
+      $composableBuilder(column: $table.shiftDate, builder: (column) => column);
+
+  GeneratedColumn<String> get shiftType =>
+      $composableBuilder(column: $table.shiftType, builder: (column) => column);
+}
+
+class $$LocalWhiteboardAssignmentsTableTableManager
+    extends
+        RootTableManager<
+          _$OraviLocalDatabase,
+          $LocalWhiteboardAssignmentsTable,
+          LocalWhiteboardAssignment,
+          $$LocalWhiteboardAssignmentsTableFilterComposer,
+          $$LocalWhiteboardAssignmentsTableOrderingComposer,
+          $$LocalWhiteboardAssignmentsTableAnnotationComposer,
+          $$LocalWhiteboardAssignmentsTableCreateCompanionBuilder,
+          $$LocalWhiteboardAssignmentsTableUpdateCompanionBuilder,
+          (
+            LocalWhiteboardAssignment,
+            BaseReferences<
+              _$OraviLocalDatabase,
+              $LocalWhiteboardAssignmentsTable,
+              LocalWhiteboardAssignment
+            >,
+          ),
+          LocalWhiteboardAssignment,
+          PrefetchHooks Function()
+        > {
+  $$LocalWhiteboardAssignmentsTableTableManager(
+    _$OraviLocalDatabase db,
+    $LocalWhiteboardAssignmentsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalWhiteboardAssignmentsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$LocalWhiteboardAssignmentsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$LocalWhiteboardAssignmentsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> bedNumber = const Value.absent(),
+                Value<String> patientName = const Value.absent(),
+                Value<String?> ageGender = const Value.absent(),
+                Value<String?> diagnosis = const Value.absent(),
+                Value<String> assignedNurse = const Value.absent(),
+                Value<String> bay = const Value.absent(),
+                Value<String> shiftDate = const Value.absent(),
+                Value<String> shiftType = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalWhiteboardAssignmentsCompanion(
+                bedNumber: bedNumber,
+                patientName: patientName,
+                ageGender: ageGender,
+                diagnosis: diagnosis,
+                assignedNurse: assignedNurse,
+                bay: bay,
+                shiftDate: shiftDate,
+                shiftType: shiftType,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String bedNumber,
+                required String patientName,
+                Value<String?> ageGender = const Value.absent(),
+                Value<String?> diagnosis = const Value.absent(),
+                required String assignedNurse,
+                required String bay,
+                required String shiftDate,
+                required String shiftType,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalWhiteboardAssignmentsCompanion.insert(
+                bedNumber: bedNumber,
+                patientName: patientName,
+                ageGender: ageGender,
+                diagnosis: diagnosis,
+                assignedNurse: assignedNurse,
+                bay: bay,
+                shiftDate: shiftDate,
+                shiftType: shiftType,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $LocalWhiteboardAssignmentsTable,
+                    LocalWhiteboardAssignment
+                  >(table),
+                  BaseReferences<
+                    _$OraviLocalDatabase,
+                    $LocalWhiteboardAssignmentsTable,
+                    LocalWhiteboardAssignment
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalWhiteboardAssignmentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OraviLocalDatabase,
+      $LocalWhiteboardAssignmentsTable,
+      LocalWhiteboardAssignment,
+      $$LocalWhiteboardAssignmentsTableFilterComposer,
+      $$LocalWhiteboardAssignmentsTableOrderingComposer,
+      $$LocalWhiteboardAssignmentsTableAnnotationComposer,
+      $$LocalWhiteboardAssignmentsTableCreateCompanionBuilder,
+      $$LocalWhiteboardAssignmentsTableUpdateCompanionBuilder,
+      (
+        LocalWhiteboardAssignment,
+        BaseReferences<
+          _$OraviLocalDatabase,
+          $LocalWhiteboardAssignmentsTable,
+          LocalWhiteboardAssignment
+        >,
+      ),
+      LocalWhiteboardAssignment,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalSupportRostersTableCreateCompanionBuilder =
+    LocalSupportRostersCompanion Function({
+      required String wardId,
+      required String shiftDate,
+      required String shiftType,
+      required String inChargeName,
+      Value<String?> inChargePhone,
+      Value<String?> inChargeRole,
+      required String floatNurseName,
+      Value<String?> floatNursePhone,
+      Value<String?> floatNurseRole,
+      required String hcasJson,
+      required String doctorsJson,
+      Value<int> rowid,
+    });
+typedef $$LocalSupportRostersTableUpdateCompanionBuilder =
+    LocalSupportRostersCompanion Function({
+      Value<String> wardId,
+      Value<String> shiftDate,
+      Value<String> shiftType,
+      Value<String> inChargeName,
+      Value<String?> inChargePhone,
+      Value<String?> inChargeRole,
+      Value<String> floatNurseName,
+      Value<String?> floatNursePhone,
+      Value<String?> floatNurseRole,
+      Value<String> hcasJson,
+      Value<String> doctorsJson,
+      Value<int> rowid,
+    });
+
+class $$LocalSupportRostersTableFilterComposer
+    extends Composer<_$OraviLocalDatabase, $LocalSupportRostersTable> {
+  $$LocalSupportRostersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get wardId => $composableBuilder(
+    column: $table.wardId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shiftDate => $composableBuilder(
+    column: $table.shiftDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shiftType => $composableBuilder(
+    column: $table.shiftType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get inChargeName => $composableBuilder(
+    column: $table.inChargeName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get inChargePhone => $composableBuilder(
+    column: $table.inChargePhone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get inChargeRole => $composableBuilder(
+    column: $table.inChargeRole,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get floatNurseName => $composableBuilder(
+    column: $table.floatNurseName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get floatNursePhone => $composableBuilder(
+    column: $table.floatNursePhone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get floatNurseRole => $composableBuilder(
+    column: $table.floatNurseRole,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hcasJson => $composableBuilder(
+    column: $table.hcasJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get doctorsJson => $composableBuilder(
+    column: $table.doctorsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalSupportRostersTableOrderingComposer
+    extends Composer<_$OraviLocalDatabase, $LocalSupportRostersTable> {
+  $$LocalSupportRostersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get wardId => $composableBuilder(
+    column: $table.wardId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shiftDate => $composableBuilder(
+    column: $table.shiftDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shiftType => $composableBuilder(
+    column: $table.shiftType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get inChargeName => $composableBuilder(
+    column: $table.inChargeName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get inChargePhone => $composableBuilder(
+    column: $table.inChargePhone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get inChargeRole => $composableBuilder(
+    column: $table.inChargeRole,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get floatNurseName => $composableBuilder(
+    column: $table.floatNurseName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get floatNursePhone => $composableBuilder(
+    column: $table.floatNursePhone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get floatNurseRole => $composableBuilder(
+    column: $table.floatNurseRole,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hcasJson => $composableBuilder(
+    column: $table.hcasJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get doctorsJson => $composableBuilder(
+    column: $table.doctorsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalSupportRostersTableAnnotationComposer
+    extends Composer<_$OraviLocalDatabase, $LocalSupportRostersTable> {
+  $$LocalSupportRostersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get wardId =>
+      $composableBuilder(column: $table.wardId, builder: (column) => column);
+
+  GeneratedColumn<String> get shiftDate =>
+      $composableBuilder(column: $table.shiftDate, builder: (column) => column);
+
+  GeneratedColumn<String> get shiftType =>
+      $composableBuilder(column: $table.shiftType, builder: (column) => column);
+
+  GeneratedColumn<String> get inChargeName => $composableBuilder(
+    column: $table.inChargeName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get inChargePhone => $composableBuilder(
+    column: $table.inChargePhone,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get inChargeRole => $composableBuilder(
+    column: $table.inChargeRole,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get floatNurseName => $composableBuilder(
+    column: $table.floatNurseName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get floatNursePhone => $composableBuilder(
+    column: $table.floatNursePhone,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get floatNurseRole => $composableBuilder(
+    column: $table.floatNurseRole,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get hcasJson =>
+      $composableBuilder(column: $table.hcasJson, builder: (column) => column);
+
+  GeneratedColumn<String> get doctorsJson => $composableBuilder(
+    column: $table.doctorsJson,
+    builder: (column) => column,
+  );
+}
+
+class $$LocalSupportRostersTableTableManager
+    extends
+        RootTableManager<
+          _$OraviLocalDatabase,
+          $LocalSupportRostersTable,
+          LocalSupportRoster,
+          $$LocalSupportRostersTableFilterComposer,
+          $$LocalSupportRostersTableOrderingComposer,
+          $$LocalSupportRostersTableAnnotationComposer,
+          $$LocalSupportRostersTableCreateCompanionBuilder,
+          $$LocalSupportRostersTableUpdateCompanionBuilder,
+          (
+            LocalSupportRoster,
+            BaseReferences<
+              _$OraviLocalDatabase,
+              $LocalSupportRostersTable,
+              LocalSupportRoster
+            >,
+          ),
+          LocalSupportRoster,
+          PrefetchHooks Function()
+        > {
+  $$LocalSupportRostersTableTableManager(
+    _$OraviLocalDatabase db,
+    $LocalSupportRostersTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalSupportRostersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalSupportRostersTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$LocalSupportRostersTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> wardId = const Value.absent(),
+                Value<String> shiftDate = const Value.absent(),
+                Value<String> shiftType = const Value.absent(),
+                Value<String> inChargeName = const Value.absent(),
+                Value<String?> inChargePhone = const Value.absent(),
+                Value<String?> inChargeRole = const Value.absent(),
+                Value<String> floatNurseName = const Value.absent(),
+                Value<String?> floatNursePhone = const Value.absent(),
+                Value<String?> floatNurseRole = const Value.absent(),
+                Value<String> hcasJson = const Value.absent(),
+                Value<String> doctorsJson = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalSupportRostersCompanion(
+                wardId: wardId,
+                shiftDate: shiftDate,
+                shiftType: shiftType,
+                inChargeName: inChargeName,
+                inChargePhone: inChargePhone,
+                inChargeRole: inChargeRole,
+                floatNurseName: floatNurseName,
+                floatNursePhone: floatNursePhone,
+                floatNurseRole: floatNurseRole,
+                hcasJson: hcasJson,
+                doctorsJson: doctorsJson,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String wardId,
+                required String shiftDate,
+                required String shiftType,
+                required String inChargeName,
+                Value<String?> inChargePhone = const Value.absent(),
+                Value<String?> inChargeRole = const Value.absent(),
+                required String floatNurseName,
+                Value<String?> floatNursePhone = const Value.absent(),
+                Value<String?> floatNurseRole = const Value.absent(),
+                required String hcasJson,
+                required String doctorsJson,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalSupportRostersCompanion.insert(
+                wardId: wardId,
+                shiftDate: shiftDate,
+                shiftType: shiftType,
+                inChargeName: inChargeName,
+                inChargePhone: inChargePhone,
+                inChargeRole: inChargeRole,
+                floatNurseName: floatNurseName,
+                floatNursePhone: floatNursePhone,
+                floatNurseRole: floatNurseRole,
+                hcasJson: hcasJson,
+                doctorsJson: doctorsJson,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalSupportRostersTable, LocalSupportRoster>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$OraviLocalDatabase,
+                    $LocalSupportRostersTable,
+                    LocalSupportRoster
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalSupportRostersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OraviLocalDatabase,
+      $LocalSupportRostersTable,
+      LocalSupportRoster,
+      $$LocalSupportRostersTableFilterComposer,
+      $$LocalSupportRostersTableOrderingComposer,
+      $$LocalSupportRostersTableAnnotationComposer,
+      $$LocalSupportRostersTableCreateCompanionBuilder,
+      $$LocalSupportRostersTableUpdateCompanionBuilder,
+      (
+        LocalSupportRoster,
+        BaseReferences<
+          _$OraviLocalDatabase,
+          $LocalSupportRostersTable,
+          LocalSupportRoster
+        >,
+      ),
+      LocalSupportRoster,
+      PrefetchHooks Function()
+    >;
 
 class $OraviLocalDatabaseManager {
   final _$OraviLocalDatabase _db;
@@ -1754,4 +4501,14 @@ class $OraviLocalDatabaseManager {
       $$LocalEventsTableTableManager(_db, _db.localEvents);
   $$OutboxTableTableManager get outbox =>
       $$OutboxTableTableManager(_db, _db.outbox);
+  $$LocalStaffTableTableManager get localStaff =>
+      $$LocalStaffTableTableManager(_db, _db.localStaff);
+  $$LocalWhiteboardAssignmentsTableTableManager
+  get localWhiteboardAssignments =>
+      $$LocalWhiteboardAssignmentsTableTableManager(
+        _db,
+        _db.localWhiteboardAssignments,
+      );
+  $$LocalSupportRostersTableTableManager get localSupportRosters =>
+      $$LocalSupportRostersTableTableManager(_db, _db.localSupportRosters);
 }

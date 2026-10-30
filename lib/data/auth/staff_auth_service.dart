@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:drift/drift.dart';
+import '../database/database.dart';
 import '../../domain/models/staff_profile.dart';
 
 class AuthResult {
@@ -78,17 +80,35 @@ const Map<String, String> kOfflineCanonicalPins = {
 };
 
 class StaffAuthService {
+  static OraviLocalDatabase? db;
   static final Map<String, String> dynamicPins = Map.from(kOfflineCanonicalPins);
   static final List<StaffProfile> dynamicStaff = List.from(kDefaultWardStaff);
 
-  static void addStaffUser(StaffProfile staff, String pin) {
+  static void setDatabase(OraviLocalDatabase database) {
+    db = database;
+  }
+
+  static void addStaffUser(StaffProfile staff, String pin, {String? email}) {
     dynamicStaff.removeWhere((s) => s.staffId == staff.staffId);
     dynamicStaff.add(staff);
     dynamicPins[staff.staffId] = pin;
+
+    db?.upsertStaff(LocalStaffCompanion.insert(
+      staffId: staff.staffId,
+      name: staff.name,
+      role: staff.role,
+      wardId: Value(staff.wardId),
+      pin: pin,
+      isActive: Value(staff.isActive),
+      avatarColor: Value(staff.avatarColor),
+      initials: staff.initials,
+      email: Value(email),
+    ));
   }
 
   static void updateStaffPin(String staffId, String newPin) {
     dynamicPins[staffId] = newPin;
+    db?.updateStaffPin(staffId, newPin);
   }
 
   static void toggleStaffActive(String staffId) {
@@ -97,11 +117,13 @@ class StaffAuthService {
       final current = dynamicStaff[idx];
       dynamicStaff[idx] = current.copyWith(isActive: !current.isActive);
     }
+    db?.toggleStaffActive(staffId);
   }
 
   static void deleteStaff(String staffId) {
     dynamicStaff.removeWhere((s) => s.staffId == staffId);
     dynamicPins.remove(staffId);
+    db?.deleteStaff(staffId);
   }
 
   static const List<String> defaultCandidateUrls = [
@@ -176,7 +198,24 @@ class StaffAuthService {
         }
       });
     } catch (_) {
-      // Offline fallback: return canonical staff matching ward
+      // Offline fallback: check SQLite database first
+      if (db != null) {
+        final rows = await db!.getAllStaff();
+        if (rows.isNotEmpty) {
+          return rows
+              .where((r) => r.wardId == wardId || wardId == 'WARD-4B')
+              .map((r) => StaffProfile(
+                    staffId: r.staffId,
+                    name: r.name,
+                    role: r.role,
+                    wardId: r.wardId,
+                    avatarColor: r.avatarColor,
+                    initials: r.initials,
+                    isActive: r.isActive,
+                  ))
+              .toList();
+        }
+      }
       return dynamicStaff.where((s) => s.wardId == wardId || wardId == 'WARD-4B').toList();
     }
   }
@@ -222,7 +261,41 @@ class StaffAuthService {
         }
       });
     } catch (_) {
-      // Offline fallback: check local canonical / dev dynamic PIN
+      // Offline fallback: check persistent Drift SQLite database
+      if (db != null) {
+        final rows = await db!.getAllStaff();
+        final match = rows.where((r) => r.staffId == staffId).firstOrNull;
+        if (match != null) {
+          if (!match.isActive) {
+            return const AuthResult(
+              success: false,
+              error: 'Account is deactivated. Contact dev administrator.',
+            );
+          }
+          if (match.pin == pin) {
+            return AuthResult(
+              success: true,
+              staff: StaffProfile(
+                staffId: match.staffId,
+                name: match.name,
+                role: match.role,
+                wardId: match.wardId,
+                avatarColor: match.avatarColor,
+                initials: match.initials,
+                isActive: match.isActive,
+              ),
+              token: 'offline_token_$staffId',
+            );
+          } else {
+            return const AuthResult(
+              success: false,
+              error: 'Invalid PIN. (Offline mode active)',
+            );
+          }
+        }
+      }
+
+      // Memory fallback if DB is uninitialized
       final staff = dynamicStaff.firstWhere(
         (s) => s.staffId == staffId,
         orElse: () => kDefaultWardStaff.firstWhere(

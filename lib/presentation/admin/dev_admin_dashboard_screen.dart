@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/auth/staff_auth_service.dart';
+import '../../data/database/database_provider.dart';
 import '../../domain/models/staff_profile.dart';
 import '../providers/auth_providers.dart';
 import '../whiteboard/digital_whiteboard_screen.dart';
@@ -53,6 +54,7 @@ class DevUserItem {
 class DevUsersNotifier extends Notifier<List<DevUserItem>> {
   @override
   List<DevUserItem> build() {
+    _loadFromDatabase();
     return [
       const DevUserItem(
         staffId: 'NUR-403',
@@ -107,6 +109,30 @@ class DevUsersNotifier extends Notifier<List<DevUserItem>> {
     ];
   }
 
+  Future<void> _loadFromDatabase() async {
+    final db = ref.read(localDatabaseProvider);
+    final rows = await db.getAllStaff();
+    if (rows.isNotEmpty) {
+      state = rows.map((r) {
+        String displayRole = 'Nurse';
+        if (r.role == 'doctor_on_call') displayRole = 'Doctor';
+        if (r.role == 'charge_nurse') displayRole = 'Ward Manager';
+        if (r.role == 'admin') displayRole = 'Administrator';
+
+        return DevUserItem(
+          staffId: r.staffId,
+          name: r.name,
+          email: r.email ?? '${r.name.toLowerCase().replaceAll(' ', '.')}@oravi.dev',
+          role: displayRole,
+          ward: r.wardId,
+          isActive: r.isActive,
+          lastLogin: 'Today',
+          pin: r.pin,
+        );
+      }).toList();
+    }
+  }
+
   void addUser(DevUserItem user) {
     state = [user, ...state];
 
@@ -134,6 +160,7 @@ class DevUsersNotifier extends Notifier<List<DevUserItem>> {
         isActive: user.isActive,
       ),
       user.pin,
+      email: user.email,
     );
   }
 

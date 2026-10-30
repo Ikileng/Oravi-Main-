@@ -1,9 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/auth/staff_auth_service.dart';
+import '../../data/database/database_provider.dart';
 import '../../domain/models/staff_profile.dart';
 
-/// Provider for staff authentication service with multi-host auto-fallback.
+/// Provider for staff authentication service with multi-host auto-fallback and SQLite persistence.
 final staffAuthServiceProvider = Provider<StaffAuthService>((ref) {
+  final db = ref.watch(localDatabaseProvider);
+  StaffAuthService.setDatabase(db);
   return StaffAuthService();
 });
 
