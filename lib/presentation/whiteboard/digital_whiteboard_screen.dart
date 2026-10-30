@@ -18,6 +18,22 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   int _activeNavIndex = 0;
   bool _isDayShift = true;
 
+  // Precise Column Widths & Grid Line styling matching user reference design
+  static const double _kColBedWidth = 64.0;
+  static const double _kColInitialsWidth = 72.0;
+  static const double _kColDoctorWidth = 112.0;
+  static const double _kColDayShiftWidth = 84.0;
+  static const double _kColNightShiftWidth = 84.0;
+  static const double _kColResponsibilitiesWidth = 178.0;
+  static const double _kTotalTableWidth = _kColBedWidth +
+      _kColInitialsWidth +
+      _kColDoctorWidth +
+      _kColDayShiftWidth +
+      _kColNightShiftWidth +
+      _kColResponsibilitiesWidth; // 594.0
+
+  static const Color _kGridBorderColor = Color(0xFF1E2C48);
+
   // Registered doctors for fast autofilter selection
   static const List<String> _kCandidateDoctors = [
     'Dr. Mbita',
@@ -257,27 +273,28 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
+        color: const Color(0xFF0C1425),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E293B)),
+        border: Border.all(color: _kGridBorderColor, width: 1.0),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(11),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: SizedBox(
-            width: 600, // Exact comfortable width for all columns
+            width: _kTotalTableWidth,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Table Header Row
+                // Table Header Row with Crisp Grid Lines
                 _buildTableHeader(),
 
-                // 10 Bed Rows
+                // 10 Bed Rows with Crisp Horizontal and Vertical Grid Lines
                 ...displayBeds.asMap().entries.map((entry) {
                   final index = entry.key;
                   final bed = entry.value;
-                  return _buildBedRow(index, bed, roster, hasWriteAccess);
+                  final isLast = index == displayBeds.length - 1;
+                  return _buildBedRow(index, bed, roster, hasWriteAccess, isLast);
                 }),
               ],
             ),
@@ -288,69 +305,106 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   }
 
   Widget _buildTableHeader() {
+    const headerStyle = TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8));
+    const subHeaderStyle = TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF64748B));
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      height: 48,
       decoration: const BoxDecoration(
-        color: Color(0xFF131D33),
-        border: Border(bottom: BorderSide(color: Color(0xFF1E293B), width: 1)),
+        color: Color(0xFF111C33),
+        border: Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
       ),
-      child: const Row(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            width: 55,
-            child: Text(
-              'Bed /\nRoom',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+          // 1. Bed / Room
+          Container(
+            width: _kColBedWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
             ),
+            alignment: Alignment.center,
+            child: const Text('Bed /\nRoom', textAlign: TextAlign.center, style: headerStyle),
           ),
-          SizedBox(
-            width: 65,
-            child: Text(
-              'Patient\nInitials',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+
+          // 2. Patient Initials
+          Container(
+            width: _kColInitialsWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
             ),
+            alignment: Alignment.center,
+            child: const Text('Patient\nInitials', textAlign: TextAlign.center, style: headerStyle),
           ),
-          SizedBox(
-            width: 105,
-            child: Text(
-              'Doctor',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+
+          // 3. Doctor
+          Container(
+            width: _kColDoctorWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
             ),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.only(left: 12),
+            child: const Text('Doctor', style: headerStyle),
           ),
-          SizedBox(
-            width: 175,
+
+          // 4 & 5. Nurses (Overarching header with Day Shift / Night Shift sub-columns)
+          Container(
+            width: _kColDayShiftWidth + _kColNightShiftWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
             child: Column(
               children: [
-                Text(
-                  'Nurses',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                Expanded(
+                  child: Container(
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      border: Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
+                    ),
+                    child: const Text('Nurses', style: headerStyle),
+                  ),
                 ),
-                SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Text('Day Shift', style: TextStyle(fontSize: 10, color: Color(0xFF64748B))),
-                    Text('Night Shift', style: TextStyle(fontSize: 10, color: Color(0xFF64748B))),
-                  ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+                          ),
+                          child: const Text('Day Shift', style: subHeaderStyle),
+                        ),
+                      ),
+                      Expanded(
+                        child: Container(
+                          alignment: Alignment.center,
+                          child: const Text('Night Shift', style: subHeaderStyle),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          SizedBox(
-            width: 170,
-            child: Text(
-              'Ward Responsibilities',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-            ),
+
+          // 6. Ward Responsibilities
+          Container(
+            width: _kColResponsibilitiesWidth,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.only(left: 12),
+            child: const Text('Ward Responsibilities', style: headerStyle),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBedRow(int index, WhiteboardBedAssignment bed, WardSupportRoster roster, bool hasWriteAccess) {
+  Widget _buildBedRow(int index, WhiteboardBedAssignment bed, WardSupportRoster roster, bool hasWriteAccess, bool isLastRow) {
     // Determine vertical status stripe color
-    // Green = Occupied & Assigned, Yellow = Pending/Review, Grey = Available
+    // Green = Occupied & Assigned, Yellow = Pending/Review, Dark Slate = Available
     final isAvailable = bed.patientInitials.trim() == '-' || bed.patientInitials.trim().isEmpty;
     final isPending = bed.status == 'pending';
     final stripeColor = isAvailable
@@ -413,18 +467,25 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      height: 48,
       decoration: BoxDecoration(
-        color: index % 2 == 0 ? Colors.transparent : const Color(0xFF0B132B).withValues(alpha: 0.5),
-        border: const Border(bottom: BorderSide(color: Color(0xFF1E293B), width: 0.8)),
+        color: index % 2 == 0 ? const Color(0xFF0C1425) : const Color(0xFF0F182E),
+        border: isLastRow
+            ? null
+            : const Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Bed / Room with Vertical Stripe
-          SizedBox(
-            width: 55,
+          // 1. Bed / Room (with Vertical Stripe & Pill)
+          Container(
+            width: _kColBedWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Vertical Color Stripe Indicator
                 Container(
@@ -456,62 +517,74 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             ),
           ),
 
-          // Patient Initials (Strictly Typed)
-          SizedBox(
-            width: 65,
+          // 2. Patient Initials (Strictly Typed)
+          Container(
+            width: _kColInitialsWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
             child: InkWell(
               onTap: hasWriteAccess ? () => _showStrictInitialsDialog(bed) : () => _notifyReadOnly(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Center(
                 child: Text(
                   bed.patientInitials.isNotEmpty ? bed.patientInitials : '-',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
               ),
             ),
           ),
 
-          // Doctor (Type / Autofilter)
-          SizedBox(
-            width: 105,
+          // 3. Doctor (Type / Autofilter)
+          Container(
+            width: _kColDoctorWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             child: InkWell(
               onTap: hasWriteAccess ? () => _showDoctorSelectionSheet(bed) : () => _notifyReadOnly(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Text(
-                  bed.admittingDoctor.isNotEmpty ? bed.admittingDoctor : '-',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis,
-                ),
+              child: Text(
+                bed.admittingDoctor.isNotEmpty ? bed.admittingDoctor : '-',
+                style: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ),
 
-          // Nurses: Day Shift Pill & Night Shift Pill
-          SizedBox(
-            width: 175,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                // Day Shift Nurse Pill
-                _buildNursePill(
-                  nurseName: bed.dayShiftNurseId,
-                  hasWriteAccess: hasWriteAccess,
-                  onTap: () => _showNurseSelectionSheet(bed, isDay: true),
-                ),
-                // Night Shift Nurse Pill
-                _buildNursePill(
-                  nurseName: bed.nightShiftNurseId,
-                  hasWriteAccess: hasWriteAccess,
-                  onTap: () => _showNurseSelectionSheet(bed, isDay: false),
-                ),
-              ],
+          // 4. Day Shift Nurse Pill
+          Container(
+            width: _kColDayShiftWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
+            alignment: Alignment.center,
+            child: _buildNursePill(
+              nurseName: bed.dayShiftNurseId,
+              hasWriteAccess: hasWriteAccess,
+              onTap: () => _showNurseSelectionSheet(bed, isDay: true),
             ),
           ),
 
-          // Ward Responsibilities (Right Sidebar Column)
-          SizedBox(
-            width: 170,
+          // 5. Night Shift Nurse Pill
+          Container(
+            width: _kColNightShiftWidth,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            ),
+            alignment: Alignment.center,
+            child: _buildNursePill(
+              nurseName: bed.nightShiftNurseId,
+              hasWriteAccess: hasWriteAccess,
+              onTap: () => _showNurseSelectionSheet(bed, isDay: false),
+            ),
+          ),
+
+          // 6. Ward Responsibilities (Right Column)
+          Container(
+            width: _kColResponsibilitiesWidth,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             child: responsibilityWidget ?? const SizedBox.shrink(),
           ),
         ],
@@ -660,7 +733,10 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                     context: context,
                     backgroundColor: Colors.transparent,
                     isScrollControlled: true,
-                    builder: (_) => WardSupportRosterSheet(roster: roster),
+                    builder: (_) => WardSupportRosterSheet(
+                      roster: roster,
+                      hasWriteAccess: hasWriteAccess,
+                    ),
                   );
                 },
                 child: const Row(
@@ -681,12 +757,54 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildResponsibilityChip('Ward Manager', roster.wardManager, Icons.manage_accounts, const Color(0xFF38BDF8)),
-                _buildResponsibilityChip('Team Leader', roster.teamLeader, Icons.person, const Color(0xFF38BDF8)),
-                _buildResponsibilityChip('Duty Leader', roster.dutyLeader, Icons.assignment, const Color(0xFFA855F7)),
-                _buildResponsibilityChip('Discharge Nurse', roster.dischargeNurse, Icons.assignment_turned_in, const Color(0xFF34D399)),
-                _buildResponsibilityChip('Patient Care Attendant', roster.pcaDay, Icons.person_pin, const Color(0xFF2DD4BF)),
-                _buildResponsibilityChip('Nurse In-Charge', roster.inchargeNurseDay, Icons.person, const Color(0xFF93C5FD)),
+                _buildResponsibilityChip(
+                  title: 'Ward Manager',
+                  nurse: roster.wardManager,
+                  icon: Icons.manage_accounts,
+                  color: const Color(0xFF38BDF8),
+                  roleKey: 'ward_manager',
+                  hasWriteAccess: hasWriteAccess,
+                ),
+                _buildResponsibilityChip(
+                  title: 'Team Leader',
+                  nurse: roster.teamLeader,
+                  icon: Icons.person,
+                  color: const Color(0xFF38BDF8),
+                  roleKey: 'team_leader',
+                  hasWriteAccess: hasWriteAccess,
+                ),
+                _buildResponsibilityChip(
+                  title: 'Duty Leader',
+                  nurse: roster.dutyLeader,
+                  icon: Icons.assignment,
+                  color: const Color(0xFFA855F7),
+                  roleKey: 'duty_leader',
+                  hasWriteAccess: hasWriteAccess,
+                ),
+                _buildResponsibilityChip(
+                  title: 'Discharge Nurse',
+                  nurse: roster.dischargeNurse,
+                  icon: Icons.assignment_turned_in,
+                  color: const Color(0xFF34D399),
+                  roleKey: 'discharge_nurse',
+                  hasWriteAccess: hasWriteAccess,
+                ),
+                _buildResponsibilityChip(
+                  title: 'Patient Care Attendant',
+                  nurse: roster.pcaDay,
+                  icon: Icons.person_pin,
+                  color: const Color(0xFF2DD4BF),
+                  roleKey: 'pca',
+                  hasWriteAccess: hasWriteAccess,
+                ),
+                _buildResponsibilityChip(
+                  title: 'Nurse In-Charge',
+                  nurse: roster.inchargeNurseDay,
+                  icon: Icons.person,
+                  color: const Color(0xFF93C5FD),
+                  roleKey: 'incharge',
+                  hasWriteAccess: hasWriteAccess,
+                ),
               ],
             ),
           ),
@@ -695,29 +813,43 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     );
   }
 
-  Widget _buildResponsibilityChip(String title, String nurse, IconData icon, Color color) {
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF334155), width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8))),
-              Text(nurse.isNotEmpty ? nurse : '-', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-            ],
-          ),
-        ],
+  Widget _buildResponsibilityChip({
+    required String title,
+    required String nurse,
+    required IconData icon,
+    required Color color,
+    required String roleKey,
+    required bool hasWriteAccess,
+  }) {
+    return InkWell(
+      onTap: hasWriteAccess
+          ? () => _showRoleAssignmentSheet(title, roleKey)
+          : () => _notifyReadOnly(),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B).withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF334155), width: 0.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8))),
+                Text(nurse.isNotEmpty ? nurse : '-',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

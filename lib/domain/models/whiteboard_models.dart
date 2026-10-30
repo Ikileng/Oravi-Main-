@@ -17,6 +17,26 @@ class WhiteboardBedAssignment {
     this.status = 'pending',
   });
 
+  WhiteboardBedAssignment copyWith({
+    String? bedNumber,
+    String? patientInitials,
+    String? admissionNumber,
+    String? admittingDoctor,
+    String? dayShiftNurseId,
+    String? nightShiftNurseId,
+    String? status,
+  }) {
+    return WhiteboardBedAssignment(
+      bedNumber: bedNumber ?? this.bedNumber,
+      patientInitials: patientInitials ?? this.patientInitials,
+      admissionNumber: admissionNumber ?? this.admissionNumber,
+      admittingDoctor: admittingDoctor ?? this.admittingDoctor,
+      dayShiftNurseId: dayShiftNurseId ?? this.dayShiftNurseId,
+      nightShiftNurseId: nightShiftNurseId ?? this.nightShiftNurseId,
+      status: status ?? this.status,
+    );
+  }
+
   Map<String, dynamic> toMap() => {
         'bed_number': bedNumber,
         'patient_initials': patientInitials,
@@ -72,6 +92,40 @@ class WardSupportRoster {
     this.cateringNightPhone = '0792777972',
     this.fireMarshall = 'MWATAKU',
   });
+
+  WardSupportRoster copyWith({
+    String? wardManager,
+    String? teamLeader,
+    String? dutyLeader,
+    String? dischargeNurse,
+    String? shiftLeader,
+    String? inchargeNurseDay,
+    String? inchargeNurseNight,
+    String? pcaDay,
+    String? pcaNight,
+    String? housekeeperDay,
+    String? housekeeperNight,
+    String? cateringDayPhone,
+    String? cateringNightPhone,
+    String? fireMarshall,
+  }) {
+    return WardSupportRoster(
+      wardManager: wardManager ?? this.wardManager,
+      teamLeader: teamLeader ?? this.teamLeader,
+      dutyLeader: dutyLeader ?? this.dutyLeader,
+      dischargeNurse: dischargeNurse ?? this.dischargeNurse,
+      shiftLeader: shiftLeader ?? this.shiftLeader,
+      inchargeNurseDay: inchargeNurseDay ?? this.inchargeNurseDay,
+      inchargeNurseNight: inchargeNurseNight ?? this.inchargeNurseNight,
+      pcaDay: pcaDay ?? this.pcaDay,
+      pcaNight: pcaNight ?? this.pcaNight,
+      housekeeperDay: housekeeperDay ?? this.housekeeperDay,
+      housekeeperNight: housekeeperNight ?? this.housekeeperNight,
+      cateringDayPhone: cateringDayPhone ?? this.cateringDayPhone,
+      cateringNightPhone: cateringNightPhone ?? this.cateringNightPhone,
+      fireMarshall: fireMarshall ?? this.fireMarshall,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'ward_manager': wardManager,
