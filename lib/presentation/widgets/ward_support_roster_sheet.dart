@@ -15,83 +15,85 @@ class WardSupportRosterSheet extends StatelessWidget {
         color: ClinicalTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFF475569),
-                borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF475569),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          const Row(
-            children: [
-              Icon(Icons.contact_phone, color: ClinicalTheme.nurseBlue, size: 20),
-              SizedBox(width: 8),
-              Text(
-                'Ward Support Team on Duty',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Physical whiteboard duty roster contacts (Gertrude\'s Sidebar)',
-            style: TextStyle(fontSize: 12, color: ClinicalTheme.textMuted),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                Icon(Icons.contact_phone, color: ClinicalTheme.nurseBlue, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Ward Support Team on Duty',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Physical whiteboard duty roster contacts (Gertrude\'s Sidebar)',
+              style: TextStyle(fontSize: 12, color: ClinicalTheme.textMuted),
+            ),
+            const SizedBox(height: 16),
 
-          _buildContactRow(
-            cadre: 'WARD MANAGER',
-            dayContact: roster.wardManager,
-            nightContact: '',
-            icon: Icons.admin_panel_settings,
-            cadreColor: ClinicalTheme.inChargePurple,
-          ),
-          _buildContactRow(
-            cadre: 'IN-CHARGE NURSE',
-            dayContact: roster.inchargeNurseDay,
-            nightContact: roster.inchargeNurseNight,
-            icon: Icons.local_hospital,
-            cadreColor: ClinicalTheme.nurseBlue,
-          ),
-          _buildContactRow(
-            cadre: 'PATIENT CARE ATTENDANT (PCA)',
-            dayContact: roster.pcaDay,
-            nightContact: roster.pcaNight,
-            icon: Icons.person_pin,
-            cadreColor: ClinicalTheme.routineTeal,
-          ),
-          _buildContactRow(
-            cadre: 'HOUSEKEEPER',
-            dayContact: roster.housekeeperDay,
-            nightContact: roster.housekeeperNight,
-            icon: Icons.cleaning_services,
-            cadreColor: ClinicalTheme.urgentAmber,
-          ),
-          _buildContactRow(
-            cadre: 'CATERING (KITCHEN & MEALS)',
-            dayContact: roster.cateringDayPhone,
-            nightContact: roster.cateringNightPhone,
-            icon: Icons.restaurant,
-            cadreColor: ClinicalTheme.successGreen,
-            isPhone: true,
-          ),
-          _buildContactRow(
-            cadre: 'FIRE MARSHALL',
-            dayContact: roster.fireMarshall,
-            nightContact: '',
-            icon: Icons.local_fire_department,
-            cadreColor: ClinicalTheme.criticalRed,
-          ),
-          const SizedBox(height: 16),
-        ],
+            _buildContactRow(
+              cadre: 'WARD MANAGER',
+              dayContact: roster.wardManager,
+              nightContact: '',
+              icon: Icons.admin_panel_settings,
+              cadreColor: ClinicalTheme.inChargePurple,
+            ),
+            _buildContactRow(
+              cadre: 'IN-CHARGE NURSE',
+              dayContact: roster.inchargeNurseDay,
+              nightContact: roster.inchargeNurseNight,
+              icon: Icons.local_hospital,
+              cadreColor: ClinicalTheme.nurseBlue,
+            ),
+            _buildContactRow(
+              cadre: 'PATIENT CARE ATTENDANT (PCA)',
+              dayContact: roster.pcaDay,
+              nightContact: roster.pcaNight,
+              icon: Icons.person_pin,
+              cadreColor: ClinicalTheme.routineTeal,
+            ),
+            _buildContactRow(
+              cadre: 'HOUSEKEEPER',
+              dayContact: roster.housekeeperDay,
+              nightContact: roster.housekeeperNight,
+              icon: Icons.cleaning_services,
+              cadreColor: ClinicalTheme.urgentAmber,
+            ),
+            _buildContactRow(
+              cadre: 'CATERING (KITCHEN & MEALS)',
+              dayContact: roster.cateringDayPhone,
+              nightContact: roster.cateringNightPhone,
+              icon: Icons.restaurant,
+              cadreColor: ClinicalTheme.successGreen,
+              isPhone: true,
+            ),
+            _buildContactRow(
+              cadre: 'FIRE MARSHALL',
+              dayContact: roster.fireMarshall,
+              nightContact: '',
+              icon: Icons.local_fire_department,
+              cadreColor: ClinicalTheme.criticalRed,
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
