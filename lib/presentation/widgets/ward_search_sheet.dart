@@ -8,7 +8,7 @@ import '../theme/clinical_theme.dart';
 /// Instant offline search across all beds, patient records, and open loops on the ward.
 ///
 /// Implements PRD Section 7.1 and Tech Arch Section 9 & 14:
-/// - Instant offline lookups by bed, name, admission number, alert, or clinical topic.
+/// - Instant offline lookups by bed, initials, alert, or clinical topic.
 /// - One-tap navigation directly into patient details.
 class WardSearchSheet extends ConsumerStatefulWidget {
   const WardSearchSheet({super.key});
@@ -79,11 +79,20 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                const Icon(Icons.search, color: ClinicalTheme.routineTeal, size: 22),
+                const Icon(
+                  Icons.search,
+                  color: ClinicalTheme.routineTeal,
+                  size: 22,
+                ),
                 const SizedBox(width: 8),
                 const Text(
                   'WARD SEARCH',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ClinicalTheme.textPrimary, letterSpacing: 0.5),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: ClinicalTheme.textPrimary,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 const Spacer(),
                 IconButton(
@@ -101,20 +110,37 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
               controller: _searchController,
               autofocus: true,
               onChanged: _onSearchChanged,
-              style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 14),
+              style: const TextStyle(
+                color: ClinicalTheme.textPrimary,
+                fontSize: 14,
+              ),
               decoration: InputDecoration(
-                hintText: 'Search bed, admission no, patient, drug, or issue...',
-                hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 13),
-                prefixIcon: const Icon(Icons.search, color: ClinicalTheme.routineTeal),
+                hintText:
+                    'Search bed, admission no, patient, drug, or issue...',
+                hintStyle: const TextStyle(
+                  color: ClinicalTheme.textMuted,
+                  fontSize: 13,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  color: ClinicalTheme.routineTeal,
+                ),
                 suffixIcon: activeQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18, color: ClinicalTheme.textMuted),
+                        icon: const Icon(
+                          Icons.clear,
+                          size: 18,
+                          color: ClinicalTheme.textMuted,
+                        ),
                         onPressed: _clearSearch,
                       )
                     : null,
                 filled: true,
                 fillColor: ClinicalTheme.surface,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: ClinicalTheme.border),
@@ -129,14 +155,19 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: _quickFilterChips.map((chip) {
-                final isSelected = activeQuery.toLowerCase() == chip.toLowerCase();
+                final isSelected =
+                    activeQuery.toLowerCase() == chip.toLowerCase();
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ActionChip(
                     label: Text(chip, style: const TextStyle(fontSize: 11)),
-                    backgroundColor: isSelected ? ClinicalTheme.routineTeal.withValues(alpha: 0.3) : ClinicalTheme.surface,
+                    backgroundColor: isSelected
+                        ? ClinicalTheme.routineTeal.withValues(alpha: 0.3)
+                        : ClinicalTheme.surface,
                     side: BorderSide(
-                      color: isSelected ? ClinicalTheme.routineTeal : ClinicalTheme.border,
+                      color: isSelected
+                          ? ClinicalTheme.routineTeal
+                          : ClinicalTheme.border,
                       width: 0.8,
                     ),
                     onPressed: () => _applyChip(chip),
@@ -154,26 +185,32 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
             child: activeQuery.isEmpty
                 ? const Center(
                     child: Text(
-                      'Type a bed number, patient name, admission number, or medical term.',
-                      style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 13),
+                      'Type a bed number, patient initials, or medical term.',
+                      style: TextStyle(
+                        color: ClinicalTheme.textSecondary,
+                        fontSize: 13,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   )
                 : searchResults.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No matches found on this ward for "$activeQuery".',
-                          style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 13),
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(12),
-                        itemCount: searchResults.length,
-                        itemBuilder: (context, index) {
-                          final result = searchResults[index];
-                          return _buildSearchResultRow(context, result);
-                        },
+                ? Center(
+                    child: Text(
+                      'No matches found on this ward for "$activeQuery".',
+                      style: const TextStyle(
+                        color: ClinicalTheme.textSecondary,
+                        fontSize: 13,
                       ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: searchResults.length,
+                    itemBuilder: (context, index) {
+                      final result = searchResults[index];
+                      return _buildSearchResultRow(context, result);
+                    },
+                  ),
           ),
         ],
       ),
@@ -200,13 +237,21 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
               ),
               child: Text(
                 result.patient.bedNumber,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: urgencyColor),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: urgencyColor,
+                ),
               ),
             ),
             const SizedBox(width: 8),
             Text(
-              '${result.patient.nameOrInitials} (${result.patient.admissionNumber})',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ClinicalTheme.textPrimary),
+              result.patient.patientInitials,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: ClinicalTheme.textPrimary,
+              ),
             ),
           ],
         ),
@@ -214,11 +259,18 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
           padding: const EdgeInsets.only(top: 4),
           child: Row(
             children: [
-              const Icon(Icons.arrow_right, size: 16, color: ClinicalTheme.routineTeal),
+              const Icon(
+                Icons.arrow_right,
+                size: 16,
+                color: ClinicalTheme.routineTeal,
+              ),
               Expanded(
                 child: Text(
                   result.matchSnippet,
-                  style: const TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: ClinicalTheme.textSecondary,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -226,7 +278,11 @@ class _WardSearchSheetState extends ConsumerState<WardSearchSheet> {
             ],
           ),
         ),
-        trailing: const Icon(Icons.chevron_right, color: ClinicalTheme.textMuted, size: 20),
+        trailing: const Icon(
+          Icons.chevron_right,
+          color: ClinicalTheme.textMuted,
+          size: 20,
+        ),
         onTap: () {
           Navigator.of(context).pop();
           Navigator.of(context).push(

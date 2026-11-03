@@ -84,5 +84,45 @@ class TestSyncEngineBackend(unittest.TestCase):
         self.assertEqual(pulled[0].server_seq, 3)
         self.assertEqual(latest_seq, 3)
 
+    def test_ward_pull_includes_followups_and_legacy_patient_id_prefix(self):
+        events = [
+            CanonicalEvent(
+                event_id="ward-admission",
+                patient_id="PAT-4B-91",
+                type="PatientAdmitted",
+                author_id="NUR-401",
+                device_id="PHONE-A",
+                client_created_at="2026-10-21T08:00:00Z",
+                payload={"ward_id": "WARD-4B"},
+            ),
+            CanonicalEvent(
+                event_id="ward-message",
+                patient_id="PAT-4B-91",
+                type="MessagePosted",
+                author_id="NUR-401",
+                device_id="PHONE-A",
+                client_created_at="2026-10-21T08:05:00Z",
+                payload={"content": "Handover note"},
+            ),
+            CanonicalEvent(
+                event_id="other-ward-admission",
+                patient_id="PAT-OTHER-01",
+                type="PatientAdmitted",
+                author_id="NUR-501",
+                device_id="PHONE-B",
+                client_created_at="2026-10-21T08:10:00Z",
+                payload={"ward_id": "WARD-OTHER"},
+            ),
+        ]
+        self.store.append_events(events)
+
+        pulled, _ = self.store.get_events_since(ward_id="WARD-4B")
+        self.assertEqual(
+            [event.event_id for event in pulled],
+            ["ward-admission", "ward-message"],
+        )
+        self.assertTrue(self.store.patient_belongs_to_ward("PAT-4B-91", "WARD-4B"))
+        self.assertEqual(self.store.get_patient_ward("PAT-4B-91"), "WARD-4B")
+
 if __name__ == "__main__":
     unittest.main()

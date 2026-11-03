@@ -73,41 +73,13 @@ class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              const Text(
-                                'Ward 4B',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF059669).withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFF059669)),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircleAvatar(radius: 3, backgroundColor: Color(0xFF10B981)),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'Active Shift',
-                                      style: TextStyle(
-                                        color: Color(0xFF34D399),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                          const Text(
+                            'Hospital staff sign-in',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ],
                       ),
@@ -399,13 +371,15 @@ class _PinKeypadModalState extends ConsumerState<_PinKeypadModal> {
   String? _localError;
 
   void _handleKeyTap(String key) {
-    if (_enteredPin.length < 4) {
+    final isDevAdmin = widget.staff.role == 'dev_admin';
+    final pinLimit = isDevAdmin ? 8 : 4;
+    if (_enteredPin.length < pinLimit) {
       setState(() {
         _enteredPin += key;
         _localError = null;
       });
 
-      if (_enteredPin.length == 4) {
+      if (!isDevAdmin && _enteredPin.length == 4) {
         _submitPin();
       }
     }
@@ -429,7 +403,11 @@ class _PinKeypadModalState extends ConsumerState<_PinKeypadModal> {
     if (success) {
       Navigator.of(context).pop(); // Close modal
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const WardBoardScreen()),
+        MaterialPageRoute(
+          builder: (_) => widget.staff.role == 'dev_admin'
+              ? const DevAdminDashboardScreen()
+              : const WardBoardScreen(),
+        ),
       );
     } else {
       final state = ref.read(authControllerProvider);
@@ -495,16 +473,18 @@ class _PinKeypadModalState extends ConsumerState<_PinKeypadModal> {
           ),
           const SizedBox(height: 20),
 
-          const Text(
-            'Enter 4-Digit Quick PIN',
-            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600),
+          Text(
+            widget.staff.role == 'dev_admin'
+                ? 'Enter Dev Admin PIN'
+                : 'Enter 4-Digit Quick PIN',
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 14),
 
           // 4 Dots
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(4, (index) {
+            children: List.generate(widget.staff.role == 'dev_admin' ? 8 : 4, (index) {
               final isFilled = index < _enteredPin.length;
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 10),
@@ -538,6 +518,13 @@ class _PinKeypadModalState extends ConsumerState<_PinKeypadModal> {
             const SizedBox(height: 20),
             // Numpad Keypad (1 - 9, 0, Backspace)
             _buildNumpad(),
+            if (widget.staff.role == 'dev_admin') ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: _enteredPin.length >= 6 ? _submitPin : null,
+                child: const Text('Sign in', style: TextStyle(color: Color(0xFF38BDF8))),
+              ),
+            ],
           ],
         ],
       ),

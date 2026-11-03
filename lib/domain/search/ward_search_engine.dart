@@ -5,8 +5,7 @@ import 'ward_lexicon.dart';
 
 enum WardSearchMatchType {
   bedNumber,
-  admissionNumber,
-  patientName,
+  patientInitials,
   keyAlert,
   loopTitle,
   verbatimQuote,
@@ -73,28 +72,14 @@ class WardSearchEngine {
         continue;
       }
 
-      // 2. Admission Number Match (FR-3)
-      if (patient.admissionNumber.toLowerCase().contains(cleanQuery)) {
+      // 2. Patient Initials Match
+      if (patient.patientInitials.toLowerCase().contains(cleanQuery)) {
         results.add(
           WardSearchResult(
             patient: patient,
             highestUrgency: highestUrgency,
-            matchType: WardSearchMatchType.admissionNumber,
-            matchSnippet: 'Adm: ${patient.admissionNumber}',
-            matchingLoops: loops,
-          ),
-        );
-        continue;
-      }
-
-      // 3. Patient Name / Initials Match
-      if (patient.nameOrInitials.toLowerCase().contains(cleanQuery)) {
-        results.add(
-          WardSearchResult(
-            patient: patient,
-            highestUrgency: highestUrgency,
-            matchType: WardSearchMatchType.patientName,
-            matchSnippet: 'Patient: ${patient.nameOrInitials}',
+            matchType: WardSearchMatchType.patientInitials,
+            matchSnippet: 'Initials: ${patient.patientInitials}',
             matchingLoops: loops,
           ),
         );
@@ -103,7 +88,9 @@ class WardSearchEngine {
 
       // 4. Key Alerts Match
       final matchingAlert = patient.keyAlerts.firstWhere(
-        (a) => a.toLowerCase().contains(cleanQuery) || expandedTerms.any((t) => a.toLowerCase().contains(t)),
+        (a) =>
+            a.toLowerCase().contains(cleanQuery) ||
+            expandedTerms.any((t) => a.toLowerCase().contains(t)),
         orElse: () => '',
       );
       if (matchingAlert.isNotEmpty) {
@@ -122,7 +109,8 @@ class WardSearchEngine {
       // 5. Loop Title / Description Match
       final matchedLoops = loops.where((l) {
         final text = '${l.title} ${l.description}'.toLowerCase();
-        return text.contains(cleanQuery) || expandedTerms.any((t) => text.contains(t));
+        return text.contains(cleanQuery) ||
+            expandedTerms.any((t) => text.contains(t));
       }).toList();
 
       if (matchedLoops.isNotEmpty) {
@@ -141,7 +129,8 @@ class WardSearchEngine {
       // 6. Timeline Quotes Match
       final matchedQuotes = timeline.where((q) {
         final text = '${q.verbatimText} ${q.loopTitle}'.toLowerCase();
-        return text.contains(cleanQuery) || expandedTerms.any((t) => text.contains(t));
+        return text.contains(cleanQuery) ||
+            expandedTerms.any((t) => text.contains(t));
       }).toList();
 
       if (matchedQuotes.isNotEmpty) {

@@ -136,9 +136,10 @@ class EventStore:
 
         return acks
 
-    def get_events_since(self, since_seq: int = 0, limit: int = 100) -> Tuple[List[CanonicalEvent], int]:
+    def get_events_since(self, since_seq: int = 0, limit: int = 100, ward_id: Optional[str] = None) -> Tuple[List[CanonicalEvent], int]:
         cursor = self._conn.cursor()
-        cursor.execute("""
+        if ward_id is None:
+            cursor.execute("""
             SELECT server_seq, event_id, patient_id, type, author_id, device_id,
                    client_created_at, server_received_at, loop_id, schema_version,
                    prev_hash, hash, payload_json
@@ -147,6 +148,20 @@ class EventStore:
             ORDER BY server_seq ASC
             LIMIT ?;
         """, (since_seq, limit))
+        else:
+            cursor.execute("""
+            SELECT server_seq, event_id, patient_id, type, author_id, device_id,
+                   client_created_at, server_received_at, loop_id, schema_version,
+                   prev_hash, hash, payload_json
+            FROM server_events
+            WHERE server_seq > ?
+              AND patient_id IN (
+                  SELECT patient_id FROM server_events
+                  WHERE json_extract(payload_json, '$.ward_id') = ?
+              )
+            ORDER BY server_seq ASC
+            LIMIT ?;
+            """, (since_seq, ward_id, limit))
 
         rows = cursor.fetchall()
         results: List[CanonicalEvent] = []
@@ -168,7 +183,29 @@ class EventStore:
             )
             results.append(ev)
 
-        return results, self._latest_seq
+        if ward_id is None or len(results) < limit:
+            return results, self._latest_seq
+        return results, results[-1].server_seq or since_seq
+
+    def patient_belongs_to_ward(self, patient_id: str, ward_id: str) -> bool:
+        row = self._conn.execute(
+            """SELECT 1 FROM server_events
+               WHERE patient_id = ?
+                 AND json_extract(payload_json, '$.ward_id') = ?
+               LIMIT 1""",
+            (patient_id, ward_id),
+        ).fetchone()
+        return row is not None
+
+    def get_patient_ward(self, patient_id: str) -> Optional[str]:
+        row = self._conn.execute(
+            """SELECT json_extract(payload_json, '$.ward_id') AS ward_id
+               FROM server_events WHERE patient_id = ?
+                 AND json_extract(payload_json, '$.ward_id') IS NOT NULL
+               ORDER BY server_seq ASC LIMIT 1""",
+            (patient_id,),
+        ).fetchone()
+        return str(row["ward_id"]) if row else None
 
     def verify_hash_chain(self) -> bool:
         """

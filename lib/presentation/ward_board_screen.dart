@@ -10,6 +10,7 @@ import 'patient_detail_screen.dart';
 import 'providers/auth_providers.dart';
 import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
+import 'providers/ward_context_providers.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_search_sheet.dart';
 import 'widgets/ward_selection_dialog.dart';
@@ -40,23 +41,30 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     final authStaff = ref.watch(authenticatedStaffProvider);
     final roster = ref.watch(wardSupportRosterProvider);
     final whiteboardBeds = ref.watch(whiteboardAssignmentsProvider);
+    final boardState = ref.watch(wardBoardProvider);
+    final staffState = ref.watch(boardStaffListProvider);
+    final staffNames = {
+      for (final member in staffState.asData?.value ?? const <StaffProfile>[])
+        member.staffId: member.name,
+    };
 
     // Map doctor names from whiteboard assignments
     final doctorMap = <String, String>{};
     for (final b in whiteboardBeds) {
       if (b.admittingDoctor.isNotEmpty && b.admittingDoctor != '-') {
-        doctorMap[b.bedNumber] = b.admittingDoctor;
+        doctorMap[b.bedNumber] =
+            staffNames[b.admittingDoctor] ?? b.admittingDoctor;
       }
     }
 
     // Nurse name
-    final nurseName = authStaff?.name ?? 'Nurse X';
+    final nurseName = authStaff?.name ?? 'Your shift';
 
     // Calculate dynamic counts
     final totalPatients = patients.length;
     // Calculate pending tasks and completed tasks from patient loops
     int pendingTasksCount = 0;
-    int completedTasksCount = 8; // Default shift completed baseline
+    int completedTasksCount = 0;
 
     for (final p in patients) {
       final loops = ref.watch(patientLoopsProvider(p.patientId));
@@ -83,39 +91,43 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             // Scrollable Dashboard Body
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14.0,
+                  vertical: 8.0,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Greeting & Shift Pills
                     _buildGreetingSection(nurseName),
-
                     const SizedBox(height: 14),
-
-                    // At A Glance KPI Cards (My Patients, Pending Tasks, Completed Today)
-                    _buildAtAGlanceCards(totalPatients, pendingTasksCount, completedTasksCount),
-
-                    const SizedBox(height: 14),
-
-                    // Filter Pills & Search/Filter Row
-                    _buildFilterRow(totalPatients, pendingTasksCount, 3),
-
-                    const SizedBox(height: 14),
-
-                    // My Patients Header & List
-                    _buildPatientListSection(filteredPatients, doctorMap),
-
-                    const SizedBox(height: 18),
-
-                    // Ward Responsibilities (6-Card Grid with One-Tap Call/Message)
-                    _buildWardResponsibilitiesGrid(roster),
-
-                    const SizedBox(height: 18),
-
-                    // Shift Handoff Action Banner
-                    _buildShiftHandoffBanner(context),
-
-                    const SizedBox(height: 20),
+                    if (currentWard.wardId.isEmpty)
+                      _buildNoWardPanel(authStaff)
+                    else if (ref.watch(wardContextNeedsConfirmationProvider))
+                      _buildWardConfirmationPanel(currentWard.name)
+                    else if (boardState.isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else if (boardState.hasError)
+                      _buildBoardLoadError(boardState.error)
+                    else ...[
+                      _buildAtAGlanceCards(
+                        totalPatients,
+                        pendingTasksCount,
+                        completedTasksCount,
+                      ),
+                      const SizedBox(height: 14),
+                      _buildFilterRow(totalPatients, pendingTasksCount, 3),
+                      const SizedBox(height: 14),
+                      _buildPatientListSection(
+                        filteredPatients,
+                        doctorMap,
+                        hasAnyPatients: patients.isNotEmpty,
+                      ),
+                      const SizedBox(height: 18),
+                      _buildWardResponsibilitiesGrid(roster),
+                      const SizedBox(height: 18),
+                      _buildShiftHandoffBanner(context),
+                      const SizedBox(height: 20),
+                    ],
                   ],
                 ),
               ),
@@ -129,10 +141,104 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     );
   }
 
+  Widget _buildNoWardPanel(StaffProfile? staff) {
+    final isChargeNurse = staff?.isChargeNurse ?? false;
+    return _contextPanel(
+      title: 'No ward assigned for this shift',
+      message: isChargeNurse
+          ? 'Choose the ward you are coordinating to load its board.'
+          : 'You do not have a ward assignment for this shift. Please contact the Charge Nurse.',
+      action: isChargeNurse
+          ? OutlinedButton(
+              onPressed: () => showDialog(
+                context: context,
+                builder: (_) => const WardSelectionDialog(),
+              ),
+              child: const Text('Choose ward'),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildWardConfirmationPanel(String wardName) => _contextPanel(
+    title: 'Confirm $wardName',
+    message: 'Confirm this saved ward before viewing its current board.',
+    action: Wrap(
+      spacing: 10,
+      children: [
+        OutlinedButton(
+          onPressed: () => ref
+              .read(wardContextNeedsConfirmationProvider.notifier)
+              .setNeedsConfirmation(false),
+          child: const Text('Confirm ward'),
+        ),
+        TextButton(
+          onPressed: () => showDialog(
+            context: context,
+            builder: (_) => const WardSelectionDialog(),
+          ),
+          child: const Text('Change ward'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildBoardLoadError(Object? error) => _contextPanel(
+    title: 'Ward board unavailable',
+    message: 'The current board could not be loaded. Please try again.\n$error',
+    action: TextButton(
+      onPressed: () => ref.invalidate(wardBoardProvider),
+      child: const Text('Try again'),
+    ),
+  );
+
+  Widget _contextPanel({
+    required String title,
+    required String message,
+    Widget? action,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C1425),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1E2C48)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 12),
+            action,
+          ],
+        ],
+      ),
+    );
+  }
+
   // ==========================================
   // 1. CLEAN HEADER
   // ==========================================
-  Widget _buildCleanHeader(BuildContext context, String wardName, StaffProfile? authStaff) {
+  Widget _buildCleanHeader(
+    BuildContext context,
+    String wardName,
+    StaffProfile? authStaff,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: const BoxDecoration(
@@ -149,7 +255,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               color: const Color(0xFF0284C7).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.monitor_heart, color: Color(0xFF38BDF8), size: 18),
+            child: const Icon(
+              Icons.monitor_heart,
+              color: Color(0xFF38BDF8),
+              size: 18,
+            ),
           ),
           const SizedBox(width: 8),
 
@@ -161,77 +271,25 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               children: [
                 const Text(
                   'ORAVI',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 Text(
                   'Jaramanda Hospital · $wardName',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF94A3B8),
+                    fontWeight: FontWeight.w500,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-
-          // Synced Pill
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF064E3B).withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.5)),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.circle, size: 6, color: Color(0xFF10B981)),
-                SizedBox(width: 4),
-                Text(
-                  'Synced',
-                  style: TextStyle(fontSize: 10, color: Color(0xFF34D399), fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-
-          // Notification Bell with Badge
-          InkWell(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('2 shift notifications: Bed 2 blood gas pending, Handover at 19:00')),
-              );
-            },
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(Icons.notifications_none, size: 18, color: Colors.white),
-                ),
-                Positioned(
-                  top: -2,
-                  right: -2,
-                  child: Container(
-                    padding: const EdgeInsets.all(3.5),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFEF4444),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Text(
-                      '2',
-                      style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
 
           // Profile Avatar with Quick Lock Station
           InkWell(
@@ -241,14 +299,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.6), width: 1.5),
+                border: Border.all(
+                  color: const Color(0xFF0284C7).withValues(alpha: 0.6),
+                  width: 1.5,
+                ),
               ),
               child: CircleAvatar(
                 radius: 13,
                 backgroundColor: const Color(0xFF1E293B),
                 child: Text(
                   authStaff?.initials ?? 'NX',
-                  style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 10, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Color(0xFF38BDF8),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -267,7 +332,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
       children: [
         Text(
           'Good morning, $nurseName',
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white),
+          style: const TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 3),
         const Text(
@@ -288,11 +357,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.calendar_month_outlined, size: 13, color: Color(0xFF38BDF8)),
+                  Icon(
+                    Icons.calendar_month_outlined,
+                    size: 13,
+                    color: Color(0xFF38BDF8),
+                  ),
                   SizedBox(width: 6),
                   Text(
                     'Fri, 30 Oct 2026',
-                    style: TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFCBD5E1),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -310,11 +387,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.wb_sunny_outlined, size: 13, color: Color(0xFFFBBF24)),
+                  Icon(
+                    Icons.wb_sunny_outlined,
+                    size: 13,
+                    color: Color(0xFFFBBF24),
+                  ),
                   SizedBox(width: 6),
                   Text(
                     'Day Shift  07:00 – 19:00',
-                    style: TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFCBD5E1),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -328,7 +413,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // ==========================================
   // 3. AT A GLANCE KPI CARDS
   // ==========================================
-  Widget _buildAtAGlanceCards(int patientCount, int pendingTasks, int completedToday) {
+  Widget _buildAtAGlanceCards(
+    int patientCount,
+    int pendingTasks,
+    int completedToday,
+  ) {
     return Row(
       children: [
         // My Patients
@@ -338,18 +427,28 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF0E1A33),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF1E3A8A).withValues(alpha: 0.6)),
+              border: Border.all(
+                color: const Color(0xFF1E3A8A).withValues(alpha: 0.6),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.people, size: 16, color: Color(0xFF38BDF8)),
+                    const Icon(
+                      Icons.people,
+                      size: 16,
+                      color: Color(0xFF38BDF8),
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '$patientCount',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                   ],
                 ),
@@ -358,10 +457,18 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   children: [
                     Text(
                       'My Patients',
-                      style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF38BDF8),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     SizedBox(width: 2),
-                    Icon(Icons.chevron_right, size: 12, color: Color(0xFF38BDF8)),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 12,
+                      color: Color(0xFF38BDF8),
+                    ),
                   ],
                 ),
               ],
@@ -377,18 +484,28 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF191E2A),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFEAB308).withValues(alpha: 0.3)),
+              border: Border.all(
+                color: const Color(0xFFEAB308).withValues(alpha: 0.3),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFF59E0B)),
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: Color(0xFFF59E0B),
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '$pendingTasks',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                   ],
                 ),
@@ -397,10 +514,18 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   children: [
                     Text(
                       'Pending Tasks',
-                      style: TextStyle(fontSize: 10, color: Color(0xFFF59E0B), fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFFF59E0B),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     SizedBox(width: 2),
-                    Icon(Icons.chevron_right, size: 12, color: Color(0xFFF59E0B)),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 12,
+                      color: Color(0xFFF59E0B),
+                    ),
                   ],
                 ),
               ],
@@ -416,18 +541,28 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF0D2122),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+              border: Border.all(
+                color: const Color(0xFF10B981).withValues(alpha: 0.3),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.check_circle, size: 16, color: Color(0xFF10B981)),
+                    const Icon(
+                      Icons.check_circle,
+                      size: 16,
+                      color: Color(0xFF10B981),
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '$completedToday',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                   ],
                 ),
@@ -436,10 +571,18 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   children: [
                     Text(
                       'Completed',
-                      style: TextStyle(fontSize: 10, color: Color(0xFF34D399), fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF34D399),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     SizedBox(width: 2),
-                    Icon(Icons.chevron_right, size: 12, color: Color(0xFF34D399)),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 12,
+                      color: Color(0xFF34D399),
+                    ),
                   ],
                 ),
               ],
@@ -457,13 +600,25 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     return Row(
       children: [
         // All Filter Pill
-        _buildFilterPill(label: 'All ($allCount)', isSelected: _activeFilterIndex == 0, onTap: () => setState(() => _activeFilterIndex = 0)),
+        _buildFilterPill(
+          label: 'All ($allCount)',
+          isSelected: _activeFilterIndex == 0,
+          onTap: () => setState(() => _activeFilterIndex = 0),
+        ),
         const SizedBox(width: 6),
         // Pending Filter Pill
-        _buildFilterPill(label: 'Pending ($pendingCount)', isSelected: _activeFilterIndex == 1, onTap: () => setState(() => _activeFilterIndex = 1)),
+        _buildFilterPill(
+          label: 'Pending ($pendingCount)',
+          isSelected: _activeFilterIndex == 1,
+          onTap: () => setState(() => _activeFilterIndex = 1),
+        ),
         const SizedBox(width: 6),
         // Completed Filter Pill
-        _buildFilterPill(label: 'Completed ($completedCount)', isSelected: _activeFilterIndex == 2, onTap: () => setState(() => _activeFilterIndex = 2)),
+        _buildFilterPill(
+          label: 'Completed ($completedCount)',
+          isSelected: _activeFilterIndex == 2,
+          onTap: () => setState(() => _activeFilterIndex = 2),
+        ),
 
         const Spacer(),
 
@@ -494,7 +649,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         InkWell(
           onTap: () {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Filtering by assigned shift: Day Shift (Beds 1–10)')),
+              const SnackBar(
+                content: Text(
+                  'Filtering by assigned shift: Day Shift (Beds 1–10)',
+                ),
+              ),
             );
           },
           borderRadius: BorderRadius.circular(8),
@@ -512,7 +671,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     );
   }
 
-  Widget _buildFilterPill({required String label, required bool isSelected, required VoidCallback onTap}) {
+  Widget _buildFilterPill({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -522,7 +685,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           color: isSelected ? const Color(0xFF0284C7) : const Color(0xFF10192E),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? const Color(0xFF38BDF8) : const Color(0xFF1E2C48),
+            color: isSelected
+                ? const Color(0xFF38BDF8)
+                : const Color(0xFF1E2C48),
             width: 0.8,
           ),
         ),
@@ -541,7 +706,12 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // ==========================================
   // 5. MY PATIENTS LIST
   // ==========================================
-  Widget _buildPatientListSection(List<PatientStateProjection> patients, Map<String, String> doctorMap) {
+  Widget _buildPatientListSection(
+    List<PatientStateProjection> patients,
+    Map<String, String> doctorMap,
+    {
+    required bool hasAnyPatients,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -551,16 +721,28 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           children: [
             const Text(
               'My Patients',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
             Row(
               children: [
                 const Text(
                   'Sort by Bed',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF94A3B8),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(width: 2),
-                const Icon(Icons.keyboard_arrow_down, size: 14, color: Color(0xFF94A3B8)),
+                const Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 14,
+                  color: Color(0xFF94A3B8),
+                ),
               ],
             ),
           ],
@@ -576,20 +758,34 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFF1E2C48)),
             ),
-            child: const Text('No patients match the selected filter.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+            child: Text(
+              hasAnyPatients
+                  ? 'No patients match the selected filter.'
+                  : 'You have no patients assigned to your ward for this shift.',
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+            ),
           )
         else
           ...patients.map((patient) {
             final rawBed = patient.bedNumber.replaceAll(RegExp(r'[^0-9]'), '');
-            final bedDisplay = rawBed.isEmpty ? patient.bedNumber : rawBed.padLeft(2, '0');
-            final doctor = doctorMap[patient.bedNumber] ?? doctorMap[rawBed] ?? 'Dr. Mbita';
+            final bedDisplay = rawBed.isEmpty
+                ? patient.bedNumber
+                : rawBed.padLeft(2, '0');
+            final doctor =
+                doctorMap[patient.bedNumber] ??
+                doctorMap[rawBed] ??
+                'Doctor not assigned';
             return _buildPatientCard(patient, bedDisplay, doctor);
           }),
       ],
     );
   }
 
-  Widget _buildPatientCard(PatientStateProjection patient, String bedDisplay, String doctor) {
+  Widget _buildPatientCard(
+    PatientStateProjection patient,
+    String bedDisplay,
+    String doctor,
+  ) {
     final loops = ref.watch(patientLoopsProvider(patient.patientId));
     final openLoops = loops.where((l) => l.isOpen).toList();
 
@@ -600,14 +796,16 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     Color stripeColor;
     Widget statusBadge;
 
-    if (openLoops.any((l) => l.urgency == LoopUrgency.critical) || patient.admissionNumber.contains('8834')) {
+    if (openLoops.any((l) => l.urgency == LoopUrgency.critical)) {
       stripeColor = const Color(0xFFEF4444);
       statusBadge = Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: const Color(0xFF450A0A),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.6)),
+          border: Border.all(
+            color: const Color(0xFFEF4444).withValues(alpha: 0.6),
+          ),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -616,7 +814,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             SizedBox(width: 4),
             Text(
               'Attention',
-              style: TextStyle(fontSize: 10, color: Color(0xFFFCA5A5), fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 10,
+                color: Color(0xFFFCA5A5),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
@@ -628,7 +830,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF451A03),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.6)),
+          border: Border.all(
+            color: const Color(0xFFF59E0B).withValues(alpha: 0.6),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -637,7 +841,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             const SizedBox(width: 4),
             Text(
               '${openLoops.length} pending',
-              style: const TextStyle(fontSize: 10, color: Color(0xFFFDE68A), fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 10,
+                color: Color(0xFFFDE68A),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
@@ -649,7 +857,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF064E3B).withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+          border: Border.all(
+            color: const Color(0xFF10B981).withValues(alpha: 0.5),
+          ),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -658,7 +868,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             SizedBox(width: 4),
             Text(
               'All clear',
-              style: TextStyle(fontSize: 10, color: Color(0xFF34D399), fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 10,
+                color: Color(0xFF34D399),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
@@ -677,7 +891,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         child: InkWell(
           onTap: () {
             Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => PatientDetailScreen(patient: patient)),
+              MaterialPageRoute(
+                builder: (_) => PatientDetailScreen(patient: patient),
+              ),
             );
           },
           borderRadius: BorderRadius.circular(12),
@@ -703,12 +919,22 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF16233B),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF293B5C), width: 0.8),
+                    border: Border.all(
+                      color: const Color(0xFF293B5C),
+                      width: 0.8,
+                    ),
                   ),
                   alignment: Alignment.center,
-                  child: Text(
-                    bedDisplay,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                  child: Semantics(
+                    label: patient.bedNumber,
+                    child: Text(
+                      bedDisplay,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -721,31 +947,51 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                       Row(
                         children: [
                           Text(
-                            patient.nameOrInitials,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                            patient.patientInitials,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
                           ),
                           const SizedBox(width: 6),
                           Text(
                             '${patient.age}y / ${patient.sex}',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF94A3B8),
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         patient.shortAdmittingNote,
-                        style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1)),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFFCBD5E1),
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          const Icon(Icons.person_outline, size: 12, color: Color(0xFF38BDF8)),
+                          const Icon(
+                            Icons.person_outline,
+                            size: 12,
+                            color: Color(0xFF38BDF8),
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             doctor,
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF38BDF8),
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
@@ -761,7 +1007,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   children: [
                     statusBadge,
                     const SizedBox(width: 6),
-                    const Icon(Icons.chevron_right, size: 16, color: Color(0xFF64748B)),
+                    const Icon(
+                      Icons.chevron_right,
+                      size: 16,
+                      color: Color(0xFF64748B),
+                    ),
                   ],
                 ),
               ],
@@ -786,7 +1036,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             SizedBox(width: 6),
             Text(
               'Ward Responsibilities',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
           ],
         ),
@@ -798,20 +1052,20 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Ward Manager',
-                nurseName: roster.wardManager.isNotEmpty ? roster.wardManager : 'Nurse A',
+                nurseName: roster.wardManager.isNotEmpty ? roster.wardManager : '-',
                 icon: Icons.person,
                 iconColor: const Color(0xFF38BDF8),
-                phone: '0722100201',
+                phone: '',
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Team Leader',
-                nurseName: roster.teamLeader.isNotEmpty ? roster.teamLeader : 'Nurse B',
+                nurseName: roster.teamLeader.isNotEmpty ? roster.teamLeader : '-',
                 icon: Icons.people_outline,
                 iconColor: const Color(0xFFA855F7),
-                phone: '0722100202',
+                phone: '',
               ),
             ),
           ],
@@ -822,20 +1076,20 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Duty Leader',
-                nurseName: roster.dutyLeader.isNotEmpty ? roster.dutyLeader : 'Nurse C',
+                nurseName: roster.dutyLeader.isNotEmpty ? roster.dutyLeader : '-',
                 icon: Icons.person_outline,
                 iconColor: const Color(0xFFF97316),
-                phone: '0722100203',
+                phone: '',
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Discharge Nurse',
-                nurseName: roster.dischargeNurse.isNotEmpty ? roster.dischargeNurse : 'Nurse D',
+                nurseName: roster.dischargeNurse.isNotEmpty ? roster.dischargeNurse : '-',
                 icon: Icons.assignment_turned_in_outlined,
                 iconColor: const Color(0xFF34D399),
-                phone: '0722100204',
+                phone: '',
               ),
             ),
           ],
@@ -846,20 +1100,20 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Patient Care Attendant',
-                nurseName: roster.pcaDay.isNotEmpty ? roster.pcaDay : 'Nurse E',
+                nurseName: roster.pcaDay.isNotEmpty ? roster.pcaDay : '-',
                 icon: Icons.person_pin_outlined,
                 iconColor: const Color(0xFF2DD4BF),
-                phone: '0722100205',
+                phone: '',
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Nurse In-Charge',
-                nurseName: roster.inchargeNurseDay.isNotEmpty ? roster.inchargeNurseDay : 'Nurse E',
+                nurseName: roster.inchargeNurseDay.isNotEmpty ? roster.inchargeNurseDay : '-',
                 icon: Icons.shield_outlined,
                 iconColor: const Color(0xFF818CF8),
-                phone: '0722100206',
+                phone: '',
               ),
             ),
           ],
@@ -876,7 +1130,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     required String phone,
   }) {
     return InkWell(
-      onTap: () => _showContactActionSheet(
+      onTap: phone.isEmpty ? null : () => _showContactActionSheet(
         roleTitle: title,
         nurseName: nurseName,
         icon: icon,
@@ -909,13 +1163,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF94A3B8),
+                      fontWeight: FontWeight.w500,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 1),
                   Text(
                     nurseName,
-                    style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -947,7 +1209,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           decoration: const BoxDecoration(
             color: Color(0xFF0F172A),
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            border: Border(top: BorderSide(color: Color(0xFF1E293B), width: 1.5)),
+            border: Border(
+              top: BorderSide(color: Color(0xFF1E293B), width: 1.5),
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -978,22 +1242,40 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                       children: [
                         Text(
                           nurseName,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                         Text(
                           roleTitle,
-                          style: TextStyle(fontSize: 12, color: iconColor, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: iconColor,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF064E3B),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text('On Duty', style: TextStyle(fontSize: 10, color: Color(0xFF34D399), fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'On Duty',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF34D399),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1008,15 +1290,25 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                     backgroundColor: const Color(0xFF10B981),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   icon: const Icon(Icons.call, size: 18),
-                  label: Text('Call $nurseName ($phoneNumber)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  label: Text(
+                    'Call $nurseName ($phoneNumber)',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
                   onPressed: () {
                     Navigator.of(ctx).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Connecting call to $nurseName ($roleTitle)...'),
+                        content: Text(
+                          'Connecting call to $nurseName ($roleTitle)...',
+                        ),
                         backgroundColor: const Color(0xFF10B981),
                       ),
                     );
@@ -1032,12 +1324,23 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF38BDF8),
-                    side: const BorderSide(color: Color(0xFF38BDF8), width: 1.2),
+                    side: const BorderSide(
+                      color: Color(0xFF38BDF8),
+                      width: 1.2,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                  label: Text('Message $nurseName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  label: Text(
+                    'Message $nurseName',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
                   onPressed: () {
                     Navigator.of(ctx).pop();
                     _showQuickMessageDialog(nurseName, roleTitle);
@@ -1067,14 +1370,26 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           children: [
             const Icon(Icons.message, color: Color(0xFF38BDF8), size: 18),
             const SizedBox(width: 8),
-            Expanded(child: Text('Message $nurseName', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold))),
+            Expanded(
+              child: Text(
+                'Message $nurseName',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('To $roleTitle on duty:', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            Text(
+              'To $roleTitle on duty:',
+              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+            ),
             const SizedBox(height: 8),
             TextField(
               controller: controller,
@@ -1082,10 +1397,15 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               maxLines: 2,
               decoration: InputDecoration(
                 hintText: 'Type clinical query or handover note...',
-                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                hintStyle: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 12,
+                ),
                 filled: true,
                 fillColor: const Color(0xFF1E293B),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -1094,30 +1414,52 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               spacing: 6,
               children: [
                 ActionChip(
-                  label: const Text('Bed 2 review', style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8))),
+                  label: const Text(
+                    'Bed 2 review',
+                    style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8)),
+                  ),
                   backgroundColor: const Color(0xFF1E293B),
-                  onPressed: () => controller.text = 'Please assist with Bed 2 urgent review.',
+                  onPressed: () => controller.text =
+                      'Please assist with Bed 2 urgent review.',
                 ),
                 ActionChip(
-                  label: const Text('Meds sign-off', style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8))),
+                  label: const Text(
+                    'Meds sign-off',
+                    style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8)),
+                  ),
                   backgroundColor: const Color(0xFF1E293B),
-                  onPressed: () => controller.text = 'Need second sign-off on IV antibiotics.',
+                  onPressed: () => controller.text =
+                      'Need second sign-off on IV antibiotics.',
                 ),
               ],
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF94A3B8)),
+            ),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0284C7),
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Message sent to $nurseName!')),
               );
             },
-            child: const Text('Send Message', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Send Message',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -1165,12 +1507,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                     children: [
                       Text(
                         'Shift Handoff',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                       SizedBox(height: 2),
                       Text(
                         'Review outstanding tasks and prepare for the next shift',
-                        style: TextStyle(color: Color(0xFFBAE6FD), fontSize: 11),
+                        style: TextStyle(
+                          color: Color(0xFFBAE6FD),
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -1226,7 +1575,10 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         unselectedFontSize: 10,
         items: [
           const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          const BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: 'Patients'),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.people_outline),
+            label: 'Patients',
+          ),
           BottomNavigationBarItem(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -1237,16 +1589,32 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   right: -4,
                   child: Container(
                     padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
-                    child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFEF4444),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Text(
+                      '2',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
             label: 'Tasks',
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.swap_horiz), label: 'Handoff'),
-          const BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.swap_horiz),
+            label: 'Handoff',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.more_horiz),
+            label: 'More',
+          ),
         ],
       ),
     );
@@ -1267,22 +1635,53 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.dashboard_customize, color: Color(0xFF38BDF8)),
-              title: const Text('Ward Management & Nurse Allocation Board', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: const Text('View master whiteboard beds 1–10 and shift roster', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+              leading: const Icon(
+                Icons.dashboard_customize,
+                color: Color(0xFF38BDF8),
+              ),
+              title: const Text(
+                'Ward Management & Nurse Allocation Board',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: const Text(
+                'View master whiteboard beds 1–10 and shift roster',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: Color(0xFF94A3B8),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DigitalWhiteboardScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const DigitalWhiteboardScreen(),
+                  ),
                 );
               },
             ),
             ListTile(
               leading: const Icon(Icons.apartment, color: Color(0xFF34D399)),
-              title: const Text('Switch Active Hospital Ward', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: const Text('Select another ward with search autofilter', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+              title: const Text(
+                'Switch Active Hospital Ward',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: const Text(
+                'Select another ward with search autofilter',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: Color(0xFF94A3B8),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 showDialog(
@@ -1293,13 +1692,25 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.lock_outline, color: Color(0xFFEF4444)),
-              title: const Text('Lock Station', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: const Text('Return to Digital ID badge screen', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+              title: const Text(
+                'Lock Station',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: const Text(
+                'Return to Digital ID badge screen',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 ref.read(authControllerProvider.notifier).logout();
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const DigitalIdLockscreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const DigitalIdLockscreen(),
+                  ),
                   (route) => false,
                 );
               },
@@ -1310,7 +1721,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     );
   }
 
-  void _showLockDialog(BuildContext context, WidgetRef ref, StaffProfile? staff) {
+  void _showLockDialog(
+    BuildContext context,
+    WidgetRef ref,
+    StaffProfile? staff,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1322,14 +1737,22 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.3),
               child: Text(
                 staff?.initials ?? 'NX',
-                style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
+                style: const TextStyle(
+                  color: Color(0xFF38BDF8),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 staff?.name ?? 'Nurse',
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -1341,12 +1764,20 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF94A3B8)),
+            ),
           ),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0284C7),
+            ),
             icon: const Icon(Icons.lock, size: 16, color: Colors.white),
-            label: const Text('Lock Station', style: TextStyle(color: Colors.white)),
+            label: const Text(
+              'Lock Station',
+              style: TextStyle(color: Colors.white),
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               ref.read(authControllerProvider.notifier).logout();

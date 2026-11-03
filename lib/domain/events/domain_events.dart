@@ -1,5 +1,19 @@
 import '../models/loop_enums.dart';
+import '../models/patient_identity.dart';
 import 'oravi_event.dart';
+
+String _restoredLoopId(Map<String, dynamic> map) {
+  final storedLoopId = map['loop_id'] as String?;
+  if (storedLoopId?.trim().isNotEmpty == true) return storedLoopId!.trim();
+
+  // Preserve malformed legacy events under a deterministic isolated thread id.
+  // This keeps one incomplete row from blocking restoration of the whole ward.
+  final eventId = map['event_id'] as String?;
+  if (eventId == null || eventId.isEmpty) {
+    throw const FormatException('A stored event is missing its event id.');
+  }
+  return 'recovered-$eventId';
+}
 
 // ==========================================
 // 1. Patient Lifecycle Events (Appendix A)
@@ -10,8 +24,9 @@ class PatientAdmittedEvent extends OraviEvent {
 
   final String wardId;
   final String bedNumber;
-  final String admissionNumber; // Second mandatory patient identifier (FR-3)
-  final String nameOrInitials;
+  final String patientInitials;
+  final String? _legacyAdmissionNumber;
+  final String? _legacyNameOrInitials;
   final int age;
   final String sex;
   final String shortAdmittingNote;
@@ -30,54 +45,87 @@ class PatientAdmittedEvent extends OraviEvent {
     super.hash,
     required this.wardId,
     required this.bedNumber,
-    required this.admissionNumber,
-    required this.nameOrInitials,
+    required String patientInitials,
     required this.age,
     required this.sex,
     required this.shortAdmittingNote,
     this.keyAlerts = const [],
-  }) : super(type: eventType);
+  }) : patientInitials = PatientIdentity.requireInitials(patientInitials),
+       _legacyAdmissionNumber = null,
+       _legacyNameOrInitials = null,
+       super(type: eventType);
+
+  PatientAdmittedEvent._legacy({
+    super.eventId,
+    required super.patientId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+    required this.wardId,
+    required this.bedNumber,
+    required String patientInitials,
+    required this._legacyAdmissionNumber,
+    required this._legacyNameOrInitials,
+    required this.age,
+    required this.sex,
+    required this.shortAdmittingNote,
+    this.keyAlerts = const [],
+  }) : patientInitials = PatientIdentity.initialsFromLegacy(patientInitials),
+       super(type: eventType);
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'ward_id': wardId,
-          'bed_number': bedNumber,
-          'admission_number': admissionNumber,
-          'name_or_initials': nameOrInitials,
-          'age': age,
-          'sex': sex,
-          'short_admitting_note': shortAdmittingNote,
-          'key_alerts': keyAlerts,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'ward_id': wardId,
+      'bed_number': bedNumber,
+      if (_legacyAdmissionNumber != null)
+        'admission_number': _legacyAdmissionNumber,
+      // Keep the existing wire key for compatibility. Its new value is initials only.
+      'name_or_initials': _legacyNameOrInitials ?? patientInitials,
+      'age': age,
+      'sex': sex,
+      'short_admitting_note': shortAdmittingNote,
+      'key_alerts': keyAlerts,
+    },
+  };
 
   factory PatientAdmittedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
-    return PatientAdmittedEvent(
+    return PatientAdmittedEvent._legacy(
       eventId: map['event_id'],
       patientId: map['patient_id'],
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       prevHash: map['prev_hash'],
       hash: map['hash'],
       wardId: payload['ward_id'],
       bedNumber: payload['bed_number'],
-      admissionNumber: payload['admission_number'],
-      nameOrInitials: payload['name_or_initials'],
+      patientInitials: PatientIdentity.initialsFromLegacy(
+        (payload['patient_initials'] ?? payload['name_or_initials'] ?? '')
+            .toString(),
+      ),
+      legacyAdmissionNumber: payload['admission_number']?.toString(),
+      legacyNameOrInitials: payload['name_or_initials']?.toString(),
       age: payload['age'],
       sex: payload['sex'],
       shortAdmittingNote: payload['short_admitting_note'] ?? '',
@@ -111,21 +159,21 @@ class PatientTransferredEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'from_ward_id': fromWardId,
-          'to_ward_id': toWardId,
-          'to_bed_number': toBedNumber,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'from_ward_id': fromWardId,
+      'to_ward_id': toWardId,
+      'to_bed_number': toBedNumber,
+    },
+  };
 
   factory PatientTransferredEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -136,7 +184,9 @@ class PatientTransferredEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       fromWardId: payload['from_ward_id'],
       toWardId: payload['to_ward_id'],
@@ -168,20 +218,20 @@ class PatientDischargedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'discharge_disposition': dischargeDisposition,
-          'unresolved_carried_forward_notes': unresolvedCarriedForwardNotes,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'discharge_disposition': dischargeDisposition,
+      'unresolved_carried_forward_notes': unresolvedCarriedForwardNotes,
+    },
+  };
 
   factory PatientDischargedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -192,10 +242,13 @@ class PatientDischargedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       dischargeDisposition: payload['discharge_disposition'],
-      unresolvedCarriedForwardNotes: payload['unresolved_carried_forward_notes'],
+      unresolvedCarriedForwardNotes:
+          payload['unresolved_carried_forward_notes'],
     );
   }
 }
@@ -213,7 +266,8 @@ class LoopOpenedEvent extends OraviEvent {
   final LoopUrgency urgency;
   final String initialOwnerId;
   final String initialOwnerRole;
-  final String? linkedLoopId; // If created from recurring/linked loop flow (FR-53)
+  final String?
+  linkedLoopId; // If created from recurring/linked loop flow (FR-53)
 
   LoopOpenedEvent({
     super.eventId,
@@ -238,45 +292,55 @@ class LoopOpenedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'title': title,
-          'description': description,
-          'loop_type': loopType.wireName,
-          'urgency': urgency.wireName,
-          'initial_owner_id': initialOwnerId,
-          'initial_owner_role': initialOwnerRole,
-          'linked_loop_id': linkedLoopId,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'title': title,
+      'description': description,
+      'loop_type': loopType.wireName,
+      'urgency': urgency.wireName,
+      'initial_owner_id': initialOwnerId,
+      'initial_owner_role': initialOwnerRole,
+      'linked_loop_id': linkedLoopId,
+    },
+  };
 
   factory LoopOpenedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
+    final eventId = map['event_id'] as String;
+    final authorId = map['author_id'] as String;
     return LoopOpenedEvent(
-      eventId: map['event_id'],
+      eventId: eventId,
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
-      authorId: map['author_id'],
+      loopId: _restoredLoopId(map),
+      authorId: authorId,
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
-      title: payload['title'],
-      description: payload['description'] ?? '',
-      loopType: LoopType.fromString(payload['loop_type']),
-      urgency: LoopUrgency.fromString(payload['urgency']),
-      initialOwnerId: payload['initial_owner_id'],
-      initialOwnerRole: payload['initial_owner_role'],
+      title: (payload['title'] as String?)?.trim().isNotEmpty == true
+          ? (payload['title'] as String).trim()
+          : 'Recovered medical issue',
+      description: payload['description'] as String? ?? '',
+      loopType: LoopType.fromString(
+        payload['loop_type'] as String? ?? LoopType.taskOrPendingResult.wireName,
+      ),
+      urgency: LoopUrgency.fromString(
+        payload['urgency'] as String? ?? LoopUrgency.routine.wireName,
+      ),
+      initialOwnerId: payload['initial_owner_id'] as String? ?? authorId,
+      initialOwnerRole: payload['initial_owner_role'] as String? ?? 'unknown',
       linkedLoopId: payload['linked_loop_id'],
     );
   }
@@ -301,29 +365,80 @@ class LoopAcknowledgedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {},
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {},
+  };
 
   factory LoopAcknowledgedEvent.fromMap(Map<String, dynamic> map) {
     return LoopAcknowledgedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
+      schemaVersion: map['schema_version'] ?? 1,
+    );
+  }
+}
+
+class LoopWorkStartedEvent extends OraviEvent {
+  static const String eventType = 'LoopWorkStarted';
+
+  LoopWorkStartedEvent({
+    super.eventId,
+    required super.patientId,
+    required String super.loopId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {},
+  };
+
+  factory LoopWorkStartedEvent.fromMap(Map<String, dynamic> map) {
+    return LoopWorkStartedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      loopId: _restoredLoopId(map),
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
     );
   }
@@ -355,34 +470,36 @@ class LoopOwnerChangedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'new_owner_id': newOwnerId,
-          'new_owner_role': newOwnerRole,
-          'transfer_reason': transferReason,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'new_owner_id': newOwnerId,
+      'new_owner_role': newOwnerRole,
+      'transfer_reason': transferReason,
+    },
+  };
 
   factory LoopOwnerChangedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return LoopOwnerChangedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       newOwnerId: payload['new_owner_id'],
       newOwnerRole: payload['new_owner_role'],
@@ -423,35 +540,37 @@ class MessagePostedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'message_id': messageId,
-          'content': content,
-          'quoted_message_id': quotedMessageId,
-          'role_mentions': roleMentions,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'message_id': messageId,
+      'content': content,
+      'quoted_message_id': quotedMessageId,
+      'role_mentions': roleMentions,
+    },
+  };
 
   factory MessagePostedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return MessagePostedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       messageId: payload['message_id'],
       content: payload['content'],
@@ -487,34 +606,36 @@ class MessageEditedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'message_id': messageId,
-          'previous_content': previousContent,
-          'new_content': newContent,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'message_id': messageId,
+      'previous_content': previousContent,
+      'new_content': newContent,
+    },
+  };
 
   factory MessageEditedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return MessageEditedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       messageId: payload['message_id'],
       previousContent: payload['previous_content'],
@@ -557,38 +678,40 @@ class CallLoggedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'call_id': callId,
-          'caller_id': callerId,
-          'caller_role': callerRole,
-          'recipient_id': recipientId,
-          'recipient_role': recipientRole,
-          'outcome_note': outcomeNote,
-          'duration_seconds': durationSeconds,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'call_id': callId,
+      'caller_id': callerId,
+      'caller_role': callerRole,
+      'recipient_id': recipientId,
+      'recipient_role': recipientRole,
+      'outcome_note': outcomeNote,
+      'duration_seconds': durationSeconds,
+    },
+  };
 
   factory CallLoggedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return CallLoggedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       callId: payload['call_id'],
       callerId: payload['caller_id'],
@@ -609,7 +732,8 @@ class LoopClosedEvent extends OraviEvent {
   static const String eventType = 'LoopClosed';
 
   final ClosureReasonCode reasonCode;
-  final String? freeTextNote; // Required if reasonCode.requiresFreeTextNote is true
+  final String?
+  freeTextNote; // Required if reasonCode.requiresFreeTextNote is true
   final ClosureResolutionType resolutionType;
 
   LoopClosedEvent({
@@ -631,38 +755,42 @@ class LoopClosedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'reason_code': reasonCode.wireName,
-          'free_text_note': freeTextNote,
-          'resolution_type': resolutionType.wireName,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'reason_code': reasonCode.wireName,
+      'free_text_note': freeTextNote,
+      'resolution_type': resolutionType.wireName,
+    },
+  };
 
   factory LoopClosedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return LoopClosedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       reasonCode: ClosureReasonCode.fromString(payload['reason_code']),
       freeTextNote: payload['free_text_note'],
-      resolutionType: ClosureResolutionType.fromString(payload['resolution_type']),
+      resolutionType: ClosureResolutionType.fromString(
+        payload['resolution_type'],
+      ),
     );
   }
 }
@@ -689,32 +817,32 @@ class LoopClosureConfirmedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'confirmed_by_role': confirmedByRole,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {'confirmed_by_role': confirmedByRole},
+  };
 
   factory LoopClosureConfirmedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return LoopClosureConfirmedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       confirmedByRole: payload['confirmed_by_role'],
     );
@@ -743,32 +871,32 @@ class LoopReopenedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'reopen_reason': reopenReason,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {'reopen_reason': reopenReason},
+  };
 
   factory LoopReopenedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return LoopReopenedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       reopenReason: payload['reopen_reason'],
     );
@@ -799,33 +927,32 @@ class LoopLinkedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'target_loop_id': targetLoopId,
-          'link_type': linkType,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {'target_loop_id': targetLoopId, 'link_type': linkType},
+  };
 
   factory LoopLinkedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return LoopLinkedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       targetLoopId: payload['target_loop_id'],
       linkType: payload['link_type'],
@@ -864,22 +991,22 @@ class HandoffStartedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'handoff_session_id': handoffSessionId,
-          'ward_id': wardId,
-          'outgoing_nurse_id': outgoingNurseId,
-          'incoming_nurse_id': incomingNurseId,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'handoff_session_id': handoffSessionId,
+      'ward_id': wardId,
+      'outgoing_nurse_id': outgoingNurseId,
+      'incoming_nurse_id': incomingNurseId,
+    },
+  };
 
   factory HandoffStartedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -890,7 +1017,9 @@ class HandoffStartedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       handoffSessionId: payload['handoff_session_id'],
       wardId: payload['ward_id'],
@@ -927,22 +1056,22 @@ class HandoffBedAcceptedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'handoff_session_id': handoffSessionId,
-          'bed_number': bedNumber,
-          'nothing_pending_confirmed': nothingPendingConfirmed,
-          'transferred_loop_ids': transferredLoopIds,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'handoff_session_id': handoffSessionId,
+      'bed_number': bedNumber,
+      'nothing_pending_confirmed': nothingPendingConfirmed,
+      'transferred_loop_ids': transferredLoopIds,
+    },
+  };
 
   factory HandoffBedAcceptedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -953,12 +1082,16 @@ class HandoffBedAcceptedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       handoffSessionId: payload['handoff_session_id'],
       bedNumber: payload['bed_number'],
       nothingPendingConfirmed: payload['nothing_pending_confirmed'] ?? false,
-      transferredLoopIds: List<String>.from(payload['transferred_loop_ids'] ?? []),
+      transferredLoopIds: List<String>.from(
+        payload['transferred_loop_ids'] ?? [],
+      ),
     );
   }
 }
@@ -988,21 +1121,21 @@ class HandoffCompletedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'handoff_session_id': handoffSessionId,
-          'total_beds_handed_over': totalBedsHandedOver,
-          'total_loops_transferred': totalLoopsTransferred,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'handoff_session_id': handoffSessionId,
+      'total_beds_handed_over': totalBedsHandedOver,
+      'total_loops_transferred': totalLoopsTransferred,
+    },
+  };
 
   factory HandoffCompletedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -1013,7 +1146,9 @@ class HandoffCompletedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       handoffSessionId: payload['handoff_session_id'],
       totalBedsHandedOver: payload['total_beds_handed_over'],
@@ -1056,36 +1191,38 @@ class EscalationRaisedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'escalation_id': escalationId,
-          'target_role': targetRole,
-          'initial_target_user_id': initialTargetUserId,
-          'escalation_reason': escalationReason,
-          'timeout_minutes': timeoutMinutes,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'escalation_id': escalationId,
+      'target_role': targetRole,
+      'initial_target_user_id': initialTargetUserId,
+      'escalation_reason': escalationReason,
+      'timeout_minutes': timeoutMinutes,
+    },
+  };
 
   factory EscalationRaisedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return EscalationRaisedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       escalationId: payload['escalation_id'],
       targetRole: payload['target_role'],
@@ -1120,33 +1257,32 @@ class EscalationAcknowledgedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'escalation_id': escalationId,
-          'note': note,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {'escalation_id': escalationId, 'note': note},
+  };
 
   factory EscalationAcknowledgedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return EscalationAcknowledgedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       escalationId: payload['escalation_id'],
       note: payload['note'] ?? '',
@@ -1182,35 +1318,37 @@ class EscalationPassedOnEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'escalation_id': escalationId,
-          'next_target_user_id': nextTargetUserId,
-          'next_target_role': nextTargetRole,
-          'reason': reason,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'escalation_id': escalationId,
+      'next_target_user_id': nextTargetUserId,
+      'next_target_role': nextTargetRole,
+      'reason': reason,
+    },
+  };
 
   factory EscalationPassedOnEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return EscalationPassedOnEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       escalationId: payload['escalation_id'],
       nextTargetUserId: payload['next_target_user_id'],
@@ -1248,35 +1386,37 @@ class FlagRaisedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'flag_id': flagId,
-          'rule_name': ruleName,
-          'explanation': explanation,
-          'severity': severity,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {
+      'flag_id': flagId,
+      'rule_name': ruleName,
+      'explanation': explanation,
+      'severity': severity,
+    },
+  };
 
   factory FlagRaisedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return FlagRaisedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       flagId: payload['flag_id'],
       ruleName: payload['rule_name'],
@@ -1290,7 +1430,8 @@ class FlagDismissedEvent extends OraviEvent {
   static const String eventType = 'FlagDismissed';
 
   final String flagId;
-  final String dismissalReason; // PRD FR-27: Snoozed/dismissed only with a logged reason
+  final String
+  dismissalReason; // PRD FR-27: Snoozed/dismissed only with a logged reason
 
   FlagDismissedEvent({
     super.eventId,
@@ -1310,40 +1451,38 @@ class FlagDismissedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'loop_id': loopId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'payload': {
-          'flag_id': flagId,
-          'dismissal_reason': dismissalReason,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': {'flag_id': flagId, 'dismissal_reason': dismissalReason},
+  };
 
   factory FlagDismissedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
     return FlagDismissedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
-      loopId: map['loop_id'],
+      loopId: _restoredLoopId(map),
       authorId: map['author_id'],
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       flagId: payload['flag_id'],
       dismissalReason: payload['dismissal_reason'],
     );
   }
 }
-
 
 // ==========================================
 // 7. Milestone 8: Multi-Ward Digital Whiteboard & Shift Allocation Events
@@ -1380,26 +1519,26 @@ class ShiftAllocationPublishedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'prev_hash': prevHash,
-        'hash': hash,
-        'payload': {
-          'allocation_id': allocationId,
-          'ward_id': wardId,
-          'shift_type': shiftType,
-          'date': date,
-          'bed_assignments': bedAssignments,
-          'support_roster': supportRoster,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'prev_hash': prevHash,
+    'hash': hash,
+    'payload': {
+      'allocation_id': allocationId,
+      'ward_id': wardId,
+      'shift_type': shiftType,
+      'date': date,
+      'bed_assignments': bedAssignments,
+      'support_roster': supportRoster,
+    },
+  };
 
   factory ShiftAllocationPublishedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -1410,13 +1549,17 @@ class ShiftAllocationPublishedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       allocationId: payload['allocation_id'],
       wardId: payload['ward_id'],
       shiftType: payload['shift_type'],
       date: payload['date'],
-      bedAssignments: List<Map<String, dynamic>>.from(payload['bed_assignments'] ?? []),
+      bedAssignments: List<Map<String, dynamic>>.from(
+        payload['bed_assignments'] ?? [],
+      ),
       supportRoster: Map<String, dynamic>.from(payload['support_roster'] ?? {}),
     );
   }
@@ -1449,24 +1592,24 @@ class ShiftAllocationAcceptedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'prev_hash': prevHash,
-        'hash': hash,
-        'payload': {
-          'allocation_id': allocationId,
-          'ward_id': wardId,
-          'nurse_id': nurseId,
-          'accepted_beds': acceptedBeds,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'prev_hash': prevHash,
+    'hash': hash,
+    'payload': {
+      'allocation_id': allocationId,
+      'ward_id': wardId,
+      'nurse_id': nurseId,
+      'accepted_beds': acceptedBeds,
+    },
+  };
 
   factory ShiftAllocationAcceptedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -1477,7 +1620,9 @@ class ShiftAllocationAcceptedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       allocationId: payload['allocation_id'],
       wardId: payload['ward_id'],
@@ -1516,25 +1661,25 @@ class ShiftAllocationDisputedEvent extends OraviEvent {
 
   @override
   Map<String, dynamic> toMap() => {
-        'event_id': eventId,
-        'type': type,
-        'patient_id': patientId,
-        'author_id': authorId,
-        'device_id': deviceId,
-        'client_created_at': clientCreatedAt.toIso8601String(),
-        'server_seq': serverSeq,
-        'server_received_at': serverReceivedAt?.toIso8601String(),
-        'schema_version': schemaVersion,
-        'prev_hash': prevHash,
-        'hash': hash,
-        'payload': {
-          'allocation_id': allocationId,
-          'ward_id': wardId,
-          'nurse_id': nurseId,
-          'bed_number': bedNumber,
-          'dispute_reason': disputeReason,
-        },
-      };
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'prev_hash': prevHash,
+    'hash': hash,
+    'payload': {
+      'allocation_id': allocationId,
+      'ward_id': wardId,
+      'nurse_id': nurseId,
+      'bed_number': bedNumber,
+      'dispute_reason': disputeReason,
+    },
+  };
 
   factory ShiftAllocationDisputedEvent.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
@@ -1545,7 +1690,9 @@ class ShiftAllocationDisputedEvent extends OraviEvent {
       deviceId: map['device_id'],
       clientCreatedAt: DateTime.parse(map['client_created_at']),
       serverSeq: map['server_seq'],
-      serverReceivedAt: map['server_received_at'] != null ? DateTime.parse(map['server_received_at']) : null,
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
       schemaVersion: map['schema_version'] ?? 1,
       allocationId: payload['allocation_id'],
       wardId: payload['ward_id'],
@@ -1570,6 +1717,8 @@ OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
       return LoopOpenedEvent.fromMap(map);
     case LoopAcknowledgedEvent.eventType:
       return LoopAcknowledgedEvent.fromMap(map);
+    case LoopWorkStartedEvent.eventType:
+      return LoopWorkStartedEvent.fromMap(map);
     case LoopOwnerChangedEvent.eventType:
       return LoopOwnerChangedEvent.fromMap(map);
     case MessagePostedEvent.eventType:

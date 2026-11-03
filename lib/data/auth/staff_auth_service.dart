@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
+import '../api_configuration.dart';
 import '../../domain/models/staff_profile.dart';
+import '../../domain/models/hospital_ward.dart';
 
 class AuthResult {
   final bool success;
@@ -8,107 +11,12 @@ class AuthResult {
   final String? token;
   final String? error;
 
-  const AuthResult({
-    required this.success,
-    this.staff,
-    this.token,
-    this.error,
-  });
+  const AuthResult({required this.success, this.staff, this.token, this.error});
 }
 
-/// Baseline canonical staff for offline-first resilience.
-const List<StaffProfile> kDefaultWardStaff = [
-  StaffProfile(
-    staffId: 'NUR-401',
-    name: 'Mary Wanjiku, RN',
-    role: 'ward_nurse',
-    wardId: 'WARD-4B',
-    avatarColor: '#059669',
-    initials: 'MW',
-  ),
-  StaffProfile(
-    staffId: 'NUR-402',
-    name: 'Grace Achieng, RN',
-    role: 'charge_nurse',
-    wardId: 'WARD-4B',
-    avatarColor: '#2563EB',
-    initials: 'GA',
-  ),
-  StaffProfile(
-    staffId: 'NUR-403',
-    name: 'Faith Njeri, RN',
-    role: 'ward_nurse',
-    wardId: 'WARD-4B',
-    avatarColor: '#0D9488',
-    initials: 'FN',
-  ),
-  StaffProfile(
-    staffId: 'DOC-401',
-    name: 'Dr. James Kamau',
-    role: 'doctor_on_call',
-    wardId: 'WARD-4B',
-    avatarColor: '#7C3AED',
-    initials: 'JK',
-  ),
-  StaffProfile(
-    staffId: 'NUR-404',
-    name: 'Sarah Otieno, RN',
-    role: 'ward_nurse',
-    wardId: 'WARD-4B',
-    avatarColor: '#D97706',
-    initials: 'SO',
-  ),
-  StaffProfile(
-    staffId: 'NUR-405',
-    name: 'Jane Muthoni, RN',
-    role: 'ward_nurse',
-    wardId: 'WARD-4B',
-    avatarColor: '#E11D48',
-    initials: 'JM',
-  ),
-];
-
-const Map<String, String> kOfflineCanonicalPins = {
-  'NUR-401': '1234',
-  'NUR-402': '5678',
-  'NUR-403': '1111',
-  'DOC-401': '9090',
-  'NUR-404': '2222',
-  'NUR-405': '3333',
-};
-
 class StaffAuthService {
-  static final Map<String, String> dynamicPins = Map.from(kOfflineCanonicalPins);
-  static final List<StaffProfile> dynamicStaff = List.from(kDefaultWardStaff);
-
-  static void addStaffUser(StaffProfile staff, String pin) {
-    dynamicStaff.removeWhere((s) => s.staffId == staff.staffId);
-    dynamicStaff.add(staff);
-    dynamicPins[staff.staffId] = pin;
-  }
-
-  static void updateStaffPin(String staffId, String newPin) {
-    dynamicPins[staffId] = newPin;
-  }
-
-  static void toggleStaffActive(String staffId) {
-    final idx = dynamicStaff.indexWhere((s) => s.staffId == staffId);
-    if (idx != -1) {
-      final current = dynamicStaff[idx];
-      dynamicStaff[idx] = current.copyWith(isActive: !current.isActive);
-    }
-  }
-
-  static void deleteStaff(String staffId) {
-    dynamicStaff.removeWhere((s) => s.staffId == staffId);
-    dynamicPins.remove(staffId);
-  }
-
-  static const List<String> defaultCandidateUrls = [
-    'http://127.0.0.1:8000',
-    'http://172.16.20.186:8000',
-    'http://10.0.96.95:8000',
-  ];
+  static List<String> get defaultCandidateUrls =>
+      OraviApiConfiguration.candidateUrls;
 
   final List<String> candidateUrls;
   String _activeBaseUrl;
@@ -116,7 +24,8 @@ class StaffAuthService {
 
   // Optional mock handlers for unit testing
   final Future<List<StaffProfile>> Function(String wardId)? mockGetStaffHandler;
-  final Future<AuthResult> Function(String staffId, String pin)? mockVerifyPinHandler;
+  final Future<AuthResult> Function(String staffId, String pin)?
+  mockVerifyPinHandler;
 
   StaffAuthService({
     String? baseUrl,
@@ -124,11 +33,24 @@ class StaffAuthService {
     this.timeout = const Duration(seconds: 4),
     this.mockGetStaffHandler,
     this.mockVerifyPinHandler,
-  })  : candidateUrls = candidateUrls ??
-            (baseUrl != null ? [baseUrl, ...defaultCandidateUrls] : defaultCandidateUrls),
-        _activeBaseUrl = baseUrl ?? defaultCandidateUrls.first;
+  }) : candidateUrls =
+           candidateUrls ??
+           (baseUrl != null
+               ? [baseUrl, ...defaultCandidateUrls]
+               : defaultCandidateUrls),
+       _activeBaseUrl =
+           baseUrl ??
+           ((candidateUrls ?? defaultCandidateUrls).isEmpty
+               ? ''
+               : (candidateUrls ?? defaultCandidateUrls).first) {
+    for (final url in this.candidateUrls) {
+      OraviApiConfiguration.validateBaseUrl(url);
+    }
+  }
 
-  Future<T> _executeWithFallback<T>(Future<T> Function(String base) request) async {
+  Future<T> _executeWithFallback<T>(
+    Future<T> Function(String base) request,
+  ) async {
     final ordered = [
       _activeBaseUrl,
       ...candidateUrls.where((u) => u != _activeBaseUrl),
@@ -146,43 +68,168 @@ class StaffAuthService {
     throw lastError ?? Exception('All candidate auth servers unreachable');
   }
 
-  /// Fetches the roster of staff on the given ward.
-  /// Automatically falls back to offline canonical staff on network unavailability.
+  /// Fetches provisioned staff identity cards for the sign-in screen.
   Future<List<StaffProfile>> getStaffForWard(String wardId) async {
     if (mockGetStaffHandler != null) {
       return mockGetStaffHandler!(wardId);
     }
 
-    try {
-      return await _executeWithFallback((base) async {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-        try {
-          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-          final uri = Uri.parse('$cleanBase/api/v1/auth/staff?ward_id=$wardId');
-
-          final request = await client.getUrl(uri).timeout(timeout);
-          request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-
-          final response = await request.close().timeout(timeout);
-          if (response.statusCode == 200) {
-            final body = await response.transform(utf8.decoder).join();
-            final json = jsonDecode(body) as Map<String, dynamic>;
-            final rawList = (json['staff'] as List<dynamic>?) ?? [];
-            return rawList.map((e) => StaffProfile.fromJson(e as Map<String, dynamic>)).toList();
-          }
-          throw Exception('Backend returned HTTP ${response.statusCode}');
-        } finally {
-          client.close();
+    return _executeWithFallback((base) async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final cleanBase = base.endsWith('/')
+            ? base.substring(0, base.length - 1)
+            : base;
+        final uri = Uri.parse('$cleanBase/api/v1/auth/directory');
+        final request = await client.getUrl(uri).timeout(timeout);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        if (response.statusCode != 200) {
+          throw HttpException(
+            'Staff directory unavailable (HTTP ${response.statusCode}).',
+            uri: uri,
+          );
         }
-      });
-    } catch (_) {
-      // Offline fallback: return canonical staff matching ward
-      return dynamicStaff.where((s) => s.wardId == wardId || wardId == 'WARD-4B').toList();
-    }
+        final rawList = jsonDecode(body) as List<dynamic>;
+        return rawList
+            .map((item) => StaffProfile.fromJson(item as Map<String, dynamic>))
+            .toList();
+      } finally {
+        client.close();
+      }
+    });
   }
 
-  /// Verifies a 4-digit PIN for the selected staff member.
-  /// Falls back to local offline validation if server is unreachable.
+  Future<List<StaffProfile>> getProvisionedStaff(String token) async {
+    return _executeWithFallback((base) async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final cleanBase = base.endsWith('/')
+            ? base.substring(0, base.length - 1)
+            : base;
+        final request = await client
+            .getUrl(Uri.parse('$cleanBase/api/v1/admin/staff'))
+            .timeout(timeout);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        if (response.statusCode != 200) {
+          throw Exception(
+            'Admin directory unavailable (${response.statusCode}).',
+          );
+        }
+        return (jsonDecode(body) as List<dynamic>)
+            .map((item) => StaffProfile.fromJson(item as Map<String, dynamic>))
+            .toList();
+      } finally {
+        client.close();
+      }
+    });
+  }
+
+  Future<StaffProfile> createClinicalStaff({
+    required String token,
+    required String staffId,
+    required String name,
+    required String role,
+    required String pin,
+  }) async {
+    return _executeWithFallback((base) async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final cleanBase = base.endsWith('/')
+            ? base.substring(0, base.length - 1)
+            : base;
+        final request = await client
+            .postUrl(Uri.parse('$cleanBase/api/v1/admin/staff'))
+            .timeout(timeout);
+        request.headers.contentType = ContentType.json;
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        request.write(
+          jsonEncode({
+            'staff_id': staffId,
+            'name': name,
+            'role': role,
+            'pin': pin,
+          }),
+        );
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        final decoded = jsonDecode(body) as Map<String, dynamic>;
+        if (response.statusCode != 200) {
+          throw Exception(
+            decoded['detail'] ?? 'Could not create staff account.',
+          );
+        }
+        return StaffProfile.fromJson(decoded);
+      } finally {
+        client.close();
+      }
+    });
+  }
+
+  Future<List<HospitalWard>> getHospitalWards(String token) async {
+    return _executeWithFallback((base) async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final cleanBase = base.endsWith('/')
+            ? base.substring(0, base.length - 1)
+            : base;
+        final request = await client
+            .getUrl(Uri.parse('$cleanBase/api/v1/wards'))
+            .timeout(timeout);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        if (response.statusCode != 200) {
+          throw Exception('Ward list unavailable.');
+        }
+        return (jsonDecode(body) as List<dynamic>)
+            .map((item) => HospitalWard.fromMap(item as Map<String, dynamic>))
+            .toList();
+      } finally {
+        client.close();
+      }
+    });
+  }
+
+  Future<void> selectChargeNurseWard(String token, String wardId) async {
+    await _executeWithFallback((base) async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final cleanBase = base.endsWith('/')
+            ? base.substring(0, base.length - 1)
+            : base;
+        final request = await client
+            .postUrl(
+              Uri.parse(
+                '$cleanBase/api/v1/auth/select-ward/${Uri.encodeComponent(wardId)}',
+              ),
+            )
+            .timeout(timeout);
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        if (response.statusCode != 200) {
+          final decoded = jsonDecode(body) as Map<String, dynamic>;
+          throw Exception(decoded['detail'] ?? 'Could not select ward.');
+        }
+        return true;
+      } finally {
+        client.close();
+      }
+    });
+  }
+
+  /// Verifies a staff PIN with the configured authentication service.
   Future<AuthResult> verifyPin(String staffId, String pin) async {
     if (mockVerifyPinHandler != null) {
       return mockVerifyPinHandler!(staffId, pin);
@@ -190,17 +237,17 @@ class StaffAuthService {
 
     try {
       return await _executeWithFallback((base) async {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 2);
         try {
-          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+          final cleanBase = base.endsWith('/')
+              ? base.substring(0, base.length - 1)
+              : base;
           final uri = Uri.parse('$cleanBase/api/v1/auth/verify-pin');
 
           final request = await client.postUrl(uri).timeout(timeout);
           request.headers.contentType = ContentType.json;
-          request.write(jsonEncode({
-            'staff_id': staffId,
-            'pin': pin,
-          }));
+          request.write(jsonEncode({'staff_id': staffId, 'pin': pin}));
 
           final response = await request.close().timeout(timeout);
           final body = await response.transform(utf8.decoder).join();
@@ -222,42 +269,12 @@ class StaffAuthService {
         }
       });
     } catch (_) {
-      // Offline fallback: check local canonical / dev dynamic PIN
-      final staff = dynamicStaff.firstWhere(
-        (s) => s.staffId == staffId,
-        orElse: () => kDefaultWardStaff.firstWhere(
-          (s) => s.staffId == staffId,
-          orElse: () => StaffProfile(
-            staffId: staffId,
-            name: 'Ward Staff',
-            role: 'ward_nurse',
-            wardId: 'WARD-4B',
-            avatarColor: '#059669',
-            initials: 'RN',
-          ),
-        ),
+      return const AuthResult(
+        success: false,
+        error:
+            'Sign-in service unavailable. Connect to the configured Oravi service.',
       );
-
-      if (!staff.isActive) {
-        return const AuthResult(
-          success: false,
-          error: 'Account is deactivated. Contact dev administrator.',
-        );
-      }
-
-      final expectedPin = dynamicPins[staffId] ?? kOfflineCanonicalPins[staffId];
-      if (expectedPin != null && expectedPin == pin) {
-        return AuthResult(
-          success: true,
-          staff: staff,
-          token: 'offline_token_$staffId',
-        );
-      } else {
-        return const AuthResult(
-          success: false,
-          error: 'Invalid PIN. (Offline mode active)',
-        );
-      }
     }
   }
+
 }

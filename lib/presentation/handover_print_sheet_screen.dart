@@ -1,8 +1,8 @@
 import '../domain/models/loop_enums.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/mock/seeded_ward_data.dart';
 import '../domain/projections/projections.dart';
+import 'providers/ward_context_providers.dart';
 import 'providers/ward_providers.dart';
 
 /// Printable 1-Page Handover Sheet strictly implementing PRD Section 7.3 & FR-15:
@@ -15,6 +15,7 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final patients = ref.watch(wardPatientsProvider);
+    final ward = ref.watch(selectedWardProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -24,7 +25,11 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
         elevation: 1,
         title: const Text(
           '1-Page Handover Sheet (Print Preview)',
-          style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           IconButton(
@@ -33,7 +38,9 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Printer ready: Formatted for standard A4 landscape handover sheet.'),
+                  content: Text(
+                    'Printer ready: Formatted for standard A4 landscape handover sheet.',
+                  ),
                 ),
               );
             },
@@ -68,7 +75,11 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                       ),
                       Text(
                         'SESSION ID: ${session.handoffSessionId}',
-                        style: const TextStyle(color: Colors.black54, fontSize: 11, fontFamily: 'monospace'),
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ],
                   ),
@@ -77,12 +88,19 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Ward: ${SeededWardData.wardName}',
-                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13),
+                        'Ward: ${ward.name}',
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                       Text(
                         'Date: ${session.startedAt.toIso8601String().substring(0, 16).replaceAll("T", " ")}',
-                        style: const TextStyle(color: Colors.black87, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -92,11 +110,18 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                     children: [
                       Text(
                         'Outgoing Nurse: ${session.outgoingNurseId}',
-                        style: const TextStyle(color: Colors.black87, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 12,
+                        ),
                       ),
                       Text(
                         'Incoming Nurse: ${session.incomingNurseId}',
-                        style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -122,48 +147,110 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                   children: const [
                     Padding(
                       padding: EdgeInsets.all(6),
-                      child: Text('Bed', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      child: Text(
+                        'Bed',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                     Padding(
                       padding: EdgeInsets.all(6),
-                      child: Text('Patient & Admission', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      child: Text(
+                        'Patient & Admission',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                     Padding(
                       padding: EdgeInsets.all(6),
-                      child: Text('SBAR Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      child: Text(
+                        'SBAR Summary',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                     Padding(
                       padding: EdgeInsets.all(6),
-                      child: Text('Pending Loops Transferred', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      child: Text(
+                        'Pending Loops Transferred',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                     Padding(
                       padding: EdgeInsets.all(6),
-                      child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      child: Text(
+                        'Status',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 // Data rows
                 ...patients.map((patient) {
-                  final loops = ref.watch(patientLoopsProvider(patient.patientId));
-                  final sbar = SbarSummary.fromPatientAndLoops(patient: patient, loops: loops);
+                  final loops = ref.watch(
+                    patientLoopsProvider(patient.patientId),
+                  );
+                  final sbar = SbarSummary.fromPatientAndLoops(
+                    patient: patient,
+                    loops: loops,
+                  );
                   final review = session.bedReviews[patient.bedNumber];
-                  final isNothingPending = review?.nothingPendingConfirmed ?? (loops.where((l) => l.isOpen).isEmpty);
+                  final isNothingPending =
+                      review?.nothingPendingConfirmed ??
+                      (loops.where((l) => l.isOpen).isEmpty);
 
                   return TableRow(
                     children: [
                       Padding(
                         padding: const EdgeInsets.all(6),
-                        child: Text(patient.bedNumber, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                        child: Text(
+                          patient.bedNumber,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
                       ),
                       Padding(
                         padding: const EdgeInsets.all(6),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(patient.nameOrInitials, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                            Text('${patient.age}y ${patient.sex} • ${patient.admissionNumber}', style: const TextStyle(fontSize: 10, color: Colors.black87)),
+                            Text(
+                              patient.patientInitials,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
+                            Text(
+                              '${patient.age}y ${patient.sex}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.black87,
+                              ),
+                            ),
                             if (patient.keyAlerts.isNotEmpty)
-                              Text('⚠️ ${patient.keyAlerts.join(", ")}', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red)),
+                              Text(
+                                '⚠️ ${patient.keyAlerts.join(", ")}',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -172,29 +259,59 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('S: ${patient.shortAdmittingNote}', style: const TextStyle(fontSize: 10)),
+                            Text(
+                              'S: ${patient.shortAdmittingNote}',
+                              style: const TextStyle(fontSize: 10),
+                            ),
                             const SizedBox(height: 2),
-                            Text('A: ${sbar.assessment}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500)),
+                            Text(
+                              'A: ${sbar.assessment}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                             const SizedBox(height: 2),
-                            Text('R: ${sbar.recommendation}', style: const TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                            Text(
+                              'R: ${sbar.recommendation}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                       Padding(
                         padding: const EdgeInsets.all(6),
                         child: loops.where((l) => l.isOpen).isEmpty
-                            ? const Text('None (All Clear)', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold))
+                            ? const Text(
+                                'None (All Clear)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
-                                children: loops.where((l) => l.isOpen).map((loop) {
+                                children: loops.where((l) => l.isOpen).map((
+                                  loop,
+                                ) {
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 2),
                                     child: Text(
                                       '• [${loop.urgency.name.toUpperCase()}] ${loop.title}',
                                       style: TextStyle(
                                         fontSize: 9.5,
-                                        fontWeight: loop.urgency == LoopUrgency.critical ? FontWeight.bold : FontWeight.normal,
-                                        color: loop.urgency == LoopUrgency.critical ? Colors.red[900] : Colors.black87,
+                                        fontWeight:
+                                            loop.urgency == LoopUrgency.critical
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        color:
+                                            loop.urgency == LoopUrgency.critical
+                                            ? Colors.red[900]
+                                            : Colors.black87,
                                       ),
                                     ),
                                   );
@@ -204,11 +321,15 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.all(6),
                         child: Text(
-                          isNothingPending ? '✓ ALL CLEAR' : 'TRANSFERRED (${review?.transferredLoopIds.length ?? 0})',
+                          isNothingPending
+                              ? '✓ ALL CLEAR'
+                              : 'TRANSFERRED (${review?.transferredLoopIds.length ?? 0})',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: isNothingPending ? Colors.green[800] : Colors.amber[900],
+                            color: isNothingPending
+                                ? Colors.green[800]
+                                : Colors.amber[900],
                           ),
                         ),
                       ),
@@ -231,10 +352,25 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Outgoing Nurse Sign-off:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        const Text(
+                          'Outgoing Nurse Sign-off:',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 16),
-                        Text('Name: ${session.outgoingNurseId}', style: const TextStyle(fontSize: 11)),
-                        Text('Status: Confirmed & Transferred', style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                        Text(
+                          'Name: ${session.outgoingNurseId}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        Text(
+                          'Status: Confirmed & Transferred',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.black54,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -244,11 +380,25 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Incoming Nurse Acceptance (FR-14 & FR-16):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        const Text(
+                          'Incoming Nurse Acceptance (FR-14 & FR-16):',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 16),
-                        Text('Name: ${session.incomingNurseId}', style: const TextStyle(fontSize: 11)),
-                        Text('Locked At: ${session.completedAt?.toIso8601String().substring(0, 16).replaceAll("T", " ") ?? "IN PROGRESS"}',
-                            style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                        Text(
+                          'Name: ${session.incomingNurseId}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        Text(
+                          'Locked At: ${session.completedAt?.toIso8601String().substring(0, 16).replaceAll("T", " ") ?? "IN PROGRESS"}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.black54,
+                          ),
+                        ),
                       ],
                     ),
                   ),

@@ -19,6 +19,13 @@ class OraviDomainReducer {
 
     for (final event in events) {
       if (event is LoopOpenedEvent) {
+        if (current != null) {
+          throw InvalidLoopTransitionException(
+            fromState: current.state,
+            attemptedAction: 'raise',
+            reason: 'A loop with this identifier has already been opened.',
+          );
+        }
         current = LoopStateProjection(
           loopId: event.loopId!,
           patientId: event.patientId,
@@ -29,9 +36,12 @@ class OraviDomainReducer {
           state: LoopState.raised,
           currentOwnerId: event.initialOwnerId,
           currentOwnerRole: event.initialOwnerRole,
+          openedByUserId: event.authorId,
           createdAt: event.clientCreatedAt,
           updatedAt: event.clientCreatedAt,
-          linkedLoopIds: event.linkedLoopId != null ? [event.linkedLoopId!] : const [],
+          linkedLoopIds: event.linkedLoopId != null
+              ? [event.linkedLoopId!]
+              : const [],
         );
       } else if (current != null && event.loopId == current.loopId) {
         if (event is LoopAcknowledgedEvent) {
@@ -42,7 +52,23 @@ class OraviDomainReducer {
             state: nextState,
             updatedAt: event.clientCreatedAt,
           );
+        } else if (event is LoopWorkStartedEvent) {
+          final nextState = LoopStateMachine.transitionOnStartWork(
+            currentState: current.state,
+          );
+          current = current.copyWith(
+            state: nextState,
+            updatedAt: event.clientCreatedAt,
+          );
         } else if (event is LoopOwnerChangedEvent) {
+          if (current.state == LoopState.closed ||
+              current.state == LoopState.closedAwaitingConfirmation) {
+            throw InvalidLoopTransitionException(
+              fromState: current.state,
+              attemptedAction: 'change_owner',
+              reason: 'Only an active issue can be reassigned.',
+            );
+          }
           current = current.copyWith(
             currentOwnerId: event.newOwnerId,
             currentOwnerRole: event.newOwnerRole,
@@ -68,7 +94,8 @@ class OraviDomainReducer {
             authorId: event.callerId,
             authorRole: event.callerRole,
             deviceId: event.deviceId,
-            content: '📞 Call with ${event.recipientId} (${event.recipientRole}): "${event.outcomeNote}"',
+            content:
+                '📞 Call with ${event.recipientId} (${event.recipientRole}): "${event.outcomeNote}"',
             createdAt: event.clientCreatedAt,
             isCallLog: true,
             callRecipientId: event.recipientId,
@@ -188,8 +215,7 @@ class OraviDomainReducer {
           patientId: event.patientId,
           wardId: event.wardId,
           bedNumber: event.bedNumber,
-          admissionNumber: event.admissionNumber,
-          nameOrInitials: event.nameOrInitials,
+          patientInitials: event.patientInitials,
           age: event.age,
           sex: event.sex,
           shortAdmittingNote: event.shortAdmittingNote,
@@ -243,8 +269,9 @@ class OraviDomainReducer {
             transferredLoopIds: event.transferredLoopIds,
             reviewedAt: event.clientCreatedAt,
           );
-          final updatedReviews =
-              Map<String, HandoffBedReview>.from(current.bedReviews);
+          final updatedReviews = Map<String, HandoffBedReview>.from(
+            current.bedReviews,
+          );
           updatedReviews[event.bedNumber] = review;
           current = current.copyWith(
             bedReviews: updatedReviews,

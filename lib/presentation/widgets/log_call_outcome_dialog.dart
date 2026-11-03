@@ -9,12 +9,14 @@ import '../theme/clinical_theme.dart';
 /// - Prevents verbal decision silos by appending the agreed outcome directly into the thread.
 class LogCallOutcomeDialog extends StatefulWidget {
   final LoopStateProjection loop;
+  final String recipientId;
   final String recipientName;
   final String recipientRole;
 
   const LogCallOutcomeDialog({
     super.key,
     required this.loop,
+    required this.recipientId,
     required this.recipientName,
     required this.recipientRole,
   });
@@ -26,6 +28,7 @@ class LogCallOutcomeDialog extends StatefulWidget {
 class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
   final TextEditingController _noteController = TextEditingController();
   String? _error;
+  bool _isSaving = false;
 
   final List<String> _quickOutcomes = [
     'Agreed to hold current dose until repeat labs',
@@ -41,22 +44,40 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
     super.dispose();
   }
 
-  void _submit(WidgetRef ref) {
+  Future<void> _submit(WidgetRef ref) async {
+    if (_isSaving) return;
     final note = _noteController.text.trim();
     if (note.isEmpty) {
-      setState(() => _error = 'A one-line outcome note is mandatory to eliminate verbal silos.');
+      setState(
+        () => _error =
+            'A one-line outcome note is mandatory to eliminate verbal silos.',
+      );
       return;
     }
 
-    ref.read(wardControllerProvider.notifier).logCallOutcome(
-          patientId: widget.loop.patientId,
-          loopId: widget.loop.loopId,
-          recipientId: widget.recipientName,
-          recipientRole: widget.recipientRole,
-          outcomeNote: note,
+    setState(() => _isSaving = true);
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .logCallOutcome(
+            patientId: widget.loop.patientId,
+            loopId: widget.loop.loopId,
+            recipientId: widget.recipientId,
+            recipientRole: widget.recipientRole,
+            outcomeNote: note,
+          );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'Could not save the outcome. Please try again.',
         );
-
-    Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -72,7 +93,10 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
               Expanded(
                 child: Text(
                   'Call with ${widget.recipientName}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -92,12 +116,19 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.lock_clock, size: 16, color: ClinicalTheme.routineTeal),
+                      const Icon(
+                        Icons.lock_clock,
+                        size: 16,
+                        color: ClinicalTheme.routineTeal,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           'Target: ${widget.loop.title}',
-                          style: const TextStyle(fontSize: 11, color: ClinicalTheme.textSecondary),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: ClinicalTheme.textSecondary,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -108,16 +139,27 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
                 const SizedBox(height: 12),
                 const Text(
                   'Verbal Outcome Summary (Mandatory - FR-54):',
-                  style: TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: _noteController,
                   maxLines: 2,
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
-                    hintText: 'e.g., Agreed to hold dose until repeat Hb at 16:00...',
-                    hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                    hintText:
+                        'e.g., Agreed to hold dose until repeat Hb at 16:00...',
+                    hintStyle: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
                     filled: true,
                     fillColor: ClinicalTheme.surfaceElevated,
                     border: OutlineInputBorder(
@@ -131,12 +173,22 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 6),
-                  Text(_error!, style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 11)),
+                  Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: ClinicalTheme.criticalRed,
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 12),
                 const Text(
                   'Quick Outcome Chips:',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -161,15 +213,18 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel', style: TextStyle(color: ClinicalTheme.textMuted)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: ClinicalTheme.textMuted),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: ClinicalTheme.routineTeal,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => _submit(ref),
-              child: const Text('Save Outcome to Thread'),
+              onPressed: _isSaving ? null : () => _submit(ref),
+              child: Text(_isSaving ? 'Saving…' : 'Save Outcome to Thread'),
             ),
           ],
         );

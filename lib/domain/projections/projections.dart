@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import '../models/loop_enums.dart';
+import '../models/patient_identity.dart';
 
 /// Single message in a loop's append-only communication thread (PRD FR-6).
 class ThreadMessage extends Equatable {
@@ -53,20 +54,20 @@ class ThreadMessage extends Equatable {
 
   @override
   List<Object?> get props => [
-        messageId,
-        authorId,
-        authorRole,
-        deviceId,
-        content,
-        createdAt,
-        editedAt,
-        previousContent,
-        quotedMessageId,
-        roleMentions,
-        isCallLog,
-        callRecipientId,
-        callRecipientRole,
-      ];
+    messageId,
+    authorId,
+    authorRole,
+    deviceId,
+    content,
+    createdAt,
+    editedAt,
+    previousContent,
+    quotedMessageId,
+    roleMentions,
+    isCallLog,
+    callRecipientId,
+    callRecipientRole,
+  ];
 }
 
 /// Record of an escalation event on a loop.
@@ -114,16 +115,16 @@ class LoopEscalationState extends Equatable {
 
   @override
   List<Object?> get props => [
-        escalationId,
-        targetRole,
-        currentTargetUserId,
-        reason,
-        timeoutMinutes,
-        raisedAt,
-        isAcknowledged,
-        acknowledgedAt,
-        acknowledgeNote,
-      ];
+    escalationId,
+    targetRole,
+    currentTargetUserId,
+    reason,
+    timeoutMinutes,
+    raisedAt,
+    isAcknowledged,
+    acknowledgedAt,
+    acknowledgeNote,
+  ];
 }
 
 /// Current state projection of an Open Loop, reduced from its events.
@@ -139,6 +140,7 @@ class LoopStateProjection extends Equatable {
   final LoopState state;
   final String currentOwnerId;
   final String currentOwnerRole;
+  final String? openedByUserId;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<ThreadMessage> messages;
@@ -163,6 +165,7 @@ class LoopStateProjection extends Equatable {
     required this.state,
     required this.currentOwnerId,
     required this.currentOwnerRole,
+    this.openedByUserId,
     required this.createdAt,
     required this.updatedAt,
     this.messages = const [],
@@ -189,6 +192,7 @@ class LoopStateProjection extends Equatable {
     LoopState? state,
     String? currentOwnerId,
     String? currentOwnerRole,
+    String? openedByUserId,
     DateTime? updatedAt,
     List<ThreadMessage>? messages,
     ClosureReasonCode? closureReason,
@@ -212,6 +216,7 @@ class LoopStateProjection extends Equatable {
       state: state ?? this.state,
       currentOwnerId: currentOwnerId ?? this.currentOwnerId,
       currentOwnerRole: currentOwnerRole ?? this.currentOwnerRole,
+      openedByUserId: openedByUserId ?? this.openedByUserId,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       messages: messages ?? this.messages,
@@ -230,29 +235,30 @@ class LoopStateProjection extends Equatable {
 
   @override
   List<Object?> get props => [
-        loopId,
-        patientId,
-        title,
-        description,
-        loopType,
-        urgency,
-        state,
-        currentOwnerId,
-        currentOwnerRole,
-        createdAt,
-        updatedAt,
-        messages,
-        closureReason,
-        closureNote,
-        resolutionType,
-        closedByUserId,
-        closedAt,
-        confirmedByRole,
-        reopenCount,
-        reopenReasons,
-        linkedLoopIds,
-        activeEscalation,
-      ];
+    loopId,
+    patientId,
+    title,
+    description,
+    loopType,
+    urgency,
+    state,
+    currentOwnerId,
+    currentOwnerRole,
+    openedByUserId,
+    createdAt,
+    updatedAt,
+    messages,
+    closureReason,
+    closureNote,
+    resolutionType,
+    closedByUserId,
+    closedAt,
+    confirmedByRole,
+    reopenCount,
+    reopenReasons,
+    linkedLoopIds,
+    activeEscalation,
+  ];
 }
 
 /// Current state projection of a Patient, reduced from admission/transfer events.
@@ -262,8 +268,7 @@ class PatientStateProjection extends Equatable {
   final String patientId;
   final String wardId;
   final String bedNumber;
-  final String admissionNumber; // Second required identifier (FR-3)
-  final String nameOrInitials;
+  final String patientInitials;
   final int age;
   final String sex;
   final String shortAdmittingNote;
@@ -273,12 +278,11 @@ class PatientStateProjection extends Equatable {
   final DateTime admittedAt;
   final DateTime updatedAt;
 
-  const PatientStateProjection({
+  PatientStateProjection({
     required this.patientId,
     required this.wardId,
     required this.bedNumber,
-    required this.admissionNumber,
-    required this.nameOrInitials,
+    required String patientInitials,
     required this.age,
     required this.sex,
     required this.shortAdmittingNote,
@@ -287,13 +291,12 @@ class PatientStateProjection extends Equatable {
     this.dischargeDisposition,
     required this.admittedAt,
     required this.updatedAt,
-  });
+  }) : patientInitials = PatientIdentity.initialsFromLegacy(patientInitials);
 
   PatientStateProjection copyWith({
     String? wardId,
     String? bedNumber,
-    String? admissionNumber,
-    String? nameOrInitials,
+    String? patientInitials,
     int? age,
     String? sex,
     String? shortAdmittingNote,
@@ -306,8 +309,9 @@ class PatientStateProjection extends Equatable {
       patientId: patientId,
       wardId: wardId ?? this.wardId,
       bedNumber: bedNumber ?? this.bedNumber,
-      admissionNumber: admissionNumber ?? this.admissionNumber,
-      nameOrInitials: nameOrInitials ?? this.nameOrInitials,
+      patientInitials: patientInitials == null
+          ? this.patientInitials
+          : PatientIdentity.initialsFromLegacy(patientInitials),
       age: age ?? this.age,
       sex: sex ?? this.sex,
       shortAdmittingNote: shortAdmittingNote ?? this.shortAdmittingNote,
@@ -321,22 +325,20 @@ class PatientStateProjection extends Equatable {
 
   @override
   List<Object?> get props => [
-        patientId,
-        wardId,
-        bedNumber,
-        admissionNumber,
-        nameOrInitials,
-        age,
-        sex,
-        shortAdmittingNote,
-        keyAlerts,
-        isDischarged,
-        dischargeDisposition,
-        admittedAt,
-        updatedAt,
-      ];
+    patientId,
+    wardId,
+    bedNumber,
+    patientInitials,
+    age,
+    sex,
+    shortAdmittingNote,
+    keyAlerts,
+    isDischarged,
+    dischargeDisposition,
+    admittedAt,
+    updatedAt,
+  ];
 }
-
 
 /// Record of a single bed's review in a handoff session (PRD FR-11 & FR-14).
 class HandoffBedReview extends Equatable {
@@ -356,12 +358,12 @@ class HandoffBedReview extends Equatable {
 
   @override
   List<Object?> get props => [
-        bedNumber,
-        patientId,
-        nothingPendingConfirmed,
-        transferredLoopIds,
-        reviewedAt,
-      ];
+    bedNumber,
+    patientId,
+    nothingPendingConfirmed,
+    transferredLoopIds,
+    reviewedAt,
+  ];
 }
 
 /// State projection of a shift handoff session (PRD Section 7.3 & FR-11 to FR-16).
@@ -407,23 +409,24 @@ class HandoffSessionProjection extends Equatable {
       isLocked: isLocked ?? this.isLocked,
       bedReviews: bedReviews ?? this.bedReviews,
       totalBedsHandedOver: totalBedsHandedOver ?? this.totalBedsHandedOver,
-      totalLoopsTransferred: totalLoopsTransferred ?? this.totalLoopsTransferred,
+      totalLoopsTransferred:
+          totalLoopsTransferred ?? this.totalLoopsTransferred,
     );
   }
 
   @override
   List<Object?> get props => [
-        handoffSessionId,
-        wardId,
-        outgoingNurseId,
-        incomingNurseId,
-        startedAt,
-        completedAt,
-        isLocked,
-        bedReviews,
-        totalBedsHandedOver,
-        totalLoopsTransferred,
-      ];
+    handoffSessionId,
+    wardId,
+    outgoingNurseId,
+    incomingNurseId,
+    startedAt,
+    completedAt,
+    isLocked,
+    bedReviews,
+    totalBedsHandedOver,
+    totalLoopsTransferred,
+  ];
 }
 
 /// Structured SBAR summary per patient compiled automatically from structured entries and open loops (PRD FR-13).
@@ -447,7 +450,7 @@ class SbarSummary extends Equatable {
   }) {
     // 1. Situation: Patient identity, location, primary complaint/admitting note
     final situation =
-        '${patient.nameOrInitials}, ${patient.age}y ${patient.sex} (Bed ${patient.bedNumber}, Adm: ${patient.admissionNumber}). Admitted for: ${patient.shortAdmittingNote}';
+        '${patient.bedNumber} — ${patient.patientInitials}, ${patient.age}y ${patient.sex}. Admitted for: ${patient.shortAdmittingNote}';
 
     // 2. Background: Clinical flags/alerts and admission timeline
     final alertsText = patient.keyAlerts.isNotEmpty
@@ -462,12 +465,15 @@ class SbarSummary extends Equatable {
     if (openLoops.isEmpty) {
       assessment = 'ALL CLEAR: No open clinical loops pending.';
     } else {
-      final criticalCount =
-          openLoops.where((l) => l.urgency == LoopUrgency.critical).length;
-      final urgentCount =
-          openLoops.where((l) => l.urgency == LoopUrgency.urgent).length;
-      final routineCount =
-          openLoops.where((l) => l.urgency == LoopUrgency.routine).length;
+      final criticalCount = openLoops
+          .where((l) => l.urgency == LoopUrgency.critical)
+          .length;
+      final urgentCount = openLoops
+          .where((l) => l.urgency == LoopUrgency.urgent)
+          .length;
+      final routineCount = openLoops
+          .where((l) => l.urgency == LoopUrgency.routine)
+          .length;
 
       final parts = <String>[];
       if (criticalCount > 0) parts.add('$criticalCount CRITICAL/STAT');
@@ -486,15 +492,17 @@ class SbarSummary extends Equatable {
     if (openLoops.isEmpty) {
       recommendation = 'Maintain routine baseline monitoring as charted.';
     } else {
-      final actionItems = openLoops.map((l) {
-        if (l.urgency == LoopUrgency.critical) {
-          return 'ACTION STAT: Follow up "${l.title}" immediately';
-        } else if (l.urgency == LoopUrgency.urgent) {
-          return 'Prioritize: "${l.title}"';
-        } else {
-          return 'Routine follow up: "${l.title}"';
-        }
-      }).join('; ');
+      final actionItems = openLoops
+          .map((l) {
+            if (l.urgency == LoopUrgency.critical) {
+              return 'ACTION STAT: Follow up "${l.title}" immediately';
+            } else if (l.urgency == LoopUrgency.urgent) {
+              return 'Prioritize: "${l.title}"';
+            } else {
+              return 'Routine follow up: "${l.title}"';
+            }
+          })
+          .join('; ');
       recommendation = '$actionItems.';
     }
 
@@ -508,9 +516,9 @@ class SbarSummary extends Equatable {
 
   @override
   List<Object?> get props => [
-        situation,
-        background,
-        assessment,
-        recommendation,
-      ];
+    situation,
+    background,
+    assessment,
+    recommendation,
+  ];
 }

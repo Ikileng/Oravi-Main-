@@ -6,63 +6,6 @@ import time
 from typing import Dict, List, Optional, Tuple
 from .models import StaffProfile
 
-DEFAULT_WARD_STAFF = [
-    {
-        "staff_id": "NUR-401",
-        "name": "Mary Wanjiku, RN",
-        "role": "ward_nurse",
-        "ward_id": "WARD-4B",
-        "pin": "1234",
-        "avatar_color": "#059669",  # Emerald
-        "initials": "MW",
-    },
-    {
-        "staff_id": "NUR-402",
-        "name": "Grace Achieng, RN",
-        "role": "charge_nurse",
-        "ward_id": "WARD-4B",
-        "pin": "5678",
-        "avatar_color": "#2563EB",  # Royal Blue
-        "initials": "GA",
-    },
-    {
-        "staff_id": "NUR-403",
-        "name": "Faith Njeri, RN",
-        "role": "ward_nurse",
-        "ward_id": "WARD-4B",
-        "pin": "1111",
-        "avatar_color": "#0D9488",  # Teal
-        "initials": "FN",
-    },
-    {
-        "staff_id": "DOC-401",
-        "name": "Dr. James Kamau",
-        "role": "doctor_on_call",
-        "ward_id": "WARD-4B",
-        "pin": "9090",
-        "avatar_color": "#7C3AED",  # Purple
-        "initials": "JK",
-    },
-    {
-        "staff_id": "NUR-404",
-        "name": "Sarah Otieno, RN",
-        "role": "ward_nurse",
-        "ward_id": "WARD-4B",
-        "pin": "2222",
-        "avatar_color": "#D97706",  # Amber
-        "initials": "SO",
-    },
-    {
-        "staff_id": "NUR-405",
-        "name": "Jane Muthoni, RN",
-        "role": "ward_nurse",
-        "ward_id": "WARD-4B",
-        "pin": "3333",
-        "avatar_color": "#E11D48",  # Rose
-        "initials": "JM",
-    },
-]
-
 class StaffStore:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
@@ -72,12 +15,12 @@ class StaffStore:
             self.db_path = db_path
 
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.row_factory = sqlite3.Row
         self._failed_attempts: Dict[str, List[float]] = {}
         self._init_db()
-        self._seed_default_staff_if_empty()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with self.conn:
             self.conn.execute(
                 """
@@ -98,42 +41,92 @@ class StaffStore:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_staff_ward ON staff_users(ward_id)"
             )
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS auth_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    staff_id TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
+                )"""
+            )
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS auth_failures (
+                    staff_id TEXT PRIMARY KEY,
+                    failure_count INTEGER NOT NULL,
+                    window_started REAL NOT NULL,
+                    locked_until REAL NOT NULL DEFAULT 0
+                )"""
+            )
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS staff_ward_preferences (
+                    staff_id TEXT PRIMARY KEY,
+                    ward_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
+                )"""
+            )
 
     @staticmethod
     def hash_pin(pin: str, salt: str) -> str:
-        return hashlib.sha256(f"{salt}:{pin}".encode("utf-8")).hexdigest()
+        return hashlib.pbkdf2_hmac(
+            "sha256", pin.encode("utf-8"), bytes.fromhex(salt), 310_000
+        ).hex()
 
-    def _seed_default_staff_if_empty(self):
+    def create_session(self, staff_id: str, token: str, lifetime_seconds: int = 28_800) -> None:
+        now = time.time()
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self.conn:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM staff_users")
-            row = cursor.fetchone()
-            if row and row["cnt"] > 0:
-                return
+            self.conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+            self.conn.execute(
+                "INSERT INTO auth_sessions (token_hash, staff_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                (token_hash, staff_id, now + lifetime_seconds, now),
+            )
 
-            now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            for member in DEFAULT_WARD_STAFF:
-                salt = secrets.token_hex(8)
-                p_hash = self.hash_pin(member["pin"], salt)
-                cursor.execute(
-                    """
-                    INSERT INTO staff_users (
-                        staff_id, name, role, ward_id, pin_hash, pin_salt,
-                        avatar_color, initials, is_active, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                    """,
-                    (
-                        member["staff_id"],
-                        member["name"],
-                        member["role"],
-                        member["ward_id"],
-                        p_hash,
-                        salt,
-                        member["avatar_color"],
-                        member["initials"],
-                        now_iso,
-                    ),
-                )
+    def create_first_admin(self, staff_id: str, name: str, pin: str) -> StaffProfile:
+        if not pin.isdigit() or not 6 <= len(pin) <= 8:
+            raise ValueError("Dev Admin PIN must contain 6 to 8 digits.")
+        parts = [part for part in name.split() if part]
+        initials = "".join(part[0] for part in parts[:2]).upper() or "DA"
+        salt = secrets.token_hex(16)
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self.conn:
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM staff_users WHERE role = 'dev_admin'"
+            ).fetchone()[0]
+            if count:
+                raise ValueError("A Dev Admin already exists; bootstrap is one-time only.")
+            self.conn.execute(
+                """INSERT INTO staff_users (
+                    staff_id, name, role, ward_id, pin_hash, pin_salt,
+                    avatar_color, initials, is_active, created_at
+                ) VALUES (?, ?, 'dev_admin', '', ?, ?, '#475569', ?, 1, ?)""",
+                (staff_id, name, self.hash_pin(pin, salt), salt, initials, now_iso),
+            )
+        return StaffProfile(staff_id, name, "dev_admin", "", "#475569", initials, True)
+
+    def get_session(self, token: str) -> Optional[StaffProfile]:
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.conn:
+            row = self.conn.execute(
+                """SELECT u.staff_id, u.name, u.role, u.ward_id, u.avatar_color,
+                          u.initials, u.is_active
+                   FROM auth_sessions s JOIN staff_users u ON u.staff_id = s.staff_id
+                   WHERE s.token_hash = ? AND s.expires_at > ?""",
+                (token_hash, time.time()),
+            ).fetchone()
+        if row is None or not row["is_active"]:
+            return None
+        return StaffProfile(
+            staff_id=row["staff_id"], name=row["name"], role=row["role"],
+            ward_id=row["ward_id"], avatar_color=row["avatar_color"],
+            initials=row["initials"], is_active=bool(row["is_active"]),
+        )
+
+    def revoke_session(self, token: str) -> None:
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.conn:
+            self.conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
 
     def get_staff_for_ward(self, ward_id: str) -> List[StaffProfile]:
         with self.conn:
@@ -142,10 +135,9 @@ class StaffStore:
                 """
                 SELECT staff_id, name, role, ward_id, avatar_color, initials, is_active
                 FROM staff_users
-                WHERE ward_id = ? AND is_active = 1
+                WHERE role != 'dev_admin' AND is_active = 1
                 ORDER BY role DESC, name ASC
-                """,
-                (ward_id,),
+                """
             )
             rows = cursor.fetchall()
             return [
@@ -161,15 +153,78 @@ class StaffStore:
                 for r in rows
             ]
 
+    def get_active_clinical_staff(self) -> List[StaffProfile]:
+        return self.get_staff_for_ward("")
+
+    def is_active_clinical_staff(self, staff_id: str) -> bool:
+        row = self.conn.execute(
+            """SELECT 1 FROM staff_users
+               WHERE staff_id = ? AND is_active = 1 AND role != 'dev_admin'""",
+            (staff_id,),
+        ).fetchone()
+        return row is not None
+
+    def get_ward_preference(self, staff_id: str) -> Optional[str]:
+        row = self.conn.execute(
+            "SELECT ward_id FROM staff_ward_preferences WHERE staff_id = ?",
+            (staff_id,),
+        ).fetchone()
+        return row["ward_id"] if row else None
+
+    def set_ward_preference(self, staff_id: str, ward_id: str) -> bool:
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self.conn:
+            cursor = self.conn.execute(
+                """INSERT INTO staff_ward_preferences (staff_id, ward_id, updated_at)
+                   SELECT staff_id, ?, ? FROM staff_users
+                   WHERE staff_id = ? AND role = 'charge_nurse' AND is_active = 1
+                   ON CONFLICT(staff_id) DO UPDATE SET
+                       ward_id = excluded.ward_id, updated_at = excluded.updated_at""",
+                (ward_id, now, staff_id),
+            )
+            return cursor.rowcount == 1
+
+    def list_staff(self) -> List[StaffProfile]:
+        with self.conn:
+            rows = self.conn.execute(
+                """SELECT staff_id, name, role, ward_id, avatar_color, initials, is_active
+                   FROM staff_users WHERE role != 'dev_admin' ORDER BY name"""
+            ).fetchall()
+        return [StaffProfile(
+            staff_id=r["staff_id"], name=r["name"], role=r["role"], ward_id=r["ward_id"],
+            avatar_color=r["avatar_color"], initials=r["initials"], is_active=bool(r["is_active"]),
+        ) for r in rows]
+
+    def get_staff_directory(self, query: str = "") -> List[StaffProfile]:
+        search = f"%{query.strip().lower()}%"
+        with self.conn:
+            rows = self.conn.execute(
+                """SELECT staff_id, name, role, avatar_color, initials
+                   FROM staff_users
+                   WHERE is_active = 1 AND (lower(name) LIKE ? OR lower(staff_id) LIKE ?)
+                   ORDER BY name LIMIT 50""",
+                (search, search),
+            ).fetchall()
+        return [StaffProfile(
+            staff_id=r["staff_id"], name=r["name"], role=r["role"], ward_id="",
+            avatar_color=r["avatar_color"], initials=r["initials"], is_active=True,
+        ) for r in rows]
+
     def verify_pin(self, staff_id: str, pin: str) -> Tuple[bool, Optional[StaffProfile], Optional[str]]:
         now = time.time()
-        # Clean up failed attempts older than 3 minutes (180s)
-        attempts = [t for t in self._failed_attempts.get(staff_id, []) if now - t < 180]
-        self._failed_attempts[staff_id] = attempts
-
-        if len(attempts) >= 5:
-            remaining_seconds = int(180 - (now - attempts[0]))
-            return False, None, f"Too many failed attempts. Locked for {remaining_seconds}s."
+        if not staff_id or not pin.isdigit() or len(pin) > 8:
+            return False, None, "Invalid staff ID or PIN."
+        failure = self.conn.execute(
+            "SELECT failure_count, window_started, locked_until FROM auth_failures WHERE staff_id = ?",
+            (staff_id,),
+        ).fetchone()
+        if failure and failure["locked_until"] > now:
+            remaining = max(1, int(failure["locked_until"] - now))
+            return False, None, f"Too many failed attempts. Locked for {remaining}s."
+        if failure and now - failure["window_started"] >= 180:
+            with self.conn:
+                self.conn.execute("DELETE FROM auth_failures WHERE staff_id = ?", (staff_id,))
+            failure = None
 
         with self.conn:
             cursor = self.conn.cursor()
@@ -185,13 +240,14 @@ class StaffStore:
             row = cursor.fetchone()
 
         if not row:
+            self._record_failure(staff_id, now, failure)
             return False, None, "Staff account not found or inactive."
 
         expected_hash = self.hash_pin(pin, row["pin_salt"])
         if secrets.compare_digest(expected_hash, row["pin_hash"]):
             # Clear failed attempts upon successful login
-            if staff_id in self._failed_attempts:
-                del self._failed_attempts[staff_id]
+            with self.conn:
+                self.conn.execute("DELETE FROM auth_failures WHERE staff_id = ?", (staff_id,))
             profile = StaffProfile(
                 staff_id=row["staff_id"],
                 name=row["name"],
@@ -203,13 +259,28 @@ class StaffStore:
             )
             return True, profile, None
         else:
-            self._failed_attempts.setdefault(staff_id, []).append(now)
-            remaining = 5 - len(self._failed_attempts[staff_id])
+            failure_count = self._record_failure(staff_id, now, failure)
+            remaining = 5 - failure_count
             if remaining > 0:
                 err_msg = f"Invalid PIN. {remaining} attempt(s) remaining."
             else:
                 err_msg = "Invalid PIN. Account locked for 3 minutes."
             return False, None, err_msg
+
+    def _record_failure(self, staff_id: str, now: float, previous) -> int:
+        count = (int(previous["failure_count"]) if previous else 0) + 1
+        window_started = float(previous["window_started"]) if previous else now
+        locked_until = now + 180 if count >= 5 else 0
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO auth_failures (staff_id, failure_count, window_started, locked_until)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(staff_id) DO UPDATE SET
+                   failure_count = excluded.failure_count,
+                   window_started = excluded.window_started,
+                   locked_until = excluded.locked_until""",
+                (staff_id, count, window_started, locked_until),
+            )
+        return count
 
     def create_staff(
         self,
@@ -220,6 +291,10 @@ class StaffStore:
         pin: str,
         avatar_color: Optional[str] = None,
     ) -> StaffProfile:
+        if role not in {"ward_nurse", "charge_nurse", "doctor_on_call"}:
+            raise ValueError("Only clinical roles can be provisioned here.")
+        if not pin.isdigit() or not 4 <= len(pin) <= 8:
+            raise ValueError("PIN must contain 4 to 8 digits.")
         parts = [p for p in name.replace(",", "").split() if p and not p.lower().startswith("rn") and not p.lower().startswith("dr")]
         if len(parts) >= 2:
             initials = (parts[0][0] + parts[1][0]).upper()
@@ -229,7 +304,7 @@ class StaffStore:
             initials = staff_id[:2].upper()
 
         color = avatar_color or "#059669"
-        salt = secrets.token_hex(8)
+        salt = secrets.token_hex(16)
         p_hash = self.hash_pin(pin, salt)
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -237,19 +312,19 @@ class StaffStore:
             cursor = self.conn.cursor()
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO staff_users (
+                INSERT INTO staff_users (
                     staff_id, name, role, ward_id, pin_hash, pin_salt,
                     avatar_color, initials, is_active, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
-                (staff_id, name, role, ward_id, p_hash, salt, color, initials, now_iso),
+                (staff_id, name, role, "", p_hash, salt, color, initials, now_iso),
             )
 
         return StaffProfile(
             staff_id=staff_id,
             name=name,
             role=role,
-            ward_id=ward_id,
+            ward_id="",
             avatar_color=color,
             initials=initials,
             is_active=True,

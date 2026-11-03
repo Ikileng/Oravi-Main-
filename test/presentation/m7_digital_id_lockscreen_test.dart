@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:oravi_app/data/auth/staff_auth_service.dart';
+import 'package:oravi_app/domain/models/staff_profile.dart';
 import 'package:oravi_app/presentation/lockscreen/digital_id_lockscreen.dart';
 import 'package:oravi_app/presentation/providers/auth_providers.dart';
 import 'package:oravi_app/presentation/ward_board_screen.dart';
@@ -9,21 +10,39 @@ import 'package:oravi_app/presentation/ward_board_screen.dart';
 void main() {
   group('M7: Digital ID Lockscreen & Quick PIN Authentication', () {
     late StaffAuthService mockAuthService;
+    final testStaff = [
+      const StaffProfile(
+        staffId: 'NUR-401',
+        name: 'Mary Wanjiku, RN',
+        role: 'ward_nurse',
+        wardId: '',
+        avatarColor: '#059669',
+        initials: 'MW',
+      ),
+      const StaffProfile(
+        staffId: 'NUR-402',
+        name: 'Grace Achieng, RN',
+        role: 'charge_nurse',
+        wardId: '',
+        avatarColor: '#2563EB',
+        initials: 'GA',
+      ),
+    ];
 
     setUp(() {
       mockAuthService = StaffAuthService(
-        mockGetStaffHandler: (wardId) async => kDefaultWardStaff,
+        mockGetStaffHandler: (_) async => testStaff,
         mockVerifyPinHandler: (staffId, pin) async {
           if (staffId == 'NUR-401' && pin == '1234') {
             return AuthResult(
               success: true,
-              staff: kDefaultWardStaff[0], // Mary Wanjiku
+              staff: testStaff[0],
               token: 'mock_token_123',
             );
           } else if (staffId == 'NUR-402' && pin == '5678') {
             return AuthResult(
               success: true,
-              staff: kDefaultWardStaff[1], // Grace Achieng
+              staff: testStaff[1],
               token: 'mock_token_456',
             );
           }
@@ -46,7 +65,7 @@ void main() {
       );
     }
 
-    testWidgets('1. Lockscreen displays Ward 4B header and staff Digital ID badges', (tester) async {
+    testWidgets('1. Lockscreen displays provisioned staff Digital ID badges', (tester) async {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -56,8 +75,7 @@ void main() {
 
       // Verify Header
       expect(find.text('ORAVI CLINICAL STATION'), findsOneWidget);
-      expect(find.text('Ward 4B'), findsOneWidget);
-      expect(find.text('Active Shift'), findsOneWidget);
+      expect(find.text('Ward 4B'), findsNothing);
 
       // Verify staff badges visible
       expect(find.text('Mary Wanjiku, RN'), findsOneWidget);

@@ -1,16 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/auth/staff_auth_service.dart';
+import '../../data/ward_board_service.dart';
 import '../../domain/models/staff_profile.dart';
+import '../../domain/models/hospital_ward.dart';
+import 'ward_context_providers.dart';
 
-/// Provider for staff authentication service with multi-host auto-fallback.
-final staffAuthServiceProvider = Provider<StaffAuthService>((ref) {
-  return StaffAuthService();
-});
+/// Provider for backend staff authentication and account management.
+final staffAuthServiceProvider = Provider<StaffAuthService>(
+  (ref) => StaffAuthService(),
+);
 
 /// Roster of staff members for the current ward.
 final wardStaffListProvider = FutureProvider<List<StaffProfile>>((ref) async {
   final service = ref.watch(staffAuthServiceProvider);
-  return service.getStaffForWard('WARD-4B');
+  return service.getStaffForWard('');
 });
 
 /// Currently authenticated clinical staff member on this device.
@@ -22,7 +25,22 @@ class AuthenticatedStaffNotifier extends Notifier<StaffProfile?> {
 }
 
 final authenticatedStaffProvider =
-    NotifierProvider<AuthenticatedStaffNotifier, StaffProfile?>(AuthenticatedStaffNotifier.new);
+    NotifierProvider<AuthenticatedStaffNotifier, StaffProfile?>(
+      AuthenticatedStaffNotifier.new,
+    );
+
+/// Short-lived access token returned by the trusted API; held only in memory.
+class AuthAccessTokenNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void setToken(String? token) => state = token;
+}
+
+final authAccessTokenProvider =
+    NotifierProvider<AuthAccessTokenNotifier, String?>(
+      AuthAccessTokenNotifier.new,
+    );
 
 class AuthState {
   final bool isLoading;
@@ -58,14 +76,81 @@ class AuthController extends Notifier<AuthState> {
     final service = ref.read(staffAuthServiceProvider);
     final result = await service.verifyPin(staffId, pin);
 
-    if (result.success && result.staff != null) {
-      ref.read(authenticatedStaffProvider.notifier).setStaff(result.staff);
-      state = const AuthState(isLoading: false, errorMessage: null, failedAttempts: 0);
+    final authenticatedStaff = result.staff;
+    final token = result.token;
+
+    if (result.success &&
+        authenticatedStaff != null &&
+        authenticatedStaff.staffId == staffId &&
+        authenticatedStaff.isActive &&
+        token != null &&
+        token.isNotEmpty) {
+      ref
+          .read(authenticatedStaffProvider.notifier)
+          .setStaff(authenticatedStaff);
+      ref
+          .read(authAccessTokenProvider.notifier)
+          .setToken(!token.startsWith('offline_token_') ? token : null);
+      final boardService = WardBoardService(
+        getAccessToken: () => ref.read(authAccessTokenProvider),
+      );
+      ref.read(wardContextErrorProvider.notifier).setError(null);
+      try {
+        if (authenticatedStaff.role == 'charge_nurse') {
+          final preferredWard = await boardService.getPreferredWard();
+          ref
+              .read(selectedWardProvider.notifier)
+              .selectWard(preferredWard ?? _noWard());
+          ref
+              .read(wardContextNeedsConfirmationProvider.notifier)
+              .setNeedsConfirmation(preferredWard != null);
+        } else {
+          final date = DateTime.now().toIso8601String().substring(0, 10);
+          var shiftType = ref.read(selectedShiftTypeProvider);
+          var assignment = await boardService.getActiveAssignment(
+            date: date,
+            shiftType: shiftType,
+          );
+          if (assignment == null) {
+            shiftType = shiftType == 'day' ? 'night' : 'day';
+            assignment = await boardService.getActiveAssignment(
+              date: date,
+              shiftType: shiftType,
+            );
+          }
+          ref.read(selectedShiftTypeProvider.notifier).select(shiftType);
+          ref
+              .read(selectedWardProvider.notifier)
+              .selectWard(
+                assignment == null
+                    ? _noWard()
+                    : HospitalWard(
+                        wardId: assignment['ward_id'] as String,
+                        name: assignment['ward_name'] as String,
+                        bedCount: 0,
+                        bedNumbers: const [],
+                        department: '',
+                        description: '',
+                      ),
+              );
+        }
+      } catch (error) {
+        ref.read(selectedWardProvider.notifier).selectWard(_noWard());
+        ref
+            .read(wardContextErrorProvider.notifier)
+            .setError('Could not load your ward assignment: $error');
+      }
+      state = const AuthState(
+        isLoading: false,
+        errorMessage: null,
+        failedAttempts: 0,
+      );
       return true;
     } else {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: result.error ?? 'Authentication failed',
+        errorMessage:
+            result.error ?? 'Authentication failed or session was invalid.',
         failedAttempts: state.failedAttempts + 1,
       );
       return false;
@@ -74,13 +159,27 @@ class AuthController extends Notifier<AuthState> {
 
   void logout() {
     ref.read(authenticatedStaffProvider.notifier).setStaff(null);
+    ref.read(authAccessTokenProvider.notifier).setToken(null);
+    ref.read(selectedWardProvider.notifier).selectWard(_noWard());
+    ref.read(wardContextNeedsConfirmationProvider.notifier).setNeedsConfirmation(false);
+    ref.read(wardContextErrorProvider.notifier).setError(null);
     state = const AuthState();
   }
 
   void clearError() {
     state = state.copyWith(errorMessage: null);
   }
+
+  HospitalWard _noWard() => const HospitalWard(
+    wardId: '',
+    name: 'No ward assigned',
+    bedCount: 0,
+    bedNumbers: [],
+    department: '',
+    description: '',
+  );
 }
 
-final authControllerProvider =
-    NotifierProvider<AuthController, AuthState>(AuthController.new);
+final authControllerProvider = NotifierProvider<AuthController, AuthState>(
+  AuthController.new,
+);

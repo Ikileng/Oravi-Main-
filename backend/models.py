@@ -93,8 +93,8 @@ class CreateStaffRequest:
     staff_id: str
     name: str
     role: str
-    ward_id: str
     pin: str
+    ward_id: str = ""
     avatar_color: Optional[str] = None
 
 @dataclass
