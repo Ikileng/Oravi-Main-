@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../domain/models/staff_profile.dart';
 import '../../domain/models/whiteboard_models.dart';
 import '../providers/whiteboard_providers.dart';
 import '../providers/auth_providers.dart';
+import '../providers/ward_context_providers.dart';
 import '../widgets/ward_support_roster_sheet.dart';
 import '../widgets/ward_selection_dialog.dart';
 
@@ -16,7 +18,6 @@ class DigitalWhiteboardScreen extends ConsumerStatefulWidget {
 
 class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScreen> {
   int _activeNavIndex = 0;
-  bool _isDayShift = true;
 
   // Precise Column Widths & Grid Line styling matching user reference design
   static const double _kColBedWidth = 64.0;
@@ -24,44 +25,13 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   static const double _kColDoctorWidth = 112.0;
   static const double _kColDayShiftWidth = 84.0;
   static const double _kColNightShiftWidth = 84.0;
-  static const double _kColResponsibilitiesWidth = 178.0;
   static const double _kTotalTableWidth = _kColBedWidth +
       _kColInitialsWidth +
       _kColDoctorWidth +
       _kColDayShiftWidth +
-      _kColNightShiftWidth +
-      _kColResponsibilitiesWidth; // 594.0
+      _kColNightShiftWidth;
 
   static const Color _kGridBorderColor = Color(0xFF1E2C48);
-
-  // Registered doctors for fast autofilter selection
-  static const List<String> _kCandidateDoctors = [
-    'Dr. Mbita',
-    'Dr. Lageti',
-    'Dr. Dawkins',
-    'Dr. Mbei',
-    'Dr. Kimani',
-    'Dr. Osundina',
-    'Dr. Khasong',
-    'Dr. Ravel',
-    'Dr. J. Martins',
-    'Dr. James Kamau',
-    'Dr. Lucy Wangari',
-  ];
-
-  // Registered nurses for fast autofilter selection
-  static const List<String> _kCandidateNurses = [
-    'Nurse A',
-    'Nurse B',
-    'Nurse C',
-    'Nurse D',
-    'Nurse E',
-    'Faith Njeri, RN',
-    'Mary Wanjiku, RN',
-    'Grace Achieng, RN',
-    'Sarah Otieno, RN',
-    'Jane Muthoni, RN',
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -69,6 +39,13 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     final beds = ref.watch(whiteboardAssignmentsProvider);
     final roster = ref.watch(wardSupportRosterProvider);
     final currentStaff = ref.watch(authenticatedStaffProvider);
+    final boardState = ref.watch(wardBoardProvider);
+    final staffState = ref.watch(boardStaffListProvider);
+    final staff = staffState.asData?.value ?? const <StaffProfile>[];
+    final isDayShift = ref.watch(selectedShiftTypeProvider) == 'day';
+    final staffNames = {
+      for (final member in staff) member.staffId: member.name,
+    };
 
     // ONLY the Charge Nurse (or Ward Manager) has write permissions.
     // Everyone else has strictly one-tap read-only access.
@@ -86,7 +63,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         child: Column(
           children: [
             // 1. Top Header
-            _buildTopHeader(context, currentWard, hasWriteAccess),
+            _buildTopHeader(context, currentWard, hasWriteAccess, isDayShift),
 
             // 2. Scrollable Body: Table + KPI Cards + Responsibilities + Update Button
             Expanded(
@@ -96,25 +73,38 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Main Table with Horizontal & Vertical Scroll
-                      _buildMainTable(beds, roster, hasWriteAccess),
-
-                      const SizedBox(height: 16),
-
-                      // KPI Cards Row (Occupied Beds, Available Beds, Day Nurses, Night Nurses)
-                      _buildKpiCardsRow(occupiedCount, availableCount, dayNursesCount, nightNursesCount),
-
-                      const SizedBox(height: 16),
-
-                      // Bottom Ward Responsibilities Card
-                      _buildBottomResponsibilitiesCard(roster, hasWriteAccess),
-
-                      const SizedBox(height: 16),
-
-                      // Primary Action Button: "⇄ Update Ward Assignments"
-                      _buildUpdateAssignmentsButton(hasWriteAccess),
-
-                      const SizedBox(height: 16),
+                      if (currentWard.wardId.isEmpty)
+                        _buildNoWardMessage()
+                      else if (ref.watch(wardContextNeedsConfirmationProvider))
+                        _buildWardConfirmation(currentWard)
+                      else if (boardState.isLoading)
+                        const Center(child: CircularProgressIndicator())
+                      else if (boardState.hasError)
+                        _buildBoardError(boardState.error)
+                      else ...[
+                        _buildMainTable(
+                          beds,
+                          roster,
+                          hasWriteAccess,
+                          staffNames,
+                        ),
+                        const SizedBox(height: 16),
+                        _buildKpiCardsRow(
+                          occupiedCount,
+                          availableCount,
+                          dayNursesCount,
+                          nightNursesCount,
+                        ),
+                        const SizedBox(height: 16),
+                        _buildBottomResponsibilitiesCard(
+                          roster,
+                          hasWriteAccess,
+                          staffNames,
+                        ),
+                        const SizedBox(height: 16),
+                        _buildUpdateAssignmentsButton(hasWriteAccess),
+                        const SizedBox(height: 16),
+                      ],
                     ],
                   ),
                 ),
@@ -132,7 +122,12 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   // ==========================================
   // TOP HEADER
   // ==========================================
-  Widget _buildTopHeader(BuildContext context, dynamic currentWard, bool hasWriteAccess) {
+  Widget _buildTopHeader(
+    BuildContext context,
+    dynamic currentWard,
+    bool hasWriteAccess,
+    bool isDayShift,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: const BoxDecoration(
@@ -167,18 +162,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                     const SizedBox(height: 2),
                     // Tappable Ward Switcher with search & autofilter
                     InkWell(
-                      onTap: () {
+                      onTap: hasWriteAccess ? () {
                         showDialog(
                           context: context,
                           builder: (_) => const WardSelectionDialog(),
                         );
-                      },
+                      } : null,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
                             child: Text(
-                              'Jaramanda Hospital · ${currentWard.name}',
+                              currentWard.name,
                               style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -224,10 +219,10 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               // Date with Calendar Icon
-              const Row(
+              Row(
                 children: [
                   Text(
-                    'Fri, 30 Oct 2026',
+                    DateTime.now().toLocal().toString().split(' ').first,
                     style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
                   ),
                   SizedBox(width: 6),
@@ -237,19 +232,19 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
               // Shift Dropdown Toggle
               InkWell(
-                onTap: () {
-                  setState(() => _isDayShift = !_isDayShift);
-                },
+                onTap: () => ref
+                    .read(selectedShiftTypeProvider.notifier)
+                    .select(isDayShift ? 'night' : 'day'),
                 child: Row(
                   children: [
                     Icon(
-                      _isDayShift ? Icons.wb_sunny_outlined : Icons.nightlight_round,
+                      isDayShift ? Icons.wb_sunny_outlined : Icons.nightlight_round,
                       size: 14,
-                      color: _isDayShift ? const Color(0xFFFBBF24) : const Color(0xFF818CF8),
+                      color: isDayShift ? const Color(0xFFFBBF24) : const Color(0xFF818CF8),
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      _isDayShift ? 'Day Shift' : 'Night Shift',
+                      isDayShift ? 'Day Shift' : 'Night Shift',
                       style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(width: 2),
@@ -264,12 +259,94 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     );
   }
 
+  Widget _buildNoWardMessage() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C1425),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kGridBorderColor),
+      ),
+      child: const Text(
+        'No ward is assigned to your account for this shift. Please contact the Charge Nurse.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 14),
+      ),
+    );
+  }
+
+  Widget _buildWardConfirmation(dynamic currentWard) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C1425),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kGridBorderColor),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Confirm ${currentWard.name} for this shift',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            children: [
+              OutlinedButton(
+                onPressed: () => ref
+                    .read(wardContextNeedsConfirmationProvider.notifier)
+                    .setNeedsConfirmation(false),
+                child: const Text('Confirm ward'),
+              ),
+              TextButton(
+                onPressed: () => showDialog(
+                  context: context,
+                  builder: (_) => const WardSelectionDialog(),
+                ),
+                child: const Text('Change ward'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBoardError(Object? error) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C1425),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFB91C1C)),
+      ),
+      child: Text(
+        'The ward board could not be loaded. Please try again.\n$error',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 13),
+      ),
+    );
+  }
+
   // ==========================================
   // MAIN TABLE WITH BED ROWS & RESPONSIBILITIES
   // ==========================================
-  Widget _buildMainTable(List<WhiteboardBedAssignment> beds, WardSupportRoster roster, bool hasWriteAccess) {
-    // 10 beds strictly
-    final displayBeds = beds.take(10).toList();
+  Widget _buildMainTable(
+    List<WhiteboardBedAssignment> beds,
+    WardSupportRoster roster,
+    bool hasWriteAccess,
+    Map<String, String> staffNames,
+  ) {
+    final displayBeds = beds;
 
     return Container(
       decoration: BoxDecoration(
@@ -289,12 +366,38 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 // Table Header Row with Crisp Grid Lines
                 _buildTableHeader(),
 
-                // 10 Bed Rows with Crisp Horizontal and Vertical Grid Lines
+                if (displayBeds.isNotEmpty &&
+                    displayBeds.every(
+                      (bed) =>
+                          bed.patientId == null &&
+                          bed.patientInitials.trim().isEmpty,
+                    ))
+                  const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Text(
+                      'No patients are assigned to this ward yet. The Charge Nurse can add patients to the board.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                  ),
+                if (displayBeds.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text(
+                      'No beds are configured for this ward. Ask an administrator to configure the ward.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                  ),
                 ...displayBeds.asMap().entries.map((entry) {
                   final index = entry.key;
                   final bed = entry.value;
                   final isLast = index == displayBeds.length - 1;
-                  return _buildBedRow(index, bed, roster, hasWriteAccess, isLast);
+                  return _buildBedRow(
+                    index,
+                    bed,
+                    hasWriteAccess,
+                    isLast,
+                    staffNames,
+                  );
                 }),
               ],
             ),
@@ -390,19 +493,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             ),
           ),
 
-          // 6. Ward Responsibilities
-          Container(
-            width: _kColResponsibilitiesWidth,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.only(left: 12),
-            child: const Text('Ward Responsibilities', style: headerStyle),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildBedRow(int index, WhiteboardBedAssignment bed, WardSupportRoster roster, bool hasWriteAccess, bool isLastRow) {
+  Widget _buildBedRow(
+    int index,
+    WhiteboardBedAssignment bed,
+    bool hasWriteAccess,
+    bool isLastRow,
+    Map<String, String> staffNames,
+  ) {
     // Determine vertical status stripe color
     // Green = Occupied & Assigned, Yellow = Pending/Review, Dark Slate = Available
     final isAvailable = bed.patientInitials.trim() == '-' || bed.patientInitials.trim().isEmpty;
@@ -410,61 +512,6 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     final stripeColor = isAvailable
         ? const Color(0xFF334155)
         : (isPending ? const Color(0xFFEAB308) : const Color(0xFF10B981));
-
-    // Map right-hand ward responsibilities stack based on row index
-    Widget? responsibilityWidget;
-    switch (index) {
-      case 0:
-        responsibilityWidget = _buildSidebarRole(
-          title: 'Team Leader',
-          nurse: roster.teamLeader.isNotEmpty ? roster.teamLeader : 'Nurse A',
-          icon: Icons.person,
-          iconColor: const Color(0xFF38BDF8),
-          roleKey: 'team_leader',
-          hasWriteAccess: hasWriteAccess,
-        );
-        break;
-      case 1:
-        responsibilityWidget = _buildSidebarRole(
-          title: 'Duty Leader',
-          nurse: roster.dutyLeader.isNotEmpty ? roster.dutyLeader : 'Nurse B',
-          icon: Icons.assignment_outlined,
-          iconColor: const Color(0xFFA855F7),
-          roleKey: 'duty_leader',
-          hasWriteAccess: hasWriteAccess,
-        );
-        break;
-      case 2:
-        responsibilityWidget = _buildSidebarRole(
-          title: 'Discharge Nurse',
-          nurse: roster.dischargeNurse.isNotEmpty ? roster.dischargeNurse : 'Nurse C',
-          icon: Icons.assignment_turned_in_outlined,
-          iconColor: const Color(0xFF34D399),
-          roleKey: 'discharge_nurse',
-          hasWriteAccess: hasWriteAccess,
-        );
-        break;
-      case 3:
-        responsibilityWidget = _buildSidebarRole(
-          title: 'Patient Care Attendant',
-          nurse: roster.pcaDay.isNotEmpty ? roster.pcaDay : 'Nurse D',
-          icon: Icons.person_pin_outlined,
-          iconColor: const Color(0xFF2DD4BF),
-          roleKey: 'pca',
-          hasWriteAccess: hasWriteAccess,
-        );
-        break;
-      case 5:
-        responsibilityWidget = _buildSidebarRole(
-          title: 'Nurse In-Charge',
-          nurse: roster.inchargeNurseDay.isNotEmpty ? roster.inchargeNurseDay : 'Nurse E',
-          icon: Icons.person,
-          iconColor: const Color(0xFF93C5FD),
-          roleKey: 'incharge',
-          hasWriteAccess: hasWriteAccess,
-        );
-        break;
-    }
 
     return Container(
       height: 48,
@@ -545,7 +592,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             child: InkWell(
               onTap: hasWriteAccess ? () => _showDoctorSelectionSheet(bed) : () => _notifyReadOnly(),
               child: Text(
-                bed.admittingDoctor.isNotEmpty ? bed.admittingDoctor : '-',
+                bed.admittingDoctor.isNotEmpty
+                    ? staffNames[bed.admittingDoctor] ?? bed.admittingDoctor
+                    : '-',
                 style: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -560,7 +609,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             ),
             alignment: Alignment.center,
             child: _buildNursePill(
-              nurseName: bed.dayShiftNurseId,
+              nurseName: bed.dayShiftNurseId == null
+                  ? null
+                  : staffNames[bed.dayShiftNurseId] ?? bed.dayShiftNurseId,
               hasWriteAccess: hasWriteAccess,
               onTap: () => _showNurseSelectionSheet(bed, isDay: true),
             ),
@@ -574,19 +625,14 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             ),
             alignment: Alignment.center,
             child: _buildNursePill(
-              nurseName: bed.nightShiftNurseId,
+              nurseName: bed.nightShiftNurseId == null
+                  ? null
+                  : staffNames[bed.nightShiftNurseId] ?? bed.nightShiftNurseId,
               hasWriteAccess: hasWriteAccess,
               onTap: () => _showNurseSelectionSheet(bed, isDay: false),
             ),
           ),
 
-          // 6. Ward Responsibilities (Right Column)
-          Container(
-            width: _kColResponsibilitiesWidth,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: responsibilityWidget ?? const SizedBox.shrink(),
-          ),
         ],
       ),
     );
@@ -608,44 +654,6 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           hasNurse ? nurseName : '-',
           style: const TextStyle(fontSize: 11, color: Color(0xFF7DD3FC), fontWeight: FontWeight.w600),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSidebarRole({
-    required String title,
-    required String nurse,
-    required IconData icon,
-    required Color iconColor,
-    required String roleKey,
-    required bool hasWriteAccess,
-  }) {
-    return InkWell(
-      onTap: hasWriteAccess ? () => _showRoleAssignmentSheet(title, roleKey) : () => _notifyReadOnly(),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: iconColor),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  nurse,
-                  style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -702,7 +710,11 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   // ==========================================
   // BOTTOM WARD RESPONSIBILITIES BANNER
   // ==========================================
-  Widget _buildBottomResponsibilitiesCard(WardSupportRoster roster, bool hasWriteAccess) {
+  Widget _buildBottomResponsibilitiesCard(
+    WardSupportRoster roster,
+    bool hasWriteAccess,
+    Map<String, String> staffNames,
+  ) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -759,7 +771,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               children: [
                 _buildResponsibilityChip(
                   title: 'Ward Manager',
-                  nurse: roster.wardManager,
+                  nurse: staffNames[roster.wardManager] ?? roster.wardManager,
                   icon: Icons.manage_accounts,
                   color: const Color(0xFF38BDF8),
                   roleKey: 'ward_manager',
@@ -767,7 +779,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Team Leader',
-                  nurse: roster.teamLeader,
+                  nurse: staffNames[roster.teamLeader] ?? roster.teamLeader,
                   icon: Icons.person,
                   color: const Color(0xFF38BDF8),
                   roleKey: 'team_leader',
@@ -775,7 +787,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Duty Leader',
-                  nurse: roster.dutyLeader,
+                  nurse: staffNames[roster.dutyLeader] ?? roster.dutyLeader,
                   icon: Icons.assignment,
                   color: const Color(0xFFA855F7),
                   roleKey: 'duty_leader',
@@ -783,7 +795,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Discharge Nurse',
-                  nurse: roster.dischargeNurse,
+                  nurse: staffNames[roster.dischargeNurse] ?? roster.dischargeNurse,
                   icon: Icons.assignment_turned_in,
                   color: const Color(0xFF34D399),
                   roleKey: 'discharge_nurse',
@@ -791,7 +803,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Patient Care Attendant',
-                  nurse: roster.pcaDay,
+                  nurse: staffNames[roster.pcaDay] ?? roster.pcaDay,
                   icon: Icons.person_pin,
                   color: const Color(0xFF2DD4BF),
                   roleKey: 'pca',
@@ -799,7 +811,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Nurse In-Charge',
-                  nurse: roster.inchargeNurseDay,
+                  nurse: staffNames[roster.inchargeNurseDay] ?? roster.inchargeNurseDay,
                   icon: Icons.person,
                   color: const Color(0xFF93C5FD),
                   roleKey: 'incharge',
@@ -976,21 +988,37 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   /// Strictly typed manual initials dialog (no autofill)
   void _showStrictInitialsDialog(WhiteboardBedAssignment bed) {
     final controller = TextEditingController(text: bed.patientInitials == '-' ? '' : bed.patientInitials);
+    final patientIdController = TextEditingController(text: bed.patientId ?? '');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
-        title: Text('Bed ${bed.bedNumber}: Patient Initials', style: const TextStyle(color: Colors.white, fontSize: 16)),
-        content: TextField(
-          controller: controller,
-          textCapitalization: TextCapitalization.characters,
-          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          decoration: const InputDecoration(
-            hintText: 'e.g. J.N or M.G',
-            hintStyle: TextStyle(color: Color(0xFF64748B)),
-            helperText: 'Strictly manual typing. No autofill.',
-            helperStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-          ),
+        title: Text('Bed ${bed.bedNumber}: Patient', style: const TextStyle(color: Colors.white, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(
+                labelText: 'Patient initials',
+                hintText: 'e.g. J.N or M.G',
+                hintStyle: TextStyle(color: Color(0xFF64748B)),
+                helperText: 'Do not enter a full patient name.',
+                helperStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+            ),
+            TextField(
+              controller: patientIdController,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: const InputDecoration(
+                labelText: 'Internal patient ID (optional)',
+                helperText: 'Reuse an existing ID for transfers; leave blank to generate a new one.',
+                helperStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -999,13 +1027,21 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
-            onPressed: () {
-              final val = controller.text.trim();
-              ref.read(whiteboardAssignmentsProvider.notifier).updateAssignment(
-                bed.bedNumber,
-                status: val.isEmpty || val == '-' ? 'available' : 'accepted',
-              );
-              Navigator.of(ctx).pop();
+            onPressed: () async {
+              final initials = controller.text.trim().toUpperCase();
+              try {
+                await ref.read(wardBoardProvider.notifier).updateAssignment(
+                  bed.bedNumber,
+                  patientInitials: initials == '-' ? '' : initials,
+                  patientId: patientIdController.text.trim(),
+                  status: initials.isEmpty || initials == '-'
+                      ? 'available'
+                      : 'accepted',
+                );
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              } catch (error) {
+                _showSaveError(error);
+              }
             },
             child: const Text('Save', style: TextStyle(color: Colors.white)),
           ),
@@ -1016,94 +1052,164 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
   /// Doctor selection sheet with real-time autofilter
   void _showDoctorSelectionSheet(WhiteboardBedAssignment bed) {
+    final doctors = _availableStaff(doctorOnly: true);
+    if (doctors.isEmpty) {
+      _showSaveError(StateError('No active doctors are available for this ward.'));
+      return;
+    }
     _showAutofilterSelectionSheet(
       title: 'Select Doctor for Bed ${bed.bedNumber}',
-      options: _kCandidateDoctors,
-      currentValue: bed.admittingDoctor,
-      onSelect: (doc) {
-        ref.read(whiteboardAssignmentsProvider.notifier).updateAssignment(bed.bedNumber, doctor: doc);
+      options: doctors.map(_staffOptionLabel).toList(),
+      currentValue: _staffLabelForId(doctors, bed.admittingDoctor),
+      onSelect: (selected) {
+        final doctor = doctors
+            .firstWhere((member) => _staffOptionLabel(member) == selected);
+        _saveBoardChange(
+          () => ref.read(wardBoardProvider.notifier).updateAssignment(
+            bed.bedNumber,
+            doctor: doctor.staffId,
+          ),
+        );
       },
     );
   }
 
   /// Nurse selection sheet with real-time autofilter
   void _showNurseSelectionSheet(WhiteboardBedAssignment bed, {required bool isDay}) {
+    final nurses = _availableStaff();
+    if (nurses.isEmpty) {
+      _showSaveError(StateError('No active nurses are available for this ward.'));
+      return;
+    }
     _showAutofilterSelectionSheet(
       title: 'Select ${isDay ? "Day" : "Night"} Nurse (Bed ${bed.bedNumber})',
-      options: _kCandidateNurses,
-      currentValue: isDay ? bed.dayShiftNurseId : bed.nightShiftNurseId,
-      onSelect: (nurse) {
-        if (isDay) {
-          ref.read(whiteboardAssignmentsProvider.notifier).updateAssignment(bed.bedNumber, nurseId: nurse);
-        } else {
-          // Night nurse assignment
-          ref.read(whiteboardAssignmentsProvider.notifier).updateAssignment(bed.bedNumber, status: 'accepted');
-        }
+      options: nurses.map(_staffOptionLabel).toList(),
+      currentValue: _staffLabelForId(
+        nurses,
+        isDay ? bed.dayShiftNurseId : bed.nightShiftNurseId,
+      ),
+      onSelect: (selected) {
+        final nurse = nurses
+            .firstWhere((member) => _staffOptionLabel(member) == selected);
+        _saveBoardChange(
+          () => ref.read(wardBoardProvider.notifier).updateAssignment(
+            bed.bedNumber,
+            nurseId: nurse.staffId,
+          ),
+        );
       },
     );
   }
 
   /// Ward responsibility role selection
   void _showRoleAssignmentSheet(String title, String roleKey) {
+    final nurses = _availableStaff();
+    if (nurses.isEmpty) {
+      _showSaveError(StateError('No active nurses are available for this ward.'));
+      return;
+    }
     _showAutofilterSelectionSheet(
       title: 'Assign $title',
-      options: _kCandidateNurses,
+      options: nurses.map(_staffOptionLabel).toList(),
       currentValue: '',
-      onSelect: (nurse) {
+      onSelect: (selected) {
+        final nurse = nurses
+            .firstWhere((member) => _staffOptionLabel(member) == selected);
         final currentRoster = ref.read(wardSupportRosterProvider);
+        late final WardSupportRoster updatedRoster;
         switch (roleKey) {
           case 'team_leader':
-            ref.read(wardSupportRosterProvider.notifier).updateRoster(WardSupportRoster(
+            updatedRoster = WardSupportRoster(
               wardManager: currentRoster.wardManager,
-              teamLeader: nurse,
+              teamLeader: nurse.staffId,
               dutyLeader: currentRoster.dutyLeader,
               dischargeNurse: currentRoster.dischargeNurse,
               inchargeNurseDay: currentRoster.inchargeNurseDay,
               pcaDay: currentRoster.pcaDay,
-            ));
+            );
             break;
           case 'duty_leader':
-            ref.read(wardSupportRosterProvider.notifier).updateRoster(WardSupportRoster(
+            updatedRoster = WardSupportRoster(
               wardManager: currentRoster.wardManager,
               teamLeader: currentRoster.teamLeader,
-              dutyLeader: nurse,
+              dutyLeader: nurse.staffId,
               dischargeNurse: currentRoster.dischargeNurse,
               inchargeNurseDay: currentRoster.inchargeNurseDay,
               pcaDay: currentRoster.pcaDay,
-            ));
+            );
             break;
           case 'discharge_nurse':
-            ref.read(wardSupportRosterProvider.notifier).updateRoster(WardSupportRoster(
+            updatedRoster = WardSupportRoster(
               wardManager: currentRoster.wardManager,
               teamLeader: currentRoster.teamLeader,
               dutyLeader: currentRoster.dutyLeader,
-              dischargeNurse: nurse,
+              dischargeNurse: nurse.staffId,
               inchargeNurseDay: currentRoster.inchargeNurseDay,
               pcaDay: currentRoster.pcaDay,
-            ));
+            );
             break;
           case 'pca':
-            ref.read(wardSupportRosterProvider.notifier).updateRoster(WardSupportRoster(
+            updatedRoster = WardSupportRoster(
               wardManager: currentRoster.wardManager,
               teamLeader: currentRoster.teamLeader,
               dutyLeader: currentRoster.dutyLeader,
               dischargeNurse: currentRoster.dischargeNurse,
               inchargeNurseDay: currentRoster.inchargeNurseDay,
-              pcaDay: nurse,
-            ));
+              pcaDay: nurse.staffId,
+            );
             break;
           case 'incharge':
-            ref.read(wardSupportRosterProvider.notifier).updateRoster(WardSupportRoster(
+            updatedRoster = WardSupportRoster(
               wardManager: currentRoster.wardManager,
               teamLeader: currentRoster.teamLeader,
               dutyLeader: currentRoster.dutyLeader,
               dischargeNurse: currentRoster.dischargeNurse,
-              inchargeNurseDay: nurse,
+              inchargeNurseDay: nurse.staffId,
               pcaDay: currentRoster.pcaDay,
-            ));
+            );
             break;
+          default:
+            return;
         }
+        _saveBoardChange(
+          () => ref.read(wardSupportRosterProvider.notifier)
+              .updateRoster(updatedRoster),
+        );
       },
+    );
+  }
+
+  List<StaffProfile> _availableStaff({bool doctorOnly = false}) {
+    final staff = ref.read(boardStaffListProvider).asData?.value ?? const [];
+    return staff.where((member) {
+      if (doctorOnly) return member.isDoctorOnCall;
+      return member.isWardNurse || member.isChargeNurse;
+    }).toList();
+  }
+
+  String _staffOptionLabel(StaffProfile staff) =>
+      '${staff.name} (${staff.staffId})';
+
+  String? _staffLabelForId(List<StaffProfile> staff, String? staffId) {
+    if (staffId == null) return null;
+    for (final member in staff) {
+      if (member.staffId == staffId) return _staffOptionLabel(member);
+    }
+    return staffId;
+  }
+
+  Future<void> _saveBoardChange(Future<void> Function() save) async {
+    try {
+      await save();
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  void _showSaveError(Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Could not save ward board changes: $error')),
     );
   }
 

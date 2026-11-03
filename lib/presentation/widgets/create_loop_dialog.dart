@@ -22,6 +22,7 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
   LoopType _type = LoopType.taskOrPendingResult;
   LoopUrgency _urgency = LoopUrgency.routine;
   String? _error;
+  bool _isSaving = false;
 
   final List<Map<String, dynamic>> _quickTemplates = [
     {
@@ -71,22 +72,37 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
     });
   }
 
-  void _submit(WidgetRef ref) {
+  Future<void> _submit(WidgetRef ref) async {
+    if (_isSaving) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       setState(() => _error = 'Please enter a title or select a template.');
       return;
     }
 
-    ref.read(wardControllerProvider.notifier).openLoop(
-          patientId: widget.patientId,
-          title: title,
-          description: _descController.text.trim(),
-          loopType: _type,
-          urgency: _urgency,
+    setState(() => _isSaving = true);
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .openLoop(
+            patientId: widget.patientId,
+            title: title,
+            description: _descController.text.trim(),
+            loopType: _type,
+            urgency: _urgency,
+          );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'Could not save the medical issue. Please try again.',
         );
-
-    Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -99,7 +115,10 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
             children: [
               Icon(Icons.add_circle_outline, color: ClinicalTheme.routineTeal),
               SizedBox(width: 8),
-              Text('Raise Medical Issue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                'Raise Medical Issue',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           content: SingleChildScrollView(
@@ -109,7 +128,11 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
               children: [
                 const Text(
                   'Quick Templates (2-Tap Entry):',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -117,7 +140,10 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                   runSpacing: 6,
                   children: _quickTemplates.map((tpl) {
                     return ActionChip(
-                      label: Text(tpl['label'], style: const TextStyle(fontSize: 11)),
+                      label: Text(
+                        tpl['label'],
+                        style: const TextStyle(fontSize: 11),
+                      ),
                       backgroundColor: ClinicalTheme.surfaceElevated,
                       onPressed: () => _applyTemplate(tpl),
                     );
@@ -126,15 +152,25 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 const SizedBox(height: 14),
                 const Text(
                   'Issue Title:',
-                  style: TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 TextField(
                   controller: _titleController,
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'e.g., Check wound dressing after surgery',
-                    hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                    hintStyle: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
                     filled: true,
                     fillColor: ClinicalTheme.surfaceElevated,
                     border: OutlineInputBorder(
@@ -146,16 +182,25 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 const SizedBox(height: 12),
                 const Text(
                   'Instructions / Clinical Context:',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 TextField(
                   controller: _descController,
                   maxLines: 2,
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Details, thresholds, or doctor instructions...',
-                    hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                    hintStyle: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
                     filled: true,
                     fillColor: ClinicalTheme.surfaceElevated,
                     border: OutlineInputBorder(
@@ -167,7 +212,11 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 const SizedBox(height: 12),
                 const Text(
                   'Urgency Tier:',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Row(
@@ -181,7 +230,9 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: isSel ? Colors.white : ClinicalTheme.urgencyColor(urg),
+                            color: isSel
+                                ? Colors.white
+                                : ClinicalTheme.urgencyColor(urg),
                           ),
                         ),
                         selected: isSel,
@@ -196,7 +247,13 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 8),
-                  Text(_error!, style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12)),
+                  Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: ClinicalTheme.criticalRed,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -204,15 +261,18 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel', style: TextStyle(color: ClinicalTheme.textMuted)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: ClinicalTheme.textMuted),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: ClinicalTheme.routineTeal,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => _submit(ref),
-              child: const Text('Raise Medical Issue'),
+              onPressed: _isSaving ? null : () => _submit(ref),
+              child: Text(_isSaving ? 'Saving…' : 'Raise Medical Issue'),
             ),
           ],
         );

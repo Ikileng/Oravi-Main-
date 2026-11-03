@@ -15,19 +15,6 @@ class WardSupportRosterSheet extends ConsumerWidget {
     this.hasWriteAccess = false,
   });
 
-  static const List<String> _kCandidateNurses = [
-    'Nurse A',
-    'Nurse B',
-    'Nurse C',
-    'Nurse D',
-    'Nurse E',
-    'Grace Achieng, RN',
-    'Faith Njeri, RN',
-    'Mary Wanjiku, RN',
-    'Sarah Otieno, RN',
-    'Jane Muthoni, RN',
-  ];
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Watch live roster so any edits update the UI reactively
@@ -278,6 +265,11 @@ class WardSupportRosterSheet extends ConsumerWidget {
     bool isPhone = false,
     required void Function(String day, String night) onSave,
   }) {
+    final staff = ref.watch(boardStaffListProvider).asData?.value ?? const [];
+    final nurseNames = staff
+        .where((member) => member.isWardNurse || member.isChargeNurse)
+        .map((member) => member.name)
+        .toList();
     final hasNight = nightContact.isNotEmpty ||
         cadre.contains('IN-CHARGE') ||
         cadre.contains('PCA') ||
@@ -301,6 +293,7 @@ class WardSupportRosterSheet extends ConsumerWidget {
               initialNight: nightContact,
               hasNight: hasNight,
               isNurseRole: isNurseRole,
+              nurseNames: nurseNames,
               isPhone: isPhone,
               onSave: onSave,
             );
@@ -383,6 +376,7 @@ class WardSupportRosterSheet extends ConsumerWidget {
     required String initialNight,
     required bool hasNight,
     required bool isNurseRole,
+    required List<String> nurseNames,
     required bool isPhone,
     required void Function(String day, String night) onSave,
   }) {
@@ -452,7 +446,7 @@ class WardSupportRosterSheet extends ConsumerWidget {
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
-                        children: _kCandidateNurses.take(5).map((nurse) {
+                        children: nurseNames.take(5).map((nurse) {
                           return InkWell(
                             onTap: () {
                               setDialogState(() {

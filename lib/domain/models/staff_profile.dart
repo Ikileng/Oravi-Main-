@@ -46,6 +46,8 @@ class StaffProfile extends Equatable {
 
   String get formattedRole {
     switch (role) {
+      case 'dev_admin':
+        return 'Development Admin';
       case 'charge_nurse':
         return 'Charge Nurse';
       case 'doctor_on_call':

@@ -34,20 +34,25 @@ class LoopStateMachine {
     required ClosureReasonCode reasonCode,
     required String? freeTextNote,
   }) {
-    if (currentState.isTerminalClosed) {
+    if (currentState.isTerminalClosed ||
+        currentState == LoopState.closedAwaitingConfirmation) {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'close',
-        reason: 'Loop is already closed.',
+        reason: currentState.isTerminalClosed
+            ? 'Loop is already closed.'
+            : 'Critical closure is awaiting confirmation; confirm or reopen it.',
       );
     }
 
     // PRD FR-46: Verify mandatory note rule
-    if (reasonCode.requiresFreeTextNote && (freeTextNote == null || freeTextNote.trim().isEmpty)) {
+    if (reasonCode.requiresFreeTextNote &&
+        (freeTextNote == null || freeTextNote.trim().isEmpty)) {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'close',
-        reason: 'Closure reason "${reasonCode.wireName}" strictly requires a brief free-text note.',
+        reason:
+            'Closure reason "${reasonCode.wireName}" strictly requires a brief free-text note.',
       );
     }
 
@@ -68,7 +73,8 @@ class LoopStateMachine {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'confirm_closure',
-        reason: 'Only loops in "closed_awaiting_confirmation" can have closure confirmed.',
+        reason:
+            'Only loops in "closed_awaiting_confirmation" can have closure confirmed.',
       );
     }
     return LoopState.closed;
@@ -98,28 +104,30 @@ class LoopStateMachine {
   }
 
   /// Acknowledges an open loop (PRD Section 6).
-  static LoopState transitionOnAcknowledge({
-    required LoopState currentState,
-  }) {
+  static LoopState transitionOnAcknowledge({required LoopState currentState}) {
     if (currentState != LoopState.raised) {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'acknowledge',
-        reason: 'Only loops in "raised" state can be transitioned to "acknowledged".',
+        reason:
+            'Only loops in "raised" state can be transitioned to "acknowledged".',
       );
     }
     return LoopState.acknowledged;
   }
 
   /// Starts work on an open loop.
-  static LoopState transitionOnStartWork({
-    required LoopState currentState,
-  }) {
-    if (currentState != LoopState.raised && currentState != LoopState.acknowledged) {
+  static LoopState transitionOnStartWork({required LoopState currentState}) {
+    // Replaying a duplicate start event must not make the whole ward projection
+    // fail. The command layer prevents appending another start once work began.
+    if (currentState == LoopState.inProgress) return LoopState.inProgress;
+    if (currentState != LoopState.raised &&
+        currentState != LoopState.acknowledged) {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'start_work',
-        reason: 'Cannot start work on a loop in state "${currentState.wireName}".',
+        reason:
+            'Cannot start work on a loop in state "${currentState.wireName}".',
       );
     }
     return LoopState.inProgress;

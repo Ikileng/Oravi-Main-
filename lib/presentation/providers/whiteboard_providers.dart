@@ -1,196 +1,257 @@
-import 'dart:convert';
-import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/database/database.dart';
-import '../../data/database/database_provider.dart';
-import '../../domain/models/hospital_ward.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../data/ward_board_service.dart';
+import '../../domain/models/staff_profile.dart';
 import '../../domain/models/whiteboard_models.dart';
-import '../../data/mock/seeded_gertrude_whiteboard_data.dart';
+import 'auth_providers.dart';
+import 'ward_context_providers.dart';
 
-/// Currently selected active hospital ward. Defaults to Jacaranda Ward (Pediatrics).
-class SelectedWardNotifier extends Notifier<HospitalWard> {
-  @override
-  HospitalWard build() {
-    return kDefaultHospitalWards.firstWhere(
-      (w) => w.wardId == SeededGertrudeWhiteboardData.jacarandaWardId,
-      orElse: () => kDefaultHospitalWards[0],
+String activeWardShiftDate() =>
+    DateTime.now().toIso8601String().substring(0, 10);
+
+class WardBoardData {
+  final String? allocationId;
+  final List<WhiteboardBedAssignment> assignments;
+  final WardSupportRoster supportRoster;
+
+  const WardBoardData({
+    this.allocationId,
+    this.assignments = const [],
+    this.supportRoster = const WardSupportRoster(),
+  });
+
+  factory WardBoardData.fromMap(Map<String, dynamic> map) {
+    final assignments = map['bed_assignments'];
+    final responsibilities = map['responsibilities'];
+    return WardBoardData(
+      allocationId: map['allocation_id'] as String?,
+      assignments: assignments is List
+          ? assignments
+                .map(
+                  (item) => WhiteboardBedAssignment.fromMap(
+                    item as Map<String, dynamic>,
+                  ),
+                )
+                .toList()
+          : const [],
+      supportRoster: responsibilities is Map<String, dynamic>
+          ? WardSupportRoster.fromMap(responsibilities)
+          : const WardSupportRoster(),
     );
-  }
-
-  void selectWard(HospitalWard ward) {
-    state = ward;
   }
 }
 
-final selectedWardProvider = NotifierProvider<SelectedWardNotifier, HospitalWard>(
-  SelectedWardNotifier.new,
-);
+final wardBoardServiceProvider = Provider<WardBoardService>((ref) {
+  return WardBoardService(
+    getAccessToken: () => ref.read(authAccessTokenProvider),
+  );
+});
 
-/// State for the Gertrude Whiteboard Bed Assignments with SQLite persistence
-class WhiteboardAssignmentsNotifier extends Notifier<List<WhiteboardBedAssignment>> {
+class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
   @override
-  List<WhiteboardBedAssignment> build() {
-    _loadFromDatabase();
-    return SeededGertrudeWhiteboardData.getInitialJacarandaAssignments();
+  Future<WardBoardData> build() async {
+    final ward = ref.watch(selectedWardProvider);
+    final shift = ref.watch(selectedShiftTypeProvider);
+    final token = ref.watch(authAccessTokenProvider);
+    final staff = ref.watch(authenticatedStaffProvider);
+    final needsConfirmation = ref.watch(wardContextNeedsConfirmationProvider);
+    if (ward.wardId.isEmpty || token == null) return const WardBoardData();
+    if (staff?.role == 'charge_nurse' && needsConfirmation) {
+      return const WardBoardData();
+    }
+    final response = await ref
+        .read(wardBoardServiceProvider)
+        .getBoard(
+          wardId: ward.wardId,
+          date: activeWardShiftDate(),
+          shiftType: shift,
+        );
+    return WardBoardData.fromMap(response);
   }
 
-  Future<void> _loadFromDatabase() async {
-    final db = ref.read(localDatabaseProvider);
-    final rows = await db.getWhiteboardAssignments(
-      DatabaseSeeder.defaultShiftDate,
-      DatabaseSeeder.defaultShiftType,
-    );
-    if (rows.isNotEmpty) {
-      state = rows.map((r) {
-        final initials = r.patientName.split(' · ').first;
-        final admNum = r.patientName.contains(' · ')
-            ? r.patientName.split(' · ').last
-            : 'ADM-${r.bedNumber}';
-        return WhiteboardBedAssignment(
-          bedNumber: r.bedNumber,
-          patientInitials: initials,
-          admissionNumber: admNum,
-          admittingDoctor: r.diagnosis ?? 'Dr. Kamau',
-          dayShiftNurseId: r.assignedNurse,
-          nightShiftNurseId: 'Unassigned',
-          status: 'accepted',
-        );
-      }).toList();
+  String get _shiftType => ref.read(selectedShiftTypeProvider);
+
+  Future<void> updateAssignment(
+    String bedNumber, {
+    String? nurseId,
+    String? doctor,
+    String? patientInitials,
+    String? patientId,
+    String? status,
+  }) async {
+    final current = state.asData?.value ?? const WardBoardData();
+    final assignments = current.assignments.map((bed) {
+      if (bed.bedNumber != bedNumber) return bed;
+      final initials = patientInitials ?? bed.patientInitials;
+      final suppliedPatientId = patientId?.trim();
+      final resolvedPatientId = initials.trim().isEmpty
+          ? null
+          : suppliedPatientId != null && suppliedPatientId.isNotEmpty
+          ? suppliedPatientId
+          : initials == bed.patientInitials
+          ? bed.patientId ?? 'PAT-${const Uuid().v7()}'
+          : 'PAT-${const Uuid().v7()}';
+      return bed.copyWith(
+        patientId: resolvedPatientId,
+        clearPatientId: resolvedPatientId == null,
+        patientInitials: initials,
+        admittingDoctor: doctor ?? bed.admittingDoctor,
+        dayShiftNurseId: _shiftType == 'day'
+            ? nurseId ?? bed.dayShiftNurseId
+            : bed.dayShiftNurseId,
+        nightShiftNurseId: _shiftType == 'night'
+            ? nurseId ?? bed.nightShiftNurseId
+            : bed.nightShiftNurseId,
+        status: status ?? bed.status,
+      );
+    }).toList();
+    await _save(assignments, current.supportRoster);
+  }
+
+  Future<void> batchAssignBeds(List<String> bedNumbers, String staffId) async {
+    final current = state.asData?.value ?? const WardBoardData();
+    final assignments = current.assignments.map((bed) {
+      if (!bedNumbers.contains(bed.bedNumber)) return bed;
+      return bed.copyWith(
+        dayShiftNurseId: _shiftType == 'day' ? staffId : bed.dayShiftNurseId,
+        nightShiftNurseId: _shiftType == 'night'
+            ? staffId
+            : bed.nightShiftNurseId,
+      );
+    }).toList();
+    await _save(assignments, current.supportRoster);
+  }
+
+  Future<void> acceptBeds(List<String> bedNumbers, String staffId) async {
+    final current = state.asData?.value ?? const WardBoardData();
+    final assignments = current.assignments.map((bed) {
+      final owner = _shiftType == 'day'
+          ? bed.dayShiftNurseId
+          : bed.nightShiftNurseId;
+      if (bedNumbers.contains(bed.bedNumber) && owner == staffId) {
+        return bed.copyWith(status: 'accepted');
+      }
+      return bed;
+    }).toList();
+    await _save(assignments, current.supportRoster);
+  }
+
+  Future<void> acceptHandoffBeds(
+    {
+    required List<String> bedNumbers,
+    required String outgoingStaffId,
+    required String incomingAccessToken,
+  }) async {
+    final current = state.asData?.value ?? const WardBoardData();
+    final ward = ref.read(selectedWardProvider);
+    final shift = ref.read(selectedShiftTypeProvider);
+    final allocationId = current.allocationId;
+    if (ward.wardId.isEmpty || allocationId == null) {
+      throw StateError('The current ward has no published allocation.');
+    }
+    state = const AsyncLoading();
+    try {
+      await ref
+          .read(wardBoardServiceProvider)
+          .acceptHandoffBeds(
+            allocationId: allocationId,
+            outgoingStaffId: outgoingStaffId,
+            incomingAccessToken: incomingAccessToken,
+            bedNumbers: bedNumbers,
+          );
+      final response = await ref
+          .read(wardBoardServiceProvider)
+          .getBoard(
+            wardId: ward.wardId,
+            date: activeWardShiftDate(),
+            shiftType: shift,
+          );
+      state = AsyncData(WardBoardData.fromMap(response));
+    } catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+      rethrow;
     }
   }
 
-  void _persistToDatabase() {
-    final db = ref.read(localDatabaseProvider);
-    final companions = state.map((b) {
-      String bay = 'Bay A';
-      final bedNum = int.tryParse(b.bedNumber.replaceAll(RegExp(r'[^0-9]'), '')) ?? 21;
-      if (bedNum >= 25 && bedNum <= 28) bay = 'Bay B';
-      if (bedNum >= 29) bay = 'Side Rooms';
-
-      return LocalWhiteboardAssignmentsCompanion.insert(
-        bedNumber: b.bedNumber,
-        patientName: '${b.patientInitials} · ${b.admissionNumber}',
-        ageGender: const Value('Pediatric'),
-        diagnosis: Value(b.admittingDoctor),
-        assignedNurse: b.dayShiftNurseId ?? 'Unassigned',
-        bay: bay,
-        shiftDate: DatabaseSeeder.defaultShiftDate,
-        shiftType: DatabaseSeeder.defaultShiftType,
-      );
-    }).toList();
-
-    db.saveWhiteboardAssignments(companions);
+  Future<void> updateRoster(WardSupportRoster roster) async {
+    final current = state.asData?.value ?? const WardBoardData();
+    await _save(current.assignments, roster);
   }
 
-  void updateAssignment(String bedNumber, {String? nurseId, String? doctor, String? status}) {
-    state = state.map((b) {
-      if (b.bedNumber == bedNumber) {
-        return WhiteboardBedAssignment(
-          bedNumber: b.bedNumber,
-          patientInitials: b.patientInitials,
-          admissionNumber: b.admissionNumber,
-          admittingDoctor: doctor ?? b.admittingDoctor,
-          dayShiftNurseId: nurseId ?? b.dayShiftNurseId,
-          nightShiftNurseId: b.nightShiftNurseId,
-          status: status ?? b.status,
-        );
-      }
-      return b;
-    }).toList();
-
-    _persistToDatabase();
-  }
-
-  void batchAssignBeds(List<String> bedNumbers, String nurseId) {
-    state = state.map((b) {
-      if (bedNumbers.contains(b.bedNumber)) {
-        return WhiteboardBedAssignment(
-          bedNumber: b.bedNumber,
-          patientInitials: b.patientInitials,
-          admissionNumber: b.admissionNumber,
-          admittingDoctor: b.admittingDoctor,
-          dayShiftNurseId: nurseId,
-          nightShiftNurseId: b.nightShiftNurseId,
-          status: 'pending',
-        );
-      }
-      return b;
-    }).toList();
-
-    _persistToDatabase();
-  }
-
-  void acceptBeds(List<String> bedNumbers, String nurseId) {
-    state = state.map((b) {
-      if (bedNumbers.contains(b.bedNumber) && b.dayShiftNurseId == nurseId) {
-        return WhiteboardBedAssignment(
-          bedNumber: b.bedNumber,
-          patientInitials: b.patientInitials,
-          admissionNumber: b.admissionNumber,
-          admittingDoctor: b.admittingDoctor,
-          dayShiftNurseId: b.dayShiftNurseId,
-          nightShiftNurseId: b.nightShiftNurseId,
-          status: 'accepted',
-        );
-      }
-      return b;
-    }).toList();
-
-    _persistToDatabase();
+  Future<void> _save(
+    List<WhiteboardBedAssignment> assignments,
+    WardSupportRoster roster,
+  ) async {
+    final ward = ref.read(selectedWardProvider);
+    final staff = ref.read(authenticatedStaffProvider);
+    if (ward.wardId.isEmpty || staff == null) {
+      throw StateError('Select a ward and sign in before publishing changes.');
+    }
+    state = const AsyncLoading();
+    try {
+      await ref
+          .read(wardBoardServiceProvider)
+          .publishBoard(
+            wardId: ward.wardId,
+            date: activeWardShiftDate(),
+            shiftType: _shiftType,
+            staffId: staff.staffId,
+            assignments: assignments,
+            supportRoster: roster.toMap(),
+          );
+      final response = await ref
+          .read(wardBoardServiceProvider)
+          .getBoard(
+            wardId: ward.wardId,
+            date: activeWardShiftDate(),
+            shiftType: _shiftType,
+          );
+      state = AsyncData(WardBoardData.fromMap(response));
+    } catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+      rethrow;
+    }
   }
 }
 
-final whiteboardAssignmentsProvider =
-    NotifierProvider<WhiteboardAssignmentsNotifier, List<WhiteboardBedAssignment>>(
-  WhiteboardAssignmentsNotifier.new,
+final wardBoardProvider =
+    AsyncNotifierProvider<WardBoardNotifier, WardBoardData>(
+      WardBoardNotifier.new,
+    );
+
+final whiteboardAssignmentsProvider = Provider<List<WhiteboardBedAssignment>>(
+  (ref) => ref.watch(wardBoardProvider).asData?.value.assignments ?? const [],
 );
 
-/// Active shift support roster contacts with SQLite persistence
 class WardSupportRosterNotifier extends Notifier<WardSupportRoster> {
   @override
   WardSupportRoster build() {
-    _loadFromDatabase();
-    return SeededGertrudeWhiteboardData.getGertrudeSupportRoster();
+    return ref.watch(
+          wardBoardProvider.select(
+            (board) => board.asData?.value.supportRoster,
+          ),
+        ) ??
+        const WardSupportRoster();
   }
 
-  Future<void> _loadFromDatabase() async {
-    final db = ref.read(localDatabaseProvider);
-    final row = await db.getSupportRoster(
-      DatabaseSeeder.defaultWardId,
-      DatabaseSeeder.defaultShiftDate,
-      DatabaseSeeder.defaultShiftType,
-    );
-    if (row != null) {
-      try {
-        final map = jsonDecode(row.hcasJson) as Map<String, dynamic>;
-        state = WardSupportRoster.fromMap(map);
-      } catch (_) {}
-    }
-  }
-
-  void updateRoster(WardSupportRoster roster) {
-    state = roster;
-    _persistToDatabase(roster);
-  }
-
-  void _persistToDatabase(WardSupportRoster roster) {
-    final db = ref.read(localDatabaseProvider);
-    db.saveSupportRoster(LocalSupportRostersCompanion.insert(
-      wardId: DatabaseSeeder.defaultWardId,
-      shiftDate: DatabaseSeeder.defaultShiftDate,
-      shiftType: DatabaseSeeder.defaultShiftType,
-      inChargeName: roster.inchargeNurseDay,
-      inChargePhone: const Value(''),
-      inChargeRole: const Value('Sister In-Charge'),
-      floatNurseName: roster.pcaDay,
-      floatNursePhone: const Value(''),
-      floatNurseRole: const Value('PCA'),
-      hcasJson: jsonEncode(roster.toMap()),
-      doctorsJson: '{}',
-    ));
-  }
+  Future<void> updateRoster(WardSupportRoster roster) =>
+      ref.read(wardBoardProvider.notifier).updateRoster(roster);
 }
 
-final wardSupportRosterProvider = NotifierProvider<WardSupportRosterNotifier, WardSupportRoster>(
-  WardSupportRosterNotifier.new,
-);
+final wardSupportRosterProvider =
+    NotifierProvider<WardSupportRosterNotifier, WardSupportRoster>(
+      WardSupportRosterNotifier.new,
+    );
+
+final boardStaffListProvider = FutureProvider<List<StaffProfile>>((ref) async {
+  final wardId = ref.watch(selectedWardProvider).wardId;
+  if (wardId.isEmpty) return const [];
+  return ref
+      .read(wardBoardServiceProvider)
+      .getStaffForWard(
+        wardId,
+        date: activeWardShiftDate(),
+        shiftType: ref.watch(selectedShiftTypeProvider),
+      );
+});

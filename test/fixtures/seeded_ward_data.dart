@@ -1,13 +1,13 @@
-import '../../domain/events/domain_events.dart';
-import '../../domain/events/oravi_event.dart';
-import '../../domain/models/loop_enums.dart';
+import 'package:oravi_app/domain/events/domain_events.dart';
+import 'package:oravi_app/domain/events/oravi_event.dart';
+import 'package:oravi_app/domain/models/loop_enums.dart';
 
 /// Seeded realistic clinical dataset representing a Kenyan hospital inpatient ward
 /// (e.g. Ward 4B - Male Medical & Surgical Ward).
 ///
 /// Designed to validate PRD Section 7.1, 7.2, and 7.6 requirements:
 /// - Distinct beds matching ward round order (Bed 1 to Bed 6).
-/// - Two patient identifiers per record: Bed + Admission Number (FR-3).
+/// - Nurse-facing patient identifiers are bed number and initials.
 /// - Routine, Urgent, and STAT/Critical loops.
 /// - Unanswered escalations and recently closed loops.
 class SeededWardData {
@@ -33,11 +33,11 @@ class SeededWardData {
         clientCreatedAt: tMinus4h,
         wardId: wardId,
         bedNumber: 'Bed 1',
-        admissionNumber: 'ADM-2026-8812',
-        nameOrInitials: 'J.K.',
+        patientInitials: 'J.K.',
         age: 58,
         sex: 'M',
-        shortAdmittingNote: 'Severe CAP; bilateral crackles, SpO2 88% on room air on arrival.',
+        shortAdmittingNote:
+            'Severe CAP; bilateral crackles, SpO2 88% on room air on arrival.',
         keyAlerts: ['Penicillin allergy', 'Fall risk'],
       ),
       LoopOpenedEvent(
@@ -48,7 +48,8 @@ class SeededWardData {
         deviceId: testDeviceId,
         clientCreatedAt: tMinus4h,
         title: 'Maintain SpO2 > 92% on nasal cannula',
-        description: 'Currently on 2L/min. If dropping below 90, notify medical officer.',
+        description:
+            'Currently on 2L/min. If dropping below 90, notify medical officer.',
         loopType: LoopType.taskOrPendingResult,
         urgency: LoopUrgency.urgent,
         initialOwnerId: testNurseId,
@@ -62,7 +63,8 @@ class SeededWardData {
         deviceId: testDeviceId,
         clientCreatedAt: tMinus2h,
         messageId: 'MSG-01-01',
-        content: 'SpO2 stable at 94% on 2L nasal prongs. Patient resting comfortably.',
+        content:
+            'SpO2 stable at 94% on 2L nasal prongs. Patient resting comfortably.',
       ),
 
       // Bed 2: Peter O. (Post-op Day 1 Laparotomy, STAT repeat hemoglobin needed)
@@ -74,11 +76,11 @@ class SeededWardData {
         clientCreatedAt: tMinus4h,
         wardId: wardId,
         bedNumber: 'Bed 2',
-        admissionNumber: 'ADM-2026-8834',
-        nameOrInitials: 'P.O.',
+        patientInitials: 'P.O.',
         age: 42,
         sex: 'M',
-        shortAdmittingNote: 'POD 1 exploratory laparotomy for perforated ulcer. Abdominal drain in situ.',
+        shortAdmittingNote:
+            'POD 1 exploratory laparotomy for perforated ulcer. Abdominal drain in situ.',
         keyAlerts: ['NPO', 'Strict fluid balance'],
       ),
       LoopOpenedEvent(
@@ -91,7 +93,8 @@ class SeededWardData {
         title: 'STAT: Draw urgent Hb and cross-match 2 units PRBC',
         description: 'Drain output 250ml serosanguinous in 2 hrs, BP 90/60.',
         loopType: LoopType.escalation,
-        urgency: LoopUrgency.critical, // STAT: Triggers confirmation gate on close
+        urgency:
+            LoopUrgency.critical, // STAT: Triggers confirmation gate on close
         initialOwnerId: testNurseId,
         initialOwnerRole: 'ward_nurse',
       ),
@@ -105,7 +108,8 @@ class SeededWardData {
         escalationId: 'ESC-4B-02-1',
         targetRole: 'doctor_on_call',
         initialTargetUserId: 'DOC-OTIENO',
-        escalationReason: 'Lab called: Hb is 7.1 g/dL. Requesting urgent blood bank release confirmation.',
+        escalationReason:
+            'Lab called: Hb is 7.1 g/dL. Requesting urgent blood bank release confirmation.',
         timeoutMinutes: 15,
       ),
 
@@ -118,11 +122,11 @@ class SeededWardData {
         clientCreatedAt: tMinus4h,
         wardId: wardId,
         bedNumber: 'Bed 3',
-        admissionNumber: 'ADM-2026-8790',
-        nameOrInitials: 'D.M.',
+        patientInitials: 'D.M.',
         age: 29,
         sex: 'M',
-        shortAdmittingNote: 'DKA on resolution. Transitioned to subQ sliding scale insulin.',
+        shortAdmittingNote:
+            'DKA on resolution. Transitioned to subQ sliding scale insulin.',
         keyAlerts: ['Type 1 Diabetes Mellitus'],
       ),
       LoopOpenedEvent(
@@ -133,7 +137,8 @@ class SeededWardData {
         deviceId: testDeviceId,
         clientCreatedAt: tMinus4h,
         title: 'Check 2-hourly blood glucose & record in counter-book',
-        description: 'Notify MO if random blood sugar > 14 mmol/L or < 4 mmol/L.',
+        description:
+            'Notify MO if random blood sugar > 14 mmol/L or < 4 mmol/L.',
         loopType: LoopType.taskOrPendingResult,
         urgency: LoopUrgency.routine,
         initialOwnerId: testNurseId,
@@ -149,11 +154,11 @@ class SeededWardData {
         clientCreatedAt: tMinus4h,
         wardId: wardId,
         bedNumber: 'Bed 4',
-        admissionNumber: 'ADM-2026-8855',
-        nameOrInitials: 'S.W.',
+        patientInitials: 'S.W.',
         age: 63,
         sex: 'M',
-        shortAdmittingNote: 'Right lower limb cellulitis. Day 3 IV Ceftriaxone.',
+        shortAdmittingNote:
+            'Right lower limb cellulitis. Day 3 IV Ceftriaxone.',
         keyAlerts: ['Hypertension'],
       ),
       LoopOpenedEvent(
@@ -178,7 +183,8 @@ class SeededWardData {
         deviceId: testDeviceId,
         clientCreatedAt: tMinus30m,
         reasonCode: ClosureReasonCode.medicationGiven,
-        freeTextNote: '2g Ceftriaxone in 100ml NS infused over 30 mins. Site clean.',
+        freeTextNote:
+            '2g Ceftriaxone in 100ml NS infused over 30 mins. Site clean.',
         resolutionType: ClosureResolutionType.resolved,
       ),
 
@@ -191,11 +197,11 @@ class SeededWardData {
         clientCreatedAt: tMinus4h,
         wardId: wardId,
         bedNumber: 'Bed 5',
-        admissionNumber: 'ADM-2026-8890',
-        nameOrInitials: 'J.K. (Snr)',
+        patientInitials: 'J.K.',
         age: 71,
         sex: 'M',
-        shortAdmittingNote: 'Closed right Colles fracture post-cast application. Limb elevated.',
+        shortAdmittingNote:
+            'Closed right Colles fracture post-cast application. Limb elevated.',
         keyAlerts: ['No known allergies'],
       ),
     ];

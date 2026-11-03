@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:equatable/equatable.dart';
+import '../api_configuration.dart';
 import '../database/database.dart';
 
 enum SyncState { idle, syncing, offline, error }
@@ -57,21 +58,20 @@ class SyncResult {
 /// - Tech Arch Section 10: Multi-Device Synchronization & Idempotency
 class SyncEngine {
   final OraviLocalDatabase _db;
-  static const List<String> defaultCandidateUrls = [
-    'http://127.0.0.1:8000',
-    'http://172.16.20.186:8000',
-    'http://10.0.96.95:8000',
-  ];
+  static List<String> get defaultCandidateUrls =>
+      OraviApiConfiguration.candidateUrls;
 
   final List<String> candidateUrls;
   String _activeBaseUrl;
   String get baseUrl => _activeBaseUrl;
   final String wardId;
   final String deviceId;
+  final String? Function()? getAccessToken;
   final Duration timeout;
 
   // Optional mock handlers for offline unit testing
-  final Future<Map<String, dynamic>> Function(Map<String, dynamic> pushPayload)? mockPushHandler;
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic> pushPayload)?
+  mockPushHandler;
   final Future<Map<String, dynamic>> Function(int sinceSeq)? mockPullHandler;
   final Future<void> Function()? onRemoteEventsReceived;
 
@@ -86,22 +86,35 @@ class SyncEngine {
     this._db, {
     String? baseUrl,
     List<String>? candidateUrls,
-    this.wardId = 'WARD-4B',
-    this.deviceId = 'PHONE-WARD4B-SHARED',
+    this.wardId = '',
+    this.deviceId = '',
+    this.getAccessToken,
     this.timeout = const Duration(seconds: 10),
     this.mockPushHandler,
     this.mockPullHandler,
     this.onRemoteEventsReceived,
-  })  : candidateUrls = candidateUrls ??
-            (baseUrl != null ? [baseUrl, ...defaultCandidateUrls] : defaultCandidateUrls),
-        _activeBaseUrl = baseUrl ?? defaultCandidateUrls.first {
+  }) : candidateUrls =
+           candidateUrls ??
+           (baseUrl != null
+               ? [baseUrl, ...defaultCandidateUrls]
+               : defaultCandidateUrls),
+       _activeBaseUrl =
+           baseUrl ??
+           ((candidateUrls ?? defaultCandidateUrls).isEmpty
+               ? ''
+               : (candidateUrls ?? defaultCandidateUrls).first) {
+    for (final url in this.candidateUrls) {
+      OraviApiConfiguration.validateBaseUrl(url);
+    }
     _statusController.add(_currentStatus);
   }
 
   Stream<SyncStatus> get statusStream => _statusController.stream;
   SyncStatus get currentStatus => _currentStatus;
 
-  Future<T> _executeWithFallback<T>(Future<T> Function(String base) request) async {
+  Future<T> _executeWithFallback<T>(
+    Future<T> Function(String base) request,
+  ) async {
     final ordered = [
       _activeBaseUrl,
       ...candidateUrls.where((u) => u != _activeBaseUrl),
@@ -131,6 +144,9 @@ class SyncEngine {
 
   /// Pushes pending outbox events over HTTP to the ward server (Tech Arch Section 9).
   Future<int> pushOutbox() async {
+    final accessToken = getAccessToken?.call();
+    if (mockPushHandler == null && accessToken == null) return 0;
+    await _db.resetStaleInFlightOutbox();
     final pending = await _db.getPendingOutboxEvents();
     if (pending.isEmpty) return 0;
 
@@ -162,13 +178,20 @@ class SyncEngine {
         data = await mockPushHandler!(payload);
       } else {
         data = await _executeWithFallback((base) async {
-          final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+          final client = HttpClient()
+            ..connectionTimeout = const Duration(seconds: 2);
           try {
-            final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+            final cleanBase = base.endsWith('/')
+                ? base.substring(0, base.length - 1)
+                : base;
             final uri = Uri.parse('$cleanBase/api/v1/sync/push');
 
             final request = await client.postUrl(uri).timeout(timeout);
             request.headers.contentType = ContentType.json;
+            request.headers.set(
+              HttpHeaders.authorizationHeader,
+              'Bearer $accessToken',
+            );
             request.write(jsonEncode(payload));
 
             final response = await request.close().timeout(timeout);
@@ -176,7 +199,9 @@ class SyncEngine {
               final body = await response.transform(utf8.decoder).join();
               return jsonDecode(body) as Map<String, dynamic>;
             } else {
-              throw Exception('Server rejected sync push: HTTP ${response.statusCode}');
+              throw Exception(
+                'Server rejected sync push: HTTP ${response.statusCode}',
+              );
             }
           } finally {
             client.close();
@@ -186,13 +211,30 @@ class SyncEngine {
 
       final acks = (data['acks'] as List<dynamic>?) ?? [];
       final serverSeqMap = <String, int>{};
+      final pendingIds = eventIds.toSet();
       for (final ack in acks) {
         final id = ack['event_id'] as String;
         final seq = ack['server_seq'] as int;
+        if (!pendingIds.contains(id) ||
+            serverSeqMap.containsKey(id) ||
+            seq <= 0) {
+          throw const FormatException(
+            'Sync response contains an invalid acknowledgement.',
+          );
+        }
         serverSeqMap[id] = seq;
       }
 
       await _db.markOutboxAcknowledged(serverSeqMap);
+      final notAcknowledged = eventIds
+          .where((eventId) => !serverSeqMap.containsKey(eventId))
+          .toList();
+      if (notAcknowledged.isNotEmpty) {
+        await _db.markOutboxFailed(
+          notAcknowledged,
+          'Server response omitted acknowledgement; event will be retried.',
+        );
+      }
       return acks.length;
     } catch (e) {
       await _db.markOutboxFailed(eventIds, e.toString());
@@ -202,6 +244,9 @@ class SyncEngine {
 
   /// Pulls new events created by other ward devices since highest serverSeq stored.
   Future<int> pullEvents() async {
+    if (wardId.isEmpty) return 0;
+    final accessToken = getAccessToken?.call();
+    if (mockPullHandler == null && accessToken == null) return 0;
     final sinceSeq = await _db.getHighestServerSeq();
 
     Map<String, dynamic> data;
@@ -210,20 +255,31 @@ class SyncEngine {
       data = await mockPullHandler!(sinceSeq);
     } else {
       data = await _executeWithFallback((base) async {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 2);
         try {
-          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-          final uri = Uri.parse('$cleanBase/api/v1/sync/pull?ward_id=$wardId&since_seq=$sinceSeq&limit=100');
+          final cleanBase = base.endsWith('/')
+              ? base.substring(0, base.length - 1)
+              : base;
+          final uri = Uri.parse(
+            '$cleanBase/api/v1/sync/pull?ward_id=$wardId&since_seq=$sinceSeq&limit=100',
+          );
 
           final request = await client.getUrl(uri).timeout(timeout);
           request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+          request.headers.set(
+            HttpHeaders.authorizationHeader,
+            'Bearer $accessToken',
+          );
 
           final response = await request.close().timeout(timeout);
           if (response.statusCode == 200) {
             final body = await response.transform(utf8.decoder).join();
             return jsonDecode(body) as Map<String, dynamic>;
           } else {
-            throw Exception('Server rejected sync pull: HTTP ${response.statusCode}');
+            throw Exception(
+              'Server rejected sync pull: HTTP ${response.statusCode}',
+            );
           }
         } finally {
           client.close();
@@ -241,20 +297,36 @@ class SyncEngine {
 
   /// Complete bidirectional sync cycle: flushes outbox, then pulls remote events.
   Future<SyncResult> syncAll() async {
-    if (_isSyncing) {
+    if (mockPushHandler == null &&
+        mockPullHandler == null &&
+        getAccessToken?.call() == null) {
+      final pending = await _db.getPendingOutboxEvents();
+      _updateStatus(
+        _currentStatus.copyWith(
+          state: SyncState.offline,
+          pendingCount: pending.length,
+          lastError: 'Sign in to synchronize pending changes.',
+        ),
+      );
       return const SyncResult(
         pushedCount: 0,
         pulledCount: 0,
-        success: true,
+        success: false,
+        error: 'An authenticated session is required to synchronize.',
       );
+    }
+    if (_isSyncing) {
+      return const SyncResult(pushedCount: 0, pulledCount: 0, success: true);
     }
 
     _isSyncing = true;
     final initialPending = await _db.getPendingOutboxEvents();
-    _updateStatus(_currentStatus.copyWith(
-      state: SyncState.syncing,
-      pendingCount: initialPending.length,
-    ));
+    _updateStatus(
+      _currentStatus.copyWith(
+        state: SyncState.syncing,
+        pendingCount: initialPending.length,
+      ),
+    );
 
     int pushed = 0;
     int pulled = 0;
@@ -267,12 +339,14 @@ class SyncEngine {
       }
 
       final remainingPending = await _db.getPendingOutboxEvents();
-      _updateStatus(_currentStatus.copyWith(
-        state: SyncState.idle,
-        pendingCount: remainingPending.length,
-        lastSyncedAt: DateTime.now(),
-        lastError: null,
-      ));
+      _updateStatus(
+        _currentStatus.copyWith(
+          state: SyncState.idle,
+          pendingCount: remainingPending.length,
+          lastSyncedAt: DateTime.now(),
+          lastError: null,
+        ),
+      );
 
       return SyncResult(
         pushedCount: pushed,
@@ -281,15 +355,18 @@ class SyncEngine {
       );
     } catch (e) {
       final remainingPending = await _db.getPendingOutboxEvents();
-      final isOffline = e.toString().contains('SocketException') ||
+      final isOffline =
+          e.toString().contains('SocketException') ||
           e.toString().contains('TimeoutException') ||
           e.toString().contains('Failed host lookup');
 
-      _updateStatus(_currentStatus.copyWith(
-        state: isOffline ? SyncState.offline : SyncState.error,
-        pendingCount: remainingPending.length,
-        lastError: e.toString(),
-      ));
+      _updateStatus(
+        _currentStatus.copyWith(
+          state: isOffline ? SyncState.offline : SyncState.error,
+          pendingCount: remainingPending.length,
+          lastError: e.toString(),
+        ),
+      );
 
       return SyncResult(
         pushedCount: pushed,

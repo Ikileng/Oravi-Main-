@@ -4,23 +4,26 @@ import 'package:oravi_app/domain/models/whiteboard_models.dart';
 
 void main() {
   group('M8: Digital Whiteboard & Hospital Ward Domain Models', () {
-    test('HospitalWard catalog initializes with canonical Gertrude wards', () {
-      expect(kDefaultHospitalWards.length, greaterThanOrEqualTo(4));
-      
-      final jacaranda = kDefaultHospitalWards.firstWhere((w) => w.wardId == 'ward-jacaranda');
-      expect(jacaranda.name, contains('Jacaranda'));
-      expect(jacaranda.department, 'Pediatrics');
-      expect(jacaranda.bedNumbers, contains('25'));
-      expect(jacaranda.bedNumbers, contains('29'));
-      expect(jacaranda.bedNumbers, contains('30'));
+    test('HospitalWard serializes explicit configured ward metadata', () {
+      const ward = HospitalWard(
+        wardId: 'WARD-TEST',
+        name: 'Test Ward',
+        bedCount: 2,
+        bedNumbers: ['1', '2'],
+        department: 'Testing',
+        description: '',
+      );
+      final restored = HospitalWard.fromMap(ward.toMap());
+      expect(restored.wardId, 'WARD-TEST');
+      expect(restored.bedNumbers, ['1', '2']);
     });
 
-    test('WhiteboardBedAssignment serialization round-trip', () {
+    test('WhiteboardBedAssignment serializes only workflow identifiers', () {
       const assignment = WhiteboardBedAssignment(
         bedNumber: '25',
+        patientId: 'PATIENT-TEST',
         patientInitials: 'J.M.H.',
-        admissionNumber: 'ADM-2026-9901',
-        admittingDoctor: 'DR. MBIATA',
+        admittingDoctor: 'DOC-TEST',
         dayShiftNurseId: 'NUR-403',
         status: 'pending',
       );
@@ -29,25 +32,28 @@ void main() {
       final reconstructed = WhiteboardBedAssignment.fromMap(map);
 
       expect(reconstructed.bedNumber, '25');
+      expect(reconstructed.patientId, 'PATIENT-TEST');
       expect(reconstructed.patientInitials, 'J.M.H.');
-      expect(reconstructed.admittingDoctor, 'DR. MBIATA');
+      expect(map.containsKey('admission_number'), isFalse);
+      expect(reconstructed.admittingDoctor, 'DOC-TEST');
       expect(reconstructed.dayShiftNurseId, 'NUR-403');
       expect(reconstructed.status, 'pending');
     });
 
-    test('WardSupportRoster captures exact Gertrude contacts sidebar', () {
-      const roster = WardSupportRoster();
-      expect(roster.wardManager, 'CAPRICE A');
-      expect(roster.pcaDay, 'FAITH / MAUREEN');
-      expect(roster.pcaNight, 'RITAH');
-      expect(roster.housekeeperDay, 'MATILDA');
-      expect(roster.cateringDayPhone, '0721299472');
-      expect(roster.fireMarshall, 'MWATAKU');
+    test('WardSupportRoster defaults empty and round-trips board assignments', () {
+      const empty = WardSupportRoster();
+      expect(empty.wardManager, isEmpty);
+      expect(empty.pcaDay, isEmpty);
+
+      const roster = WardSupportRoster(
+        wardManager: 'NURSE-TEST',
+        pcaDay: 'PCA-TEST',
+      );
 
       final map = roster.toMap();
       final reconstructed = WardSupportRoster.fromMap(map);
-      expect(reconstructed.wardManager, 'CAPRICE A');
-      expect(reconstructed.housekeeperDay, 'MATILDA');
+      expect(reconstructed.wardManager, 'NURSE-TEST');
+      expect(reconstructed.pcaDay, 'PCA-TEST');
     });
   });
 }

@@ -1197,7 +1197,7 @@ class $LocalStaffTable extends LocalStaff
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: false,
-    defaultValue: const Constant('WARD-4B'),
+    defaultValue: const Constant(''),
   );
   static const VerificationMeta _pinMeta = const VerificationMeta('pin');
   @override

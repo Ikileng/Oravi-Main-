@@ -1,7 +1,7 @@
 class WhiteboardBedAssignment {
   final String bedNumber;
+  final String? patientId;
   final String patientInitials;
-  final String admissionNumber;
   final String admittingDoctor;
   final String? dayShiftNurseId;
   final String? nightShiftNurseId;
@@ -9,8 +9,8 @@ class WhiteboardBedAssignment {
 
   const WhiteboardBedAssignment({
     required this.bedNumber,
+    this.patientId,
     required this.patientInitials,
-    required this.admissionNumber,
     required this.admittingDoctor,
     this.dayShiftNurseId,
     this.nightShiftNurseId,
@@ -19,8 +19,9 @@ class WhiteboardBedAssignment {
 
   WhiteboardBedAssignment copyWith({
     String? bedNumber,
+    String? patientId,
+    bool clearPatientId = false,
     String? patientInitials,
-    String? admissionNumber,
     String? admittingDoctor,
     String? dayShiftNurseId,
     String? nightShiftNurseId,
@@ -28,8 +29,8 @@ class WhiteboardBedAssignment {
   }) {
     return WhiteboardBedAssignment(
       bedNumber: bedNumber ?? this.bedNumber,
+      patientId: clearPatientId ? null : patientId ?? this.patientId,
       patientInitials: patientInitials ?? this.patientInitials,
-      admissionNumber: admissionNumber ?? this.admissionNumber,
       admittingDoctor: admittingDoctor ?? this.admittingDoctor,
       dayShiftNurseId: dayShiftNurseId ?? this.dayShiftNurseId,
       nightShiftNurseId: nightShiftNurseId ?? this.nightShiftNurseId,
@@ -38,20 +39,20 @@ class WhiteboardBedAssignment {
   }
 
   Map<String, dynamic> toMap() => {
-        'bed_number': bedNumber,
-        'patient_initials': patientInitials,
-        'admission_number': admissionNumber,
-        'admitting_doctor': admittingDoctor,
-        'day_shift_nurse_id': dayShiftNurseId,
-        'night_shift_nurse_id': nightShiftNurseId,
-        'status': status,
-      };
+    'bed_number': bedNumber,
+    'patient_id': patientId,
+    'patient_initials': patientInitials,
+    'admitting_doctor': admittingDoctor,
+    'day_shift_nurse_id': dayShiftNurseId,
+    'night_shift_nurse_id': nightShiftNurseId,
+    'status': status,
+  };
 
   factory WhiteboardBedAssignment.fromMap(Map<String, dynamic> map) {
     return WhiteboardBedAssignment(
       bedNumber: map['bed_number'] as String,
+      patientId: map['patient_id'] as String?,
       patientInitials: map['patient_initials'] as String? ?? '',
-      admissionNumber: map['admission_number'] as String? ?? '',
       admittingDoctor: map['admitting_doctor'] as String? ?? '',
       dayShiftNurseId: map['day_shift_nurse_id'] as String?,
       nightShiftNurseId: map['night_shift_nurse_id'] as String?,
@@ -77,20 +78,20 @@ class WardSupportRoster {
   final String fireMarshall;
 
   const WardSupportRoster({
-    this.wardManager = 'CAPRICE A',
+    this.wardManager = '',
     this.teamLeader = '',
     this.dutyLeader = '',
     this.dischargeNurse = '',
     this.shiftLeader = '',
-    this.inchargeNurseDay = 'SISTER ACHIENG',
+    this.inchargeNurseDay = '',
     this.inchargeNurseNight = '',
-    this.pcaDay = 'FAITH / MAUREEN',
-    this.pcaNight = 'RITAH',
-    this.housekeeperDay = 'MATILDA',
-    this.housekeeperNight = '072411528',
-    this.cateringDayPhone = '0721299472',
-    this.cateringNightPhone = '0792777972',
-    this.fireMarshall = 'MWATAKU',
+    this.pcaDay = '',
+    this.pcaNight = '',
+    this.housekeeperDay = '',
+    this.housekeeperNight = '',
+    this.cateringDayPhone = '',
+    this.cateringNightPhone = '',
+    this.fireMarshall = '',
   });
 
   WardSupportRoster copyWith({
@@ -128,21 +129,21 @@ class WardSupportRoster {
   }
 
   Map<String, dynamic> toMap() => {
-        'ward_manager': wardManager,
-        'team_leader': teamLeader,
-        'duty_leader': dutyLeader,
-        'discharge_nurse': dischargeNurse,
-        'shift_leader': shiftLeader,
-        'incharge_nurse_day': inchargeNurseDay,
-        'incharge_nurse_night': inchargeNurseNight,
-        'pca_day': pcaDay,
-        'pca_night': pcaNight,
-        'housekeeper_day': housekeeperDay,
-        'housekeeper_night': housekeeperNight,
-        'catering_day_phone': cateringDayPhone,
-        'catering_night_phone': cateringNightPhone,
-        'fire_marshall': fireMarshall,
-      };
+    'ward_manager': wardManager,
+    'team_leader': teamLeader,
+    'duty_leader': dutyLeader,
+    'discharge_nurse': dischargeNurse,
+    'shift_leader': shiftLeader,
+    'incharge_nurse_day': inchargeNurseDay,
+    'incharge_nurse_night': inchargeNurseNight,
+    'pca_day': pcaDay,
+    'pca_night': pcaNight,
+    'housekeeper_day': housekeeperDay,
+    'housekeeper_night': housekeeperNight,
+    'catering_day_phone': cateringDayPhone,
+    'catering_night_phone': cateringNightPhone,
+    'fire_marshall': fireMarshall,
+  };
 
   factory WardSupportRoster.fromMap(Map<String, dynamic> map) {
     return WardSupportRoster(

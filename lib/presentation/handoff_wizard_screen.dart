@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/mock/seeded_ward_data.dart';
 import '../domain/models/loop_enums.dart';
+import '../domain/models/staff_profile.dart';
 import '../domain/projections/projections.dart';
 import 'handover_print_sheet_screen.dart';
+import 'providers/auth_providers.dart';
 import 'providers/ward_providers.dart';
+import 'providers/whiteboard_providers.dart';
+import 'providers/ward_context_providers.dart';
 import 'theme/clinical_theme.dart';
 
 /// Shift Handoff Wizard strictly implementing PRD Section 7.3:
@@ -17,7 +20,8 @@ class HandoffWizardScreen extends ConsumerStatefulWidget {
   const HandoffWizardScreen({super.key});
 
   @override
-  ConsumerState<HandoffWizardScreen> createState() => _HandoffWizardScreenState();
+  ConsumerState<HandoffWizardScreen> createState() =>
+      _HandoffWizardScreenState();
 }
 
 class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
@@ -25,31 +29,105 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   int _currentStep = 0;
   int _currentBedIndex = 0;
 
-  String _outgoingNurse = 'Nurse Mwangi, RN';
-  String _incomingNurse = 'Nurse Achieng, RN';
+  String _outgoingNurse = '';
+  String _incomingNurse = '';
+  String? _incomingAcceptanceToken;
 
   // Per-bed review state during stepper
   final Set<String> _selectedLoopIds = {};
   final Set<String> _acknowledgedCriticalLoopIds = {};
 
-  final List<String> _availableNurses = [
-    'Nurse Mwangi, RN',
-    'Nurse Achieng, RN',
-    'Nurse Wanjiku, KRCHN',
-    'Nurse Otieno, BSN',
-    'Sister Mary, In-Charge',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _outgoingNurse = ref.read(authenticatedStaffProvider)?.staffId ?? '';
+  }
 
-  void _onStartHandoff() {
-    ref.read(wardControllerProvider.notifier).startHandoffSession(
-          outgoingNurseId: _outgoingNurse,
-          incomingNurseId: _incomingNurse,
+  Future<void> _onStartHandoff() async {
+    final pin = await _requestIncomingPin();
+    if (pin == null) return;
+    final result = await ref
+        .read(staffAuthServiceProvider)
+        .verifyPin(_incomingNurse, pin);
+    final incomingToken = result.token;
+    if (!result.success ||
+        result.staff?.staffId != _incomingNurse ||
+        result.staff?.isWardNurse != true ||
+        incomingToken == null ||
+        incomingToken.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.error ?? 'Incoming nurse verification failed.',
+            ),
+          ),
         );
+      }
+      return;
+    }
+    _incomingAcceptanceToken = incomingToken;
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .startHandoffSession(
+            outgoingNurseId: _outgoingNurse,
+            incomingNurseId: _incomingNurse,
+          );
+    } catch (error) {
+      _showHandoffError('Could not save the handoff: $error');
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _currentStep = 1;
       _currentBedIndex = 0;
       _resetBedSelection();
     });
+  }
+
+  Future<String?> _requestIncomingPin() async {
+    var enteredPin = '';
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Incoming nurse verification'),
+        content: TextField(
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 8,
+          onChanged: (value) => enteredPin = value,
+          decoration: const InputDecoration(
+            labelText: 'Enter the incoming nurse PIN',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final pin = enteredPin.trim();
+              if (pin.length >= 4 &&
+                  pin.length <= 8 &&
+                  int.tryParse(pin) != null) {
+                Navigator.of(dialogContext).pop(pin);
+              }
+            },
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHandoffError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _resetBedSelection() {
@@ -61,6 +139,14 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   Widget build(BuildContext context) {
     final patients = ref.watch(wardPatientsProvider);
     final session = ref.watch(activeHandoffSessionProvider);
+    final ward = ref.watch(selectedWardProvider);
+    final boardState = ref.watch(wardBoardProvider);
+    final currentStaff = ref.watch(authenticatedStaffProvider);
+    final nurses =
+        (ref.watch(boardStaffListProvider).asData?.value ??
+                const <StaffProfile>[])
+            .where((staff) => staff.isWardNurse || staff.isChargeNurse)
+            .toList();
 
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
@@ -70,24 +156,62 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
           children: [
             const Text('SHIFT HANDOFF SESSION'),
             Text(
-              '${SeededWardData.wardName} • PRD FR-11 to FR-17',
-              style: const TextStyle(fontSize: 11, color: ClinicalTheme.routineTeal, fontWeight: FontWeight.normal),
+              '${ward.name} • PRD FR-11 to FR-17',
+              style: const TextStyle(
+                fontSize: 11,
+                color: ClinicalTheme.routineTeal,
+                fontWeight: FontWeight.normal,
+              ),
             ),
           ],
         ),
       ),
-      body: _buildCurrentStep(patients, session),
+      body: ward.wardId.isEmpty
+          ? _handoffMessage('No ward is assigned for this shift.')
+          : ref.watch(wardContextNeedsConfirmationProvider)
+          ? _handoffMessage('Confirm your ward before starting handoff.')
+          : boardState.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : boardState.hasError
+          ? _handoffMessage(
+              'The ward board could not be loaded: ${boardState.error}',
+            )
+          : patients.isEmpty
+          ? _handoffMessage(
+              'There are no patients assigned to hand over for this shift.',
+            )
+          : _buildCurrentStep(patients, session, nurses, currentStaff),
     );
   }
 
-  Widget _buildCurrentStep(List<PatientStateProjection> patients, HandoffSessionProjection? session) {
+  Widget _handoffMessage(String message) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: ClinicalTheme.textSecondary),
+      ),
+    ),
+  );
+
+  Widget _buildCurrentStep(
+    List<PatientStateProjection> patients,
+    HandoffSessionProjection? session,
+    List<StaffProfile> nurses,
+    StaffProfile? currentStaff,
+  ) {
     if (_currentStep == 0) {
-      return _buildPairingView();
+      return _buildPairingView(nurses, currentStaff);
     } else if (_currentStep == 1) {
       if (patients.isEmpty || _currentBedIndex >= patients.length) {
         return _buildSummaryLockView(session);
       }
-      return _buildBedWalkthrough(patients[_currentBedIndex], patients.length, session);
+      return _buildBedWalkthrough(
+        patients[_currentBedIndex],
+        patients.length,
+        session,
+      );
     } else {
       return _buildSummaryLockView(session);
     }
@@ -96,7 +220,17 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   // ==========================================
   // Step 1: Nurse Pairing View (FR-11)
   // ==========================================
-  Widget _buildPairingView() {
+  Widget _buildPairingView(
+    List<StaffProfile> nurses,
+    StaffProfile? currentStaff,
+  ) {
+    final availableIncoming = nurses
+        .where((staff) => staff.staffId != currentStaff?.staffId)
+        .toList();
+    final incomingValue =
+        availableIncoming.any((staff) => staff.staffId == _incomingNurse)
+        ? _incomingNurse
+        : null;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -111,7 +245,11 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.swap_horiz, color: ClinicalTheme.nurseBlue, size: 32),
+                const Icon(
+                  Icons.swap_horiz,
+                  color: ClinicalTheme.nurseBlue,
+                  size: 32,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -119,12 +257,19 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                     children: const [
                       Text(
                         'Shift Handover Protocol',
-                        style: TextStyle(color: ClinicalTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
+                        style: TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
                       ),
                       SizedBox(height: 4),
                       Text(
                         'Pairs outgoing and incoming nurses to walk the board bed by bed. No patient is left unconfirmed.',
-                        style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12),
+                        style: TextStyle(
+                          color: ClinicalTheme.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -133,47 +278,73 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text('OUTGOING NURSE (Handing Over)',
-              style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            initialValue: _outgoingNurse,
-            dropdownColor: ClinicalTheme.surface,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: ClinicalTheme.surface,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          const Text(
+            'OUTGOING NURSE (Handing Over)',
+            style: TextStyle(
+              color: ClinicalTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
             ),
-            items: _availableNurses
-                .map((n) => DropdownMenuItem(
-                      value: n,
-                      child: Text(n, style: const TextStyle(color: ClinicalTheme.nurseBlue, fontWeight: FontWeight.w600)),
-                    ))
-                .toList(),
-            onChanged: (val) {
-              if (val != null) setState(() => _outgoingNurse = val);
-            },
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: ClinicalTheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: ClinicalTheme.border),
+            ),
+            child: Text(
+              currentStaff == null
+                  ? 'Sign in as the outgoing nurse.'
+                  : '${currentStaff.name} · ${currentStaff.staffId}',
+              style: const TextStyle(
+                color: ClinicalTheme.nurseBlue,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           const SizedBox(height: 20),
-          const Text('INCOMING NURSE (Taking Over)',
-              style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+          const Text(
+            'INCOMING NURSE (Taking Over)',
+            style: TextStyle(
+              color: ClinicalTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            initialValue: _incomingNurse,
+            initialValue: incomingValue,
             dropdownColor: ClinicalTheme.surface,
             decoration: InputDecoration(
               filled: true,
               fillColor: ClinicalTheme.surface,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            items: _availableNurses
-                .map((n) => DropdownMenuItem(
-                      value: n,
-                      child: Text(n, style: const TextStyle(color: ClinicalTheme.doctorPink, fontWeight: FontWeight.w600)),
-                    ))
+            hint: const Text(
+              'Select the incoming nurse',
+              style: TextStyle(color: ClinicalTheme.textSecondary),
+            ),
+            items: availableIncoming
+                .map(
+                  (staff) => DropdownMenuItem(
+                    value: staff.staffId,
+                    child: Text(
+                      '${staff.name} · ${staff.staffId}',
+                      style: const TextStyle(
+                        color: ClinicalTheme.doctorPink,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                )
                 .toList(),
-            onChanged: (val) {
-              if (val != null) setState(() => _incomingNurse = val);
+            onChanged: (value) {
+              if (value != null) setState(() => _incomingNurse = value);
             },
           ),
           const Spacer(),
@@ -184,11 +355,19 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
               style: FilledButton.styleFrom(
                 backgroundColor: ClinicalTheme.nurseBlue,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               icon: const Icon(Icons.arrow_forward),
-              label: const Text('Begin Bed-by-Bed Walkthrough', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              onPressed: _onStartHandoff,
+              label: const Text(
+                'Begin Bed-by-Bed Walkthrough',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              onPressed:
+                  incomingValue == null || currentStaff?.isWardNurse != true
+                  ? null
+                  : _onStartHandoff,
             ),
           ),
         ],
@@ -206,13 +385,23 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   ) {
     final loops = ref.watch(patientLoopsProvider(patient.patientId));
     final openLoops = loops.where((l) => l.isOpen).toList();
-    final criticalLoops = openLoops.where((l) => l.urgency == LoopUrgency.critical).toList();
-    final routineLoops = openLoops.where((l) => l.urgency != LoopUrgency.critical).toList();
+    final criticalLoops = openLoops
+        .where((l) => l.urgency == LoopUrgency.critical)
+        .toList();
+    final routineLoops = openLoops
+        .where((l) => l.urgency != LoopUrgency.critical)
+        .toList();
 
-    final sbar = SbarSummary.fromPatientAndLoops(patient: patient, loops: loops);
+    final sbar = SbarSummary.fromPatientAndLoops(
+      patient: patient,
+      loops: loops,
+    );
 
-    final allCriticalAcknowledged = criticalLoops.isEmpty ||
-        criticalLoops.every((l) => _acknowledgedCriticalLoopIds.contains(l.loopId));
+    final allCriticalAcknowledged =
+        criticalLoops.isEmpty ||
+        criticalLoops.every(
+          (l) => _acknowledgedCriticalLoopIds.contains(l.loopId),
+        );
 
     return Column(
       children: [
@@ -227,11 +416,18 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                 children: [
                   Text(
                     'Bed ${_currentBedIndex + 1} of $totalBeds: ${patient.bedNumber}',
-                    style: const TextStyle(color: ClinicalTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
+                    style: const TextStyle(
+                      color: ClinicalTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
                   ),
                   Text(
                     '${((_currentBedIndex + 1) / totalBeds * 100).toInt()}% Complete',
-                    style: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                    style: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -261,10 +457,15 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                 child: Row(
                   children: [
                     CircleAvatar(
-                      backgroundColor: ClinicalTheme.nurseBlue.withValues(alpha: 0.15),
+                      backgroundColor: ClinicalTheme.nurseBlue.withValues(
+                        alpha: 0.15,
+                      ),
                       child: Text(
                         patient.bedNumber,
-                        style: const TextStyle(color: ClinicalTheme.nurseBlue, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          color: ClinicalTheme.nurseBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -273,12 +474,12 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${patient.nameOrInitials} (${patient.age}y ${patient.sex})',
-                            style: const TextStyle(color: ClinicalTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
-                          ),
-                          Text(
-                            'Admission: ${patient.admissionNumber}',
-                            style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12),
+                            '${patient.patientInitials} (${patient.age}y ${patient.sex})',
+                            style: const TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
                           ),
                         ],
                       ),
@@ -301,11 +502,20 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.assignment_outlined, size: 16, color: ClinicalTheme.routineTeal),
+                        Icon(
+                          Icons.assignment_outlined,
+                          size: 16,
+                          color: ClinicalTheme.routineTeal,
+                        ),
                         SizedBox(width: 6),
                         Text(
                           'SBAR SUMMARY (Compiled without AI)',
-                          style: TextStyle(color: ClinicalTheme.routineTeal, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                          style: TextStyle(
+                            color: ClinicalTheme.routineTeal,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                       ],
                     ),
@@ -328,16 +538,27 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                 children: [
                   Text(
                     'ACTIVE MEDICAL ISSUES (${openLoops.length})',
-                    style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: ClinicalTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   if (routineLoops.isNotEmpty)
                     TextButton.icon(
-                      style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
                       icon: const Icon(Icons.select_all, size: 16),
-                      label: const Text('Bulk Accept Routine', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Bulk Accept Routine',
+                        style: TextStyle(fontSize: 12),
+                      ),
                       onPressed: () {
                         setState(() {
-                          _selectedLoopIds.addAll(routineLoops.map((l) => l.loopId));
+                          _selectedLoopIds.addAll(
+                            routineLoops.map((l) => l.loopId),
+                          );
                         });
                       },
                     ),
@@ -355,11 +576,17 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.check_circle, color: ClinicalTheme.successGreen),
+                      Icon(
+                        Icons.check_circle,
+                        color: ClinicalTheme.successGreen,
+                      ),
                       SizedBox(width: 10),
                       Text(
                         'ALL CLEAR: No open items pending on this bed.',
-                        style: TextStyle(color: ClinicalTheme.successGreen, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          color: ClinicalTheme.successGreen,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -367,14 +594,18 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
               else ...[
                 // Critical Loops: Individual Mandatory Acceptance (FR-12)
                 ...criticalLoops.map((loop) {
-                  final isAcked = _acknowledgedCriticalLoopIds.contains(loop.loopId);
+                  final isAcked = _acknowledgedCriticalLoopIds.contains(
+                    loop.loopId,
+                  );
                   return Card(
                     color: ClinicalTheme.surface,
                     margin: const EdgeInsets.only(bottom: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(
-                        color: isAcked ? ClinicalTheme.successGreen : ClinicalTheme.criticalRed,
+                        color: isAcked
+                            ? ClinicalTheme.successGreen
+                            : ClinicalTheme.criticalRed,
                         width: 1.5,
                       ),
                     ),
@@ -386,28 +617,49 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: ClinicalTheme.criticalRed.withValues(alpha: 0.15),
+                                  color: ClinicalTheme.criticalRed.withValues(
+                                    alpha: 0.15,
+                                  ),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: const Text(
                                   'CRITICAL / STAT',
-                                  style: TextStyle(color: ClinicalTheme.criticalRed, fontSize: 10, fontWeight: FontWeight.bold),
+                                  style: TextStyle(
+                                    color: ClinicalTheme.criticalRed,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   loop.title,
-                                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                    color: ClinicalTheme.textPrimary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 6),
-                          Text(loop.description, style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12)),
-                          const Divider(height: 16, color: ClinicalTheme.border),
+                          Text(
+                            loop.description,
+                            style: const TextStyle(
+                              color: ClinicalTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Divider(
+                            height: 16,
+                            color: ClinicalTheme.border,
+                          ),
                           CheckboxListTile(
                             contentPadding: EdgeInsets.zero,
                             dense: true,
@@ -415,7 +667,11 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                             activeColor: ClinicalTheme.successGreen,
                             title: const Text(
                               'I have verbally discussed this STAT item and accept individual ownership (FR-12)',
-                              style: TextStyle(color: ClinicalTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: ClinicalTheme.textPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             onChanged: (val) {
                               setState(() {
@@ -423,7 +679,9 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                                   _acknowledgedCriticalLoopIds.add(loop.loopId);
                                   _selectedLoopIds.add(loop.loopId);
                                 } else {
-                                  _acknowledgedCriticalLoopIds.remove(loop.loopId);
+                                  _acknowledgedCriticalLoopIds.remove(
+                                    loop.loopId,
+                                  );
                                   _selectedLoopIds.remove(loop.loopId);
                                 }
                               });
@@ -443,7 +701,11 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                     margin: const EdgeInsets.only(bottom: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(color: isSelected ? ClinicalTheme.nurseBlue : ClinicalTheme.border),
+                      side: BorderSide(
+                        color: isSelected
+                            ? ClinicalTheme.nurseBlue
+                            : ClinicalTheme.border,
+                      ),
                     ),
                     child: CheckboxListTile(
                       dense: true,
@@ -451,9 +713,19 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                       activeColor: ClinicalTheme.nurseBlue,
                       title: Text(
                         '[${loop.urgency.name.toUpperCase()}] ${loop.title}',
-                        style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      subtitle: Text(loop.description, style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 11)),
+                      subtitle: Text(
+                        loop.description,
+                        style: const TextStyle(
+                          color: ClinicalTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
                       onChanged: (val) {
                         setState(() {
                           if (val == true) {
@@ -486,18 +758,27 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                     style: FilledButton.styleFrom(
                       backgroundColor: ClinicalTheme.successGreen,
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     icon: const Icon(Icons.check_circle_outline),
-                    label: Text('Confirm: Nothing Pending (${patient.bedNumber})',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () => _confirmBed(patient, session, nothingPending: true),
+                    label: Text(
+                      'Confirm: Nothing Pending (${patient.bedNumber})',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () =>
+                        _confirmBed(patient, session, nothingPending: true),
                   )
                 : FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: allCriticalAcknowledged ? ClinicalTheme.urgentAmber : Colors.grey[700],
+                      backgroundColor: allCriticalAcknowledged
+                          ? ClinicalTheme.urgentAmber
+                          : Colors.grey[700],
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     icon: const Icon(Icons.arrow_forward),
                     label: Text(
@@ -507,7 +788,11 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     onPressed: allCriticalAcknowledged
-                        ? () => _confirmBed(patient, session, nothingPending: false)
+                        ? () => _confirmBed(
+                            patient,
+                            session,
+                            nothingPending: false,
+                          )
                         : null,
                   ),
           ),
@@ -516,17 +801,43 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
     );
   }
 
-  void _confirmBed(PatientStateProjection patient, HandoffSessionProjection? session, {required bool nothingPending}) {
+  Future<void> _confirmBed(
+    PatientStateProjection patient,
+    HandoffSessionProjection? session, {
+    required bool nothingPending,
+  }) async {
     final sessionId = session?.handoffSessionId ?? 'HANDOFF-ACTIVE';
+    final incomingToken = _incomingAcceptanceToken;
+    if (incomingToken == null) {
+      _showHandoffError('Verify the incoming nurse before accepting beds.');
+      return;
+    }
 
-    ref.read(wardControllerProvider.notifier).acceptBedInHandoff(
-          handoffSessionId: sessionId,
-          bedNumber: patient.bedNumber,
-          patientId: patient.patientId,
-          incomingNurseId: _incomingNurse,
-          nothingPendingConfirmed: nothingPending,
-          transferredLoopIds: nothingPending ? const [] : _selectedLoopIds.toList(),
-        );
+    try {
+      await ref
+          .read(wardBoardProvider.notifier)
+          .acceptHandoffBeds(
+            bedNumbers: [patient.bedNumber],
+            outgoingStaffId: _outgoingNurse,
+            incomingAccessToken: incomingToken,
+          );
+      await ref
+          .read(wardControllerProvider.notifier)
+          .acceptBedInHandoff(
+            handoffSessionId: sessionId,
+            bedNumber: patient.bedNumber,
+            patientId: patient.patientId,
+            incomingNurseId: _incomingNurse,
+            nothingPendingConfirmed: nothingPending,
+            transferredLoopIds: nothingPending
+                ? const []
+                : _selectedLoopIds.toList(),
+          );
+    } catch (error) {
+      _showHandoffError('Could not save this bed handoff: $error');
+      return;
+    }
+    if (!mounted) return;
 
     final patients = ref.read(wardPatientsProvider);
     if (_currentBedIndex + 1 < patients.length) {
@@ -547,10 +858,23 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
       children: [
         SizedBox(
           width: 120,
-          child: Text(label, style: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold)),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: ClinicalTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         Expanded(
-          child: Text(value, style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 11.5)),
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: ClinicalTheme.textPrimary,
+              fontSize: 11.5,
+            ),
+          ),
         ),
       ],
     );
@@ -576,24 +900,39 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             decoration: BoxDecoration(
               color: ClinicalTheme.surface,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: isLocked ? ClinicalTheme.successGreen : ClinicalTheme.border),
+              border: Border.all(
+                color: isLocked
+                    ? ClinicalTheme.successGreen
+                    : ClinicalTheme.border,
+              ),
             ),
             child: Column(
               children: [
                 Icon(
                   isLocked ? Icons.lock : Icons.task_alt,
-                  color: isLocked ? ClinicalTheme.successGreen : ClinicalTheme.nurseBlue,
+                  color: isLocked
+                      ? ClinicalTheme.successGreen
+                      : ClinicalTheme.nurseBlue,
                   size: 44,
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  isLocked ? 'Handoff Locked & Finalized' : 'Handoff Walkthrough Complete',
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                  isLocked
+                      ? 'Handoff Locked & Finalized'
+                      : 'Handoff Walkthrough Complete',
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   '${session?.outgoingNurseId ?? _outgoingNurse} ➔ ${session?.incomingNurseId ?? _incomingNurse}',
-                  style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 13),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
@@ -613,10 +952,22 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   ),
                   child: Column(
                     children: [
-                      Text('$totalBeds / ${patients.length}',
-                          style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
+                      Text(
+                        '$totalBeds / ${patients.length}',
+                        style: const TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      const Text('Beds Reviewed', style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11)),
+                      const Text(
+                        'Beds Reviewed',
+                        style: TextStyle(
+                          color: ClinicalTheme.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -632,10 +983,22 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   ),
                   child: Column(
                     children: [
-                      Text('$totalTransferred',
-                          style: const TextStyle(color: ClinicalTheme.urgentAmber, fontSize: 20, fontWeight: FontWeight.bold)),
+                      Text(
+                        '$totalTransferred',
+                        style: const TextStyle(
+                          color: ClinicalTheme.urgentAmber,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      const Text('Medical Issues Transferred', style: TextStyle(color: ClinicalTheme.textMuted, fontSize: 11)),
+                      const Text(
+                        'Medical Issues Transferred',
+                        style: TextStyle(
+                          color: ClinicalTheme.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -674,15 +1037,26 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: ClinicalTheme.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              icon: const Icon(Icons.print_outlined, color: ClinicalTheme.textPrimary),
-              label: const Text('View 1-Page Handover Sheet (FR-15)', style: TextStyle(color: ClinicalTheme.textPrimary)),
+              icon: const Icon(
+                Icons.print_outlined,
+                color: ClinicalTheme.textPrimary,
+              ),
+              label: const Text(
+                'View 1-Page Handover Sheet (FR-15)',
+                style: TextStyle(color: ClinicalTheme.textPrimary),
+              ),
               onPressed: session == null
                   ? null
                   : () {
                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => HandoverPrintSheetScreen(session: session)),
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              HandoverPrintSheetScreen(session: session),
+                        ),
                       );
                     },
             ),
@@ -695,27 +1069,48 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             height: 50,
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: isLocked ? ClinicalTheme.border : ClinicalTheme.successGreen,
+                backgroundColor: isLocked
+                    ? ClinicalTheme.border
+                    : ClinicalTheme.successGreen,
                 foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               icon: Icon(isLocked ? Icons.check : Icons.lock_outline),
               label: Text(
-                isLocked ? 'Handoff Locked & Completed' : 'Sign & Lock Shift Handover',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                isLocked
+                    ? 'Handoff Locked & Completed'
+                    : 'Sign & Lock Shift Handover',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
               ),
               onPressed: isLocked || session == null
                   ? null
-                  : () {
-                      ref.read(wardControllerProvider.notifier).completeHandoffSession(
-                            handoffSessionId: session.handoffSessionId,
-                            authorId: _incomingNurse,
-                            totalBedsHandedOver: totalBeds,
-                            totalLoopsTransferred: totalTransferred,
-                          );
+                  : () async {
+                      try {
+                        await ref
+                            .read(wardControllerProvider.notifier)
+                            .completeHandoffSession(
+                              handoffSessionId: session.handoffSessionId,
+                              authorId: _incomingNurse,
+                              totalBedsHandedOver: totalBeds,
+                              totalLoopsTransferred: totalTransferred,
+                            );
+                      } catch (error) {
+                        _showHandoffError(
+                          'Could not save the completed handoff: $error',
+                        );
+                        return;
+                      }
+                      if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: const Text('Shift handoff locked and signed. Record is immutable.'),
+                          content: const Text(
+                            'Shift handoff locked and signed. Record is immutable.',
+                          ),
                           backgroundColor: ClinicalTheme.successGreen,
                         ),
                       );

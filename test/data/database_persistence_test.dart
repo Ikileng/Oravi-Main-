@@ -1,10 +1,11 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:oravi_app/data/database/database.dart';
-import 'package:oravi_app/data/database/database_provider.dart';
 
 void main() {
   late OraviLocalDatabase db;
+  const testDate = '2026-03-19';
 
   setUp(() async {
     db = OraviLocalDatabase(NativeDatabase.memory());
@@ -14,81 +15,58 @@ void main() {
     await db.close();
   });
 
-  test('DatabaseSeeder seeds default staff and whiteboard when empty', () async {
-    await DatabaseSeeder.seedIfEmpty(db);
+  test(
+    'a new local database contains no demo staff or board allocations',
+    () async {
+      expect(await db.getAllStaff(), isEmpty);
+      expect(await db.getWhiteboardAssignments(testDate, 'day'), isEmpty);
+      expect(await db.getSupportRoster('WARD-TEST', testDate, 'day'), isNull);
+    },
+  );
 
-    final staff = await db.getAllStaff();
-    expect(staff.length, greaterThanOrEqualTo(8));
-    expect(staff.any((s) => s.staffId == 'NUR-403'), isTrue);
-
-    final beds = await db.getWhiteboardAssignments(
-      DatabaseSeeder.defaultShiftDate,
-      DatabaseSeeder.defaultShiftType,
+  test('explicit test staff CRUD persists in SQLite', () async {
+    await db.upsertStaff(
+      LocalStaffCompanion.insert(
+        staffId: 'DEV-TEST',
+        name: 'Test Nurse',
+        role: 'ward_nurse',
+        wardId: const Value('WARD-TEST'),
+        pin: '9999',
+        initials: 'TN',
+      ),
     );
-    expect(beds.length, equals(10));
-    expect(beds.first.bedNumber, equals('1'));
-
-    final roster = await db.getSupportRoster(
-      DatabaseSeeder.defaultWardId,
-      DatabaseSeeder.defaultShiftDate,
-      DatabaseSeeder.defaultShiftType,
-    );
-    expect(roster, isNotNull);
-    expect(roster!.inChargeName, equals('Nurse E'));
-  });
-
-  test('Staff CRUD, PIN update and active toggle persists in SQLite', () async {
-    await DatabaseSeeder.seedIfEmpty(db);
-
-    // 1. Insert new staff
-    await db.upsertStaff(LocalStaffCompanion.insert(
-      staffId: 'DEV-TEST',
-      name: 'Nurse Test, RN',
-      role: 'ward_nurse',
-      pin: '9999',
-      initials: 'NT',
-    ));
 
     var staff = await db.getAllStaff();
-    expect(staff.any((s) => s.staffId == 'DEV-TEST' && s.pin == '9999'), isTrue);
+    expect(staff.single.staffId, 'DEV-TEST');
+    expect(staff.single.pin, '9999');
 
-    // 2. Update PIN
     await db.updateStaffPin('DEV-TEST', '5555');
     staff = await db.getAllStaff();
-    expect(staff.firstWhere((s) => s.staffId == 'DEV-TEST').pin, equals('5555'));
+    expect(staff.single.pin, '5555');
 
-    // 3. Toggle active
     await db.toggleStaffActive('DEV-TEST');
     staff = await db.getAllStaff();
-    expect(staff.firstWhere((s) => s.staffId == 'DEV-TEST').isActive, isFalse);
+    expect(staff.single.isActive, isFalse);
 
-    // 4. Delete staff
     await db.deleteStaff('DEV-TEST');
-    staff = await db.getAllStaff();
-    expect(staff.any((s) => s.staffId == 'DEV-TEST'), isFalse);
+    expect(await db.getAllStaff(), isEmpty);
   });
 
-  test('Whiteboard bed allocation update persists in SQLite', () async {
-    await DatabaseSeeder.seedIfEmpty(db);
-
-    // Reallocate Bed 21 to Nurse X
-    final updated = [
+  test('explicit test board allocation persists in SQLite', () async {
+    final allocation = [
       LocalWhiteboardAssignmentsCompanion.insert(
-        bedNumber: 'Bed 21',
-        patientName: 'K.M. · ADM-4089',
-        assignedNurse: 'Nurse X (Faith Njeri)',
+        bedNumber: '1',
+        patientName: 'Patient Test',
+        assignedNurse: 'NUR-TEST',
         bay: 'Bay A',
-        shiftDate: DatabaseSeeder.defaultShiftDate,
-        shiftType: DatabaseSeeder.defaultShiftType,
+        shiftDate: testDate,
+        shiftType: 'day',
       ),
     ];
-    await db.saveWhiteboardAssignments(updated);
+    await db.saveWhiteboardAssignments(allocation);
 
-    final beds = await db.getWhiteboardAssignments(
-      DatabaseSeeder.defaultShiftDate,
-      DatabaseSeeder.defaultShiftType,
-    );
-    final bed21 = beds.firstWhere((b) => b.bedNumber == 'Bed 21');
-    expect(bed21.assignedNurse, equals('Nurse X (Faith Njeri)'));
+    final beds = await db.getWhiteboardAssignments(testDate, 'day');
+    expect(beds.single.bedNumber, '1');
+    expect(beds.single.assignedNurse, 'NUR-TEST');
   });
 }

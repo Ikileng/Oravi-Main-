@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'api_configuration.dart';
 
 /// Response payload from the Oravi backend model-assisted endpoint (PRD Section 8A & Tech Arch Section 11).
 class ModelAskResponse {
@@ -45,7 +46,8 @@ class ModelAskResponse {
       verificationPassed: json['verification_passed'] as bool? ?? true,
       modelProvider: json['model_provider'] as String? ?? 'ollama',
       modelName: json['model_name'] as String? ?? 'qwen2.5:7b',
-      verbatimQuotes: (json['verbatim_quotes'] as List<dynamic>?)
+      verbatimQuotes:
+          (json['verbatim_quotes'] as List<dynamic>?)
               ?.map((e) => Map<String, dynamic>.from(e as Map))
               .toList() ??
           const [],
@@ -60,28 +62,45 @@ class ModelAskResponse {
 /// 2. Zero-failure guarantee: silently falls back if backend is offline or times out (>4s).
 /// 3. Injectable HTTP client for fast, deterministic unit testing.
 class AskOraviModelService {
-  static const List<String> defaultCandidateUrls = [
-    'http://127.0.0.1:8000',
-    'http://172.16.20.186:8000',
-    'http://10.0.96.95:8000',
-  ];
+  static List<String> get defaultCandidateUrls =>
+      OraviApiConfiguration.candidateUrls;
 
   final List<String> candidateUrls;
   String _activeBaseUrl;
   String get baseUrl => _activeBaseUrl;
   final Duration timeout;
-  final Future<ModelAskResponse?> Function(String patientId, String query, int? timeWindowHours)? mockHandler;
+  final String? Function()? getAccessToken;
+  final Future<ModelAskResponse?> Function(
+    String patientId,
+    String query,
+    int? timeWindowHours,
+  )?
+  mockHandler;
 
   AskOraviModelService({
     String? baseUrl,
     List<String>? candidateUrls,
     this.timeout = const Duration(seconds: 30),
+    this.getAccessToken,
     this.mockHandler,
-  })  : candidateUrls = candidateUrls ??
-            (baseUrl != null ? [baseUrl, ...defaultCandidateUrls] : defaultCandidateUrls),
-        _activeBaseUrl = baseUrl ?? defaultCandidateUrls.first;
+  }) : candidateUrls =
+           candidateUrls ??
+           (baseUrl != null
+               ? [baseUrl, ...defaultCandidateUrls]
+               : defaultCandidateUrls),
+       _activeBaseUrl =
+           baseUrl ??
+           ((candidateUrls ?? defaultCandidateUrls).isEmpty
+               ? ''
+               : (candidateUrls ?? defaultCandidateUrls).first) {
+    for (final url in this.candidateUrls) {
+      OraviApiConfiguration.validateBaseUrl(url);
+    }
+  }
 
-  Future<T> _executeWithFallback<T>(Future<T> Function(String base) request) async {
+  Future<T> _executeWithFallback<T>(
+    Future<T> Function(String base) request,
+  ) async {
     final ordered = [
       _activeBaseUrl,
       ...candidateUrls.where((u) => u != _activeBaseUrl),
@@ -111,20 +130,27 @@ class AskOraviModelService {
     if (mockHandler != null) {
       return mockHandler!(patientId, query, timeWindowHours);
     }
+    final accessToken = getAccessToken?.call();
+    if (accessToken == null) return null;
 
     try {
       return await _executeWithFallback((base) async {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 2);
         try {
-          final cleanBase = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+          final cleanBase = base.endsWith('/')
+              ? base.substring(0, base.length - 1)
+              : base;
           final uri = Uri.parse('$cleanBase/api/v1/patients/$patientId/ask');
 
           final request = await client.postUrl(uri).timeout(timeout);
           request.headers.contentType = ContentType.json;
+          request.headers.set(
+            HttpHeaders.authorizationHeader,
+            'Bearer $accessToken',
+          );
 
-          final bodyMap = <String, dynamic>{
-            'query': query,
-          };
+          final bodyMap = <String, dynamic>{'query': query};
           if (timeWindowHours != null) {
             bodyMap['time_window_hours'] = timeWindowHours;
           }

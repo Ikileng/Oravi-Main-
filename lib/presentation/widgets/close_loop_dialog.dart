@@ -22,6 +22,7 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
   ClosureReasonCode _selectedReason = ClosureReasonCode.resultReceived;
   final TextEditingController _noteController = TextEditingController();
   String? _validationError;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -29,22 +30,42 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
     super.dispose();
   }
 
-  void _submitClosure(WidgetRef ref) {
-    if (_selectedReason.requiresFreeTextNote && _noteController.text.trim().isEmpty) {
+  Future<void> _submitClosure(WidgetRef ref) async {
+    if (_isSaving) return;
+    if (_selectedReason.requiresFreeTextNote &&
+        _noteController.text.trim().isEmpty) {
       setState(() {
-        _validationError = 'A clinical note is mandatory when selecting "${_selectedReason.wireName}".';
+        _validationError =
+            'A clinical note is mandatory when selecting "${_selectedReason.wireName}".';
       });
       return;
     }
 
-    ref.read(wardControllerProvider.notifier).closeLoop(
-          patientId: widget.loop.patientId,
-          loopId: widget.loop.loopId,
-          reasonCode: _selectedReason,
-          freeTextNote: _noteController.text.trim().isNotEmpty ? _noteController.text.trim() : null,
+    setState(() => _isSaving = true);
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .closeLoop(
+            patientId: widget.loop.patientId,
+            loopId: widget.loop.loopId,
+            reasonCode: _selectedReason,
+            freeTextNote: _noteController.text.trim().isNotEmpty
+                ? _noteController.text.trim()
+                : null,
+          );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _validationError =
+              'Could not save the closure. Please try again.',
         );
-
-    Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -55,12 +76,18 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
           backgroundColor: ClinicalTheme.surface,
           title: Row(
             children: [
-              const Icon(Icons.check_circle_outline, color: ClinicalTheme.successGreen),
+              const Icon(
+                Icons.check_circle_outline,
+                color: ClinicalTheme.successGreen,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Close Loop: ${widget.loop.title}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -83,12 +110,19 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.shield_outlined, color: ClinicalTheme.criticalRed, size: 20),
+                        Icon(
+                          Icons.shield_outlined,
+                          color: ClinicalTheme.criticalRed,
+                          size: 20,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'STAT Critical Loop: Will require confirmation by the opener or senior in charge (PRD FR-51).',
-                            style: TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12),
+                            style: TextStyle(
+                              color: ClinicalTheme.criticalRed,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ],
@@ -96,7 +130,11 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                   ),
                 const Text(
                   'Select Closure Reason (FR-46):',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -109,8 +147,12 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                         _reasonLabel(reason),
                         style: TextStyle(
                           fontSize: 12,
-                          color: isSelected ? Colors.white : ClinicalTheme.textSecondary,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected
+                              ? Colors.white
+                              : ClinicalTheme.textSecondary,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                         ),
                       ),
                       selected: isSelected,
@@ -133,7 +175,9 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                       ? 'Clinical Action Note (Mandatory):'
                       : 'Clinical Action Note (Optional):',
                   style: TextStyle(
-                    color: _selectedReason.requiresFreeTextNote ? ClinicalTheme.urgentAmber : ClinicalTheme.textSecondary,
+                    color: _selectedReason.requiresFreeTextNote
+                        ? ClinicalTheme.urgentAmber
+                        : ClinicalTheme.textSecondary,
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
@@ -142,10 +186,16 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                 TextField(
                   controller: _noteController,
                   maxLines: 2,
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'e.g., 2g IV Ceftriaxone given, site clean...',
-                    hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                    hintStyle: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
                     filled: true,
                     fillColor: ClinicalTheme.surfaceElevated,
                     border: OutlineInputBorder(
@@ -163,7 +213,10 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                   const SizedBox(height: 8),
                   Text(
                     _validationError!,
-                    style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12),
+                    style: const TextStyle(
+                      color: ClinicalTheme.criticalRed,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ],
@@ -172,15 +225,18 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel', style: TextStyle(color: ClinicalTheme.textMuted)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: ClinicalTheme.textMuted),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: ClinicalTheme.routineTeal,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => _submitClosure(ref),
-              child: const Text('Confirm Closure'),
+              onPressed: _isSaving ? null : () => _submitClosure(ref),
+              child: Text(_isSaving ? 'Saving…' : 'Confirm Closure'),
             ),
           ],
         );
@@ -220,6 +276,7 @@ class ReopenLoopDialog extends StatefulWidget {
 class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
   final TextEditingController _reasonController = TextEditingController();
   String? _error;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -227,20 +284,39 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
     super.dispose();
   }
 
-  void _submitReopen(WidgetRef ref) {
+  Future<void> _submitReopen(WidgetRef ref) async {
+    if (_isSaving) return;
     final text = _reasonController.text.trim();
     if (text.isEmpty) {
-      setState(() => _error = 'A clinical reason is strictly required to reopen a closed loop.');
+      setState(
+        () => _error =
+            'A clinical reason is strictly required to reopen a closed loop.',
+      );
       return;
     }
 
-    ref.read(wardControllerProvider.notifier).reopenLoop(
-          patientId: widget.loop.patientId,
-          loopId: widget.loop.loopId,
-          reopenReason: text,
+    setState(() => _isSaving = true);
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .reopenLoop(
+            patientId: widget.loop.patientId,
+            loopId: widget.loop.loopId,
+            reopenReason: text,
+          );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = 'Could not reopen the medical issue. Please try again.',
         );
-
-    Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -253,7 +329,10 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
             children: [
               Icon(Icons.replay, color: ClinicalTheme.urgentAmber),
               SizedBox(width: 8),
-              Text('Reopen Closed Loop', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                'Reopen Closed Loop',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           content: Column(
@@ -262,26 +341,42 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
             children: [
               Text(
                 'Previous closure: ${widget.loop.closureReason?.wireName ?? "closed"}',
-                style: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                style: const TextStyle(
+                  color: ClinicalTheme.textMuted,
+                  fontSize: 12,
+                ),
               ),
               if (widget.loop.closureNote != null)
                 Text(
                   'Note: "${widget.loop.closureNote}"',
-                  style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
               const SizedBox(height: 12),
               const Text(
                 'Why is this loop being reopened? (Mandatory)',
-                style: TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: ClinicalTheme.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 6),
               TextField(
                 controller: _reasonController,
                 maxLines: 2,
-                style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                style: const TextStyle(
+                  color: ClinicalTheme.textPrimary,
+                  fontSize: 13,
+                ),
                 decoration: InputDecoration(
                   hintText: 'e.g., Symptoms recurred after 2 hours...',
-                  hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                  hintStyle: const TextStyle(
+                    color: ClinicalTheme.textMuted,
+                    fontSize: 12,
+                  ),
                   filled: true,
                   fillColor: ClinicalTheme.surfaceElevated,
                   border: OutlineInputBorder(
@@ -295,22 +390,31 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12)),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: ClinicalTheme.criticalRed,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel', style: TextStyle(color: ClinicalTheme.textMuted)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: ClinicalTheme.textMuted),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: ClinicalTheme.urgentAmber,
                 foregroundColor: Colors.black,
               ),
-              onPressed: () => _submitReopen(ref),
-              child: const Text('Reopen Loop'),
+              onPressed: _isSaving ? null : () => _submitReopen(ref),
+              child: Text(_isSaving ? 'Saving…' : 'Reopen Loop'),
             ),
           ],
         );

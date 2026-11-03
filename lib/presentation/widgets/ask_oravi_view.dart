@@ -116,7 +116,8 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       OraviChatMessage(
         id: 'welcome',
         sender: ChatSender.oravi,
-        text: 'Hello Nurse! I am Oravi, your offline clinical assistant for Bed ${widget.patient.bedNumber} (${widget.patient.nameOrInitials}). How may I help you with this patient?',
+        text:
+            'Hello Nurse! I am Oravi, your offline clinical assistant for Bed ${widget.patient.bedNumber} (${widget.patient.patientInitials}). How may I help you with this patient?',
         timestamp: DateTime.now(),
       ),
     );
@@ -144,8 +145,18 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   bool _isGreeting(String query) {
     final lower = query.trim().toLowerCase();
     const greetings = [
-      'hello', 'hi', 'hey', 'jambo', 'habari', 'habari yako',
-      'good morning', 'good afternoon', 'good evening', 'how are you', 'sasa', 'mambo'
+      'hello',
+      'hi',
+      'hey',
+      'jambo',
+      'habari',
+      'habari yako',
+      'good morning',
+      'good afternoon',
+      'good evening',
+      'how are you',
+      'sasa',
+      'mambo',
     ];
     return greetings.contains(lower);
   }
@@ -153,31 +164,31 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   bool _isActiveMedicalIssuesQuery(String query) {
     final lower = query.trim().toLowerCase();
     return lower.contains('active medical issue') ||
-           lower.contains('medical issue') ||
-           lower.contains('active issue') ||
-           lower.contains('open loop') ||
-           lower.contains('open issue') ||
-           lower.contains('pending issue') ||
-           lower.contains('what issues') ||
-           lower.contains('what loops') ||
-           lower == 'loops' ||
-           lower == 'issues';
+        lower.contains('medical issue') ||
+        lower.contains('active issue') ||
+        lower.contains('open loop') ||
+        lower.contains('open issue') ||
+        lower.contains('pending issue') ||
+        lower.contains('what issues') ||
+        lower.contains('what loops') ||
+        lower == 'loops' ||
+        lower == 'issues';
   }
 
   bool _isBriefingQuery(String query) {
     final lower = query.trim().toLowerCase();
     return lower.contains('what do i need to know') ||
-           lower.contains('what should i know') ||
-           lower.contains('tell me what i need to know') ||
-           lower.contains('tell me what i need to knkw') ||
-           lower.contains('know nothing') ||
-           lower.contains('brief me') ||
-           lower.contains('catch me up') ||
-           lower.contains('overview') ||
-           lower.contains('summary') ||
-           lower.contains('who is this patient') ||
-           lower.contains('tell me about this patient') ||
-           lower.contains('what happened');
+        lower.contains('what should i know') ||
+        lower.contains('tell me what i need to know') ||
+        lower.contains('tell me what i need to knkw') ||
+        lower.contains('know nothing') ||
+        lower.contains('brief me') ||
+        lower.contains('catch me up') ||
+        lower.contains('overview') ||
+        lower.contains('summary') ||
+        lower.contains('who is this patient') ||
+        lower.contains('tell me about this patient') ||
+        lower.contains('what happened');
   }
 
   void _sendMessage(String query) {
@@ -204,7 +215,8 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       final oraviGreeting = OraviChatMessage(
         id: 'oravi-${DateTime.now().millisecondsSinceEpoch}',
         sender: ChatSender.oravi,
-        text: 'Hey, how may I help you with Bed ${widget.patient.bedNumber} (${widget.patient.nameOrInitials}) today?',
+        text:
+            'Hey, how may I help you with Bed ${widget.patient.bedNumber} (${widget.patient.patientInitials}) today?',
         timestamp: DateTime.now(),
       );
       setState(() {
@@ -225,9 +237,9 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
         sender: ChatSender.oravi,
         text: openLoops.isNotEmpty
             ? (openLoops.length == 1
-                ? 'There is 1 active medical issue currently open for ${widget.patient.nameOrInitials}:'
-                : 'There are ${openLoops.length} active medical issues currently open for ${widget.patient.nameOrInitials}:')
-            : 'ALL CLEAR — There are currently no active medical issues or open loops for ${widget.patient.nameOrInitials}.',
+                  ? 'There is 1 active medical issue currently open for ${widget.patient.patientInitials}:'
+                  : 'There are ${openLoops.length} active medical issues currently open for ${widget.patient.patientInitials}:')
+            : 'ALL CLEAR — There are currently no active medical issues or open loops for ${widget.patient.patientInitials}.',
         timestamp: DateTime.now(),
         activeMedicalIssues: openLoops,
         isAllClear: openLoops.isEmpty,
@@ -258,45 +270,49 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
 
       // Query offline model service in background
       final modelService = ref.read(askOraviModelServiceProvider);
-      modelService.askPatient(
-        patientId: widget.patient.patientId,
-        query: clean,
-      ).then((resp) {
-        if (!mounted) return;
-        final synthesis = resp?.observationNote ??
-            'Here is the clinical overview for ${widget.patient.nameOrInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}';
+      modelService
+          .askPatient(patientId: widget.patient.patientId, query: clean)
+          .then((resp) {
+            if (!mounted) return;
+            final synthesis =
+                resp?.observationNote ??
+                'Here is the clinical overview for ${widget.patient.patientInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}';
 
-        setState(() {
-          final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-          if (idx != -1) {
-            _messages[idx] = _messages[idx].copyWith(
-              text: synthesis,
-              isLoading: false,
-              isModelAssisted: resp != null && resp.observationNote != null,
-              modelName: resp?.modelName,
-              modelProvider: resp?.modelProvider,
-              activeMedicalIssues: openLoops.isNotEmpty ? openLoops : null,
-              isAllClear: openLoops.isEmpty,
-            );
-          }
-        });
-        _scrollToBottom();
-      }).catchError((_) {
-        if (mounted) {
-          setState(() {
-            final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-            if (idx != -1) {
-              _messages[idx] = _messages[idx].copyWith(
-                text: 'Here is the clinical overview for ${widget.patient.nameOrInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}',
-                isLoading: false,
-                activeMedicalIssues: openLoops.isNotEmpty ? openLoops : null,
-                isAllClear: openLoops.isEmpty,
-              );
+            setState(() {
+              final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
+              if (idx != -1) {
+                _messages[idx] = _messages[idx].copyWith(
+                  text: synthesis,
+                  isLoading: false,
+                  isModelAssisted: resp != null && resp.observationNote != null,
+                  modelName: resp?.modelName,
+                  modelProvider: resp?.modelProvider,
+                  activeMedicalIssues: openLoops.isNotEmpty ? openLoops : null,
+                  isAllClear: openLoops.isEmpty,
+                );
+              }
+            });
+            _scrollToBottom();
+          })
+          .catchError((_) {
+            if (mounted) {
+              setState(() {
+                final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
+                if (idx != -1) {
+                  _messages[idx] = _messages[idx].copyWith(
+                    text:
+                        'Here is the clinical overview for ${widget.patient.patientInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}',
+                    isLoading: false,
+                    activeMedicalIssues: openLoops.isNotEmpty
+                        ? openLoops
+                        : null,
+                    isAllClear: openLoops.isEmpty,
+                  );
+                }
+              });
+              _scrollToBottom();
             }
           });
-          _scrollToBottom();
-        }
-      });
       return;
     }
 
@@ -323,54 +339,62 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
     _scrollToBottom();
 
     final modelService = ref.read(askOraviModelServiceProvider);
-    modelService.askPatient(
-      patientId: widget.patient.patientId,
-      query: clean,
-    ).then((resp) {
-      if (!mounted) return;
-      setState(() {
-        final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-        if (idx != -1) {
-          final displayText = (resp != null && resp.observationNote != null && resp.verificationPassed)
-              ? resp.observationNote!
-              : (localResult.verbatimQuotes.isNotEmpty
-                  ? 'Here is what the record says about "$clean" for ${widget.patient.nameOrInitials}:'
-                  : (localResult.absenceMessage ?? 'No record in Oravi mentions this topic.'));
+    modelService
+        .askPatient(patientId: widget.patient.patientId, query: clean)
+        .then((resp) {
+          if (!mounted) return;
+          setState(() {
+            final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
+            if (idx != -1) {
+              final displayText =
+                  (resp != null &&
+                      resp.observationNote != null &&
+                      resp.verificationPassed)
+                  ? resp.observationNote!
+                  : (localResult.verbatimQuotes.isNotEmpty
+                        ? 'Here is what the record says about "$clean" for ${widget.patient.patientInitials}:'
+                        : (localResult.absenceMessage ??
+                              'No record in Oravi mentions this topic.'));
 
-          _messages[idx] = _messages[idx].copyWith(
-            text: displayText,
-            isModelAssisted: resp != null && resp.observationNote != null && resp.verificationPassed,
-            modelName: resp?.modelName,
-            modelProvider: resp?.modelProvider,
-            isLoading: false,
-            result: _messages[idx].result?.copyWith(
-              observationNote: resp?.observationNote,
-              isModelAssisted: resp != null,
-              modelName: resp?.modelName,
-              modelProvider: resp?.modelProvider,
-              verificationPassed: resp?.verificationPassed,
-            ),
-          );
-        }
-      });
-      _scrollToBottom();
-    }).catchError((_) {
-      if (mounted) {
-        setState(() {
-          final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-          if (idx != -1) {
-            final displayText = localResult.verbatimQuotes.isNotEmpty
-                ? 'Here is what the record says about "$clean" for ${widget.patient.nameOrInitials}:'
-                : (localResult.absenceMessage ?? 'No record in Oravi mentions this topic.');
-            _messages[idx] = _messages[idx].copyWith(
-              text: displayText,
-              isLoading: false,
-            );
+              _messages[idx] = _messages[idx].copyWith(
+                text: displayText,
+                isModelAssisted:
+                    resp != null &&
+                    resp.observationNote != null &&
+                    resp.verificationPassed,
+                modelName: resp?.modelName,
+                modelProvider: resp?.modelProvider,
+                isLoading: false,
+                result: _messages[idx].result?.copyWith(
+                  observationNote: resp?.observationNote,
+                  isModelAssisted: resp != null,
+                  modelName: resp?.modelName,
+                  modelProvider: resp?.modelProvider,
+                  verificationPassed: resp?.verificationPassed,
+                ),
+              );
+            }
+          });
+          _scrollToBottom();
+        })
+        .catchError((_) {
+          if (mounted) {
+            setState(() {
+              final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
+              if (idx != -1) {
+                final displayText = localResult.verbatimQuotes.isNotEmpty
+                    ? 'Here is what the record says about "$clean" for ${widget.patient.patientInitials}:'
+                    : (localResult.absenceMessage ??
+                          'No record in Oravi mentions this topic.');
+                _messages[idx] = _messages[idx].copyWith(
+                  text: displayText,
+                  isLoading: false,
+                );
+              }
+            });
+            _scrollToBottom();
           }
         });
-        _scrollToBottom();
-      }
-    });
   }
 
   void _showVoiceFeedback() {
@@ -407,20 +431,31 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
           children: [
             Text(
               'Query: "$query"',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ClinicalTheme.textPrimary),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: ClinicalTheme.textPrimary,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
               'Help us improve the local ward lexicon. What did you expect to see that was not returned?',
-              style: TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary),
+              style: TextStyle(
+                fontSize: 12,
+                color: ClinicalTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: noteController,
               maxLines: 3,
-              style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+              style: const TextStyle(
+                color: ClinicalTheme.textPrimary,
+                fontSize: 13,
+              ),
               decoration: const InputDecoration(
-                hintText: 'e.g. "Catheter output was mentioned in yesterday\'s handoff"',
+                hintText:
+                    'e.g. "Catheter output was mentioned in yesterday\'s handoff"',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -432,12 +467,16 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: ClinicalTheme.routineTeal),
+            style: FilledButton.styleFrom(
+              backgroundColor: ClinicalTheme.routineTeal,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Feedback logged. Thank you for improving Oravi.'),
+                  content: Text(
+                    'Feedback logged. Thank you for improving Oravi.',
+                  ),
                   duration: Duration(seconds: 2),
                 ),
               );
@@ -474,6 +513,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       context: context,
       builder: (ctx) => LogCallOutcomeDialog(
         loop: loop,
+        recipientId: entry.authorId,
         recipientName: ClinicalTheme.formatAuthorDisplayName(entry.authorId),
         recipientRole: entry.authorRole,
       ),
@@ -523,7 +563,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 child: ActionChip(
                   label: Text(chipText, style: const TextStyle(fontSize: 11)),
                   backgroundColor: ClinicalTheme.surfaceElevated,
-                  side: const BorderSide(color: ClinicalTheme.border, width: 0.8),
+                  side: const BorderSide(
+                    color: ClinicalTheme.border,
+                    width: 0.8,
+                  ),
                   onPressed: () => _sendMessage(chipText),
                 ),
               );
@@ -536,7 +579,9 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: const BoxDecoration(
             color: ClinicalTheme.surface,
-            border: Border(top: BorderSide(color: ClinicalTheme.border, width: 0.8)),
+            border: Border(
+              top: BorderSide(color: ClinicalTheme.border, width: 0.8),
+            ),
           ),
           child: SafeArea(
             top: false,
@@ -556,24 +601,39 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     controller: _queryController,
                     textInputAction: TextInputAction.send,
                     onSubmitted: _sendMessage,
-                    style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+                    style: const TextStyle(
+                      color: ClinicalTheme.textPrimary,
+                      fontSize: 13,
+                    ),
                     decoration: InputDecoration(
                       hintText: 'Message Oravi about this patient...',
-                      hintStyle: const TextStyle(color: ClinicalTheme.textMuted, fontSize: 12),
+                      hintStyle: const TextStyle(
+                        color: ClinicalTheme.textMuted,
+                        fontSize: 12,
+                      ),
                       filled: true,
                       fillColor: ClinicalTheme.background,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(20),
-                        borderSide: const BorderSide(color: ClinicalTheme.border),
+                        borderSide: const BorderSide(
+                          color: ClinicalTheme.border,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(20),
-                        borderSide: const BorderSide(color: ClinicalTheme.border),
+                        borderSide: const BorderSide(
+                          color: ClinicalTheme.border,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(20),
-                        borderSide: const BorderSide(color: ClinicalTheme.routineTeal),
+                        borderSide: const BorderSide(
+                          color: ClinicalTheme.routineTeal,
+                        ),
                       ),
                     ),
                   ),
@@ -583,7 +643,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 // Send Button
                 IconButton(
                   tooltip: 'Send Query',
-                  icon: const Icon(Icons.send_rounded, color: ClinicalTheme.routineTeal),
+                  icon: const Icon(
+                    Icons.send_rounded,
+                    color: ClinicalTheme.routineTeal,
+                  ),
                   onPressed: () => _sendMessage(_queryController.text),
                 ),
               ],
@@ -608,19 +671,28 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             bottomLeft: Radius.circular(12),
             bottomRight: Radius.circular(12),
           ),
-          border: Border.all(color: ClinicalTheme.routineTeal.withValues(alpha: 0.5), width: 0.8),
+          border: Border.all(
+            color: ClinicalTheme.routineTeal.withValues(alpha: 0.5),
+            width: 0.8,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
               msg.text,
-              style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13),
+              style: const TextStyle(
+                color: ClinicalTheme.textPrimary,
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               _formatTimestamp(msg.timestamp),
-              style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted),
+              style: const TextStyle(
+                fontSize: 10,
+                color: ClinicalTheme.textMuted,
+              ),
             ),
           ],
         ),
@@ -641,16 +713,27 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             // Header: Oravi Bot Tag
             Row(
               children: [
-                const Icon(Icons.smart_toy_outlined, size: 15, color: ClinicalTheme.routineTeal),
+                const Icon(
+                  Icons.smart_toy_outlined,
+                  size: 15,
+                  color: ClinicalTheme.routineTeal,
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   'Oravi Assistant',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClinicalTheme.routineTeal),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: ClinicalTheme.routineTeal,
+                  ),
                 ),
                 const Spacer(),
                 Text(
                   _formatTimestamp(msg.timestamp),
-                  style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: ClinicalTheme.textMuted,
+                  ),
                 ),
               ],
             ),
@@ -664,7 +747,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF2C223A),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF8B5CF6), width: 1.2),
+                  border: Border.all(
+                    color: const Color(0xFF8B5CF6),
+                    width: 1.2,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -672,7 +758,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFF8B5CF6),
                             borderRadius: BorderRadius.circular(4),
@@ -690,7 +779,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                         if (msg.modelName != null || result?.modelName != null)
                           Text(
                             '${msg.modelName ?? result?.modelName} (${msg.modelProvider ?? result?.modelProvider ?? "local"})',
-                            style: const TextStyle(fontSize: 10, color: Color(0xFFC4B5FD)),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFFC4B5FD),
+                            ),
                           ),
                       ],
                     ),
@@ -706,21 +798,32 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     const SizedBox(height: 6),
                     const Row(
                       children: [
-                        Icon(Icons.verified, size: 12, color: Color(0xFF10B981)),
+                        Icon(
+                          Icons.verified,
+                          size: 12,
+                          color: Color(0xFF10B981),
+                        ),
                         SizedBox(width: 4),
                         Text(
                           'All numbers verified against patient event log quotes below',
-                          style: TextStyle(fontSize: 10, color: Color(0xFF10B981)),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF10B981),
+                          ),
                         ),
                       ],
                     ),
                   ],
                 ),
               )
-            else if (!msg.isLoading && !(result != null && result.isAbsence && !result.isRefusal))
+            else if (!msg.isLoading &&
+                !(result != null && result.isAbsence && !result.isRefusal))
               // Standard message text bubble (only shown if not loading and not an absence card)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: ClinicalTheme.surface,
                   borderRadius: const BorderRadius.only(
@@ -733,7 +836,11 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 child: Text(
                   msg.text,
-                  style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 13, height: 1.35),
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
                 ),
               ),
 
@@ -741,7 +848,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             if (msg.isLoading) ...[
               const SizedBox(height: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: ClinicalTheme.surfaceElevated,
                   borderRadius: BorderRadius.circular(6),
@@ -752,17 +862,27 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     const SizedBox(
                       width: 12,
                       height: 12,
-                      child: CircularProgressIndicator(strokeWidth: 1.5, color: ClinicalTheme.routineTeal),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: ClinicalTheme.routineTeal,
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    Text(msg.text, style: const TextStyle(fontSize: 11, color: ClinicalTheme.textMuted)),
+                    Text(
+                      msg.text,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: ClinicalTheme.textMuted,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ],
 
             // Active Medical Issues Cards (Returned as rich actionable cards)
-            if (msg.activeMedicalIssues != null && msg.activeMedicalIssues!.isNotEmpty) ...[
+            if (msg.activeMedicalIssues != null &&
+                msg.activeMedicalIssues!.isNotEmpty) ...[
               const SizedBox(height: 6),
               for (final issue in msg.activeMedicalIssues!)
                 _buildActiveMedicalIssueCard(issue),
@@ -782,25 +902,39 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 decoration: BoxDecoration(
                   color: ClinicalTheme.criticalRed.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ClinicalTheme.criticalRed, width: 1),
+                  border: Border.all(
+                    color: ClinicalTheme.criticalRed,
+                    width: 1,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.shield_outlined, color: ClinicalTheme.criticalRed, size: 18),
+                        Icon(
+                          Icons.shield_outlined,
+                          color: ClinicalTheme.criticalRed,
+                          size: 18,
+                        ),
                         SizedBox(width: 6),
                         Text(
                           'Clinical Boundary Refusal (FR-40)',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: ClinicalTheme.criticalRed, fontSize: 12),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: ClinicalTheme.criticalRed,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     Text(
                       result.refusalMessage ?? '',
-                      style: const TextStyle(color: ClinicalTheme.textPrimary, fontSize: 12),
+                      style: const TextStyle(
+                        color: ClinicalTheme.textPrimary,
+                        fontSize: 12,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     FilledButton.icon(
@@ -811,15 +945,24 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
                       icon: const Icon(Icons.call, size: 13),
-                      label: Text('Ask ${result.doctorInChargeId} (Doctor on call)', style: const TextStyle(fontSize: 11)),
+                      label: Text(
+                        'Ask ${result.doctorInChargeId} (Doctor on call)',
+                        style: const TextStyle(fontSize: 11),
+                      ),
                       onPressed: () {
-                        final loops = ref.read(patientLoopsProvider(widget.patient.patientId));
+                        final loops = ref.read(
+                          patientLoopsProvider(widget.patient.patientId),
+                        );
                         if (loops.isNotEmpty) {
                           showDialog(
                             context: context,
                             builder: (ctx) => LogCallOutcomeDialog(
                               loop: loops.first,
-                              recipientName: result.doctorInChargeId,
+                              recipientId: result.doctorInChargeId,
+                              recipientName:
+                                  ClinicalTheme.formatAuthorDisplayName(
+                                    result.doctorInChargeId,
+                                  ),
                               recipientRole: 'doctor_on_call',
                             ),
                           );
@@ -846,17 +989,27 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 decoration: BoxDecoration(
                   color: ClinicalTheme.urgentAmber.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ClinicalTheme.urgentAmber.withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: ClinicalTheme.urgentAmber.withValues(alpha: 0.4),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.info_outline, color: ClinicalTheme.urgentAmber, size: 16),
+                    const Icon(
+                      Icons.info_outline,
+                      color: ClinicalTheme.urgentAmber,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         result.absenceMessage ?? '',
-                        style: const TextStyle(fontSize: 12, color: ClinicalTheme.textPrimary, height: 1.3),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: ClinicalTheme.textPrimary,
+                          height: 1.3,
+                        ),
                       ),
                     ),
                   ],
@@ -867,8 +1020,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             // Verbatim Quotes Cards with 1-Tap Action Buttons
             if (result != null && result.verbatimQuotes.isNotEmpty) ...[
               const SizedBox(height: 8),
-              for (final quote in result.verbatimQuotes)
-                _buildQuoteCard(quote),
+              for (final quote in result.verbatimQuotes) _buildQuoteCard(quote),
             ],
 
             // Coverage Line Metadata (FR-36)
@@ -877,17 +1029,31 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.check_circle, size: 12, color: ClinicalTheme.routineTeal),
+                  const Icon(
+                    Icons.check_circle,
+                    size: 12,
+                    color: ClinicalTheme.routineTeal,
+                  ),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       result.coverage.formattedLine,
-                      style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted, height: 1.3),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: ClinicalTheme.textMuted,
+                        height: 1.3,
+                      ),
                     ),
                   ),
                   InkWell(
                     onTap: () => _showFeedbackDialog(result.queryString),
-                    child: const Text('Something is missing?', style: TextStyle(fontSize: 10, color: ClinicalTheme.routineTeal)),
+                    child: const Text(
+                      'Something is missing?',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: ClinicalTheme.routineTeal,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -922,7 +1088,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 2.5,
+                ),
                 decoration: BoxDecoration(
                   color: urgencyColor.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(5),
@@ -940,12 +1109,19 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               const SizedBox(width: 8),
               Text(
                 loop.loopType.wireName.replaceAll('_', ' ').toUpperCase(),
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ClinicalTheme.textMuted),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: ClinicalTheme.textMuted,
+                ),
               ),
               const Spacer(),
               Text(
                 _formatTimestamp(loop.createdAt),
-                style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: ClinicalTheme.textMuted,
+                ),
               ),
             ],
           ),
@@ -964,7 +1140,11 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             const SizedBox(height: 4),
             Text(
               loop.description,
-              style: const TextStyle(fontSize: 12, color: ClinicalTheme.textSecondary, height: 1.3),
+              style: const TextStyle(
+                fontSize: 12,
+                color: ClinicalTheme.textSecondary,
+                height: 1.3,
+              ),
             ),
           ],
           const SizedBox(height: 10),
@@ -985,7 +1165,11 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     const SizedBox(width: 4),
                     Text(
                       loop.currentOwnerId,
-                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: ownerColor),
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: ownerColor,
+                      ),
                     ),
                   ],
                 ),
@@ -996,13 +1180,22 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: ClinicalTheme.nurseBlue,
-                  side: const BorderSide(color: ClinicalTheme.nurseBlue, width: 0.8),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  side: const BorderSide(
+                    color: ClinicalTheme.nurseBlue,
+                    width: 0.8,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   minimumSize: const Size(0, 28),
                   visualDensity: VisualDensity.compact,
                 ),
                 icon: const Icon(Icons.chat_bubble_outline, size: 12),
-                label: Text('Message ${loop.currentOwnerId}', style: const TextStyle(fontSize: 11)),
+                label: Text(
+                  'Message ${loop.currentOwnerId}',
+                  style: const TextStyle(fontSize: 11),
+                ),
                 onPressed: () {
                   if (widget.onAnchorMessage != null) {
                     widget.onAnchorMessage!(loop.loopId, loop.currentOwnerId);
@@ -1016,7 +1209,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 style: FilledButton.styleFrom(
                   backgroundColor: ClinicalTheme.doctorPink,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   minimumSize: const Size(0, 28),
                   visualDensity: VisualDensity.compact,
                 ),
@@ -1027,7 +1223,10 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     context: context,
                     builder: (ctx) => LogCallOutcomeDialog(
                       loop: loop,
-                      recipientName: loop.currentOwnerId,
+                      recipientId: loop.currentOwnerId,
+                      recipientName: ClinicalTheme.formatAuthorDisplayName(
+                        loop.currentOwnerId,
+                      ),
                       recipientRole: loop.currentOwnerRole,
                     ),
                   );
@@ -1047,11 +1246,18 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       decoration: BoxDecoration(
         color: ClinicalTheme.successGreen.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ClinicalTheme.successGreen.withValues(alpha: 0.5), width: 1),
+        border: Border.all(
+          color: ClinicalTheme.successGreen.withValues(alpha: 0.5),
+          width: 1,
+        ),
       ),
       child: const Row(
         children: [
-          Icon(Icons.check_circle_outline, color: ClinicalTheme.successGreen, size: 20),
+          Icon(
+            Icons.check_circle_outline,
+            color: ClinicalTheme.successGreen,
+            size: 20,
+          ),
           SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1059,12 +1265,19 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               children: [
                 Text(
                   'ALL CLEAR — No Active Medical Issues',
-                  style: TextStyle(color: ClinicalTheme.successGreen, fontWeight: FontWeight.bold, fontSize: 12),
+                  style: TextStyle(
+                    color: ClinicalTheme.successGreen,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
                 SizedBox(height: 2),
                 Text(
                   'There are currently 0 open loops or pending escalations for this patient.',
-                  style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 11),
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -1095,13 +1308,20 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               Expanded(
                 child: Text(
                   entry.loopTitle,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClinicalTheme.textPrimary),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: ClinicalTheme.textPrimary,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 5,
+                  vertical: 1.5,
+                ),
                 decoration: BoxDecoration(
                   color: urgencyColor.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(4),
@@ -1109,7 +1329,11 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 child: Text(
                   entry.loopUrgency.name.toUpperCase(),
-                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: urgencyColor),
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: urgencyColor,
+                  ),
                 ),
               ),
             ],
@@ -1128,14 +1352,22 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 child: Text(
                   ClinicalTheme.formatAuthorDisplayName(entry.authorId),
-                  style: TextStyle(color: cadreColor, fontWeight: FontWeight.bold, fontSize: 10),
+                  style: TextStyle(
+                    color: cadreColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 10,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   '“${entry.verbatimText}”',
-                  style: const TextStyle(fontSize: 12, color: ClinicalTheme.textPrimary, height: 1.3),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: ClinicalTheme.textPrimary,
+                    height: 1.3,
+                  ),
                 ),
               ),
             ],
@@ -1148,20 +1380,36 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             children: [
               Text(
                 _formatTimestamp(entry.timestamp),
-                style: const TextStyle(fontSize: 10, color: ClinicalTheme.textMuted),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: ClinicalTheme.textMuted,
+                ),
               ),
               Row(
                 children: [
                   if (entry.loopId != null && widget.onAnchorMessage != null)
                     InkWell(
-                      onTap: () => widget.onAnchorMessage!(entry.loopId!, entry.authorId),
+                      onTap: () => widget.onAnchorMessage!(
+                        entry.loopId!,
+                        entry.authorId,
+                      ),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         child: Row(
                           children: [
-                            const Icon(Icons.chat_bubble_outline, size: 12, color: ClinicalTheme.nurseBlue),
+                            const Icon(
+                              Icons.chat_bubble_outline,
+                              size: 12,
+                              color: ClinicalTheme.nurseBlue,
+                            ),
                             const SizedBox(width: 4),
-                            Text('Message', style: TextStyle(fontSize: 11, color: cadreColor)),
+                            Text(
+                              'Message',
+                              style: TextStyle(fontSize: 11, color: cadreColor),
+                            ),
                           ],
                         ),
                       ),
@@ -1170,12 +1418,25 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                   InkWell(
                     onTap: () => _initiateCall(entry),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       child: const Row(
                         children: [
-                          Icon(Icons.call_outlined, size: 12, color: ClinicalTheme.doctorPink),
+                          Icon(
+                            Icons.call_outlined,
+                            size: 12,
+                            color: ClinicalTheme.doctorPink,
+                          ),
                           SizedBox(width: 4),
-                          Text('Call', style: TextStyle(fontSize: 11, color: ClinicalTheme.doctorPink)),
+                          Text(
+                            'Call',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: ClinicalTheme.doctorPink,
+                            ),
+                          ),
                         ],
                       ),
                     ),

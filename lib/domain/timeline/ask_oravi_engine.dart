@@ -43,7 +43,9 @@ class CoverageMetadata {
   /// Example:
   /// "Searched: urine, UO, mkojo in 41 messages across 5 threads, Mon 26/10 02:15 to Tue 27/10 14:00."
   String get formattedLine {
-    final terms = termsSearched.isEmpty ? 'all messages' : termsSearched.take(6).join(', ');
+    final terms = termsSearched.isEmpty
+        ? 'all messages'
+        : termsSearched.take(6).join(', ');
     final startStr = startTime != null ? _formatDate(startTime!) : 'Admission';
     final endStr = endTime != null ? _formatDate(endTime!) : 'Present';
 
@@ -165,14 +167,19 @@ class AskOraviEngine {
     final entries = <PatientTimelineEntry>[];
 
     // Filter events for this patient
-    final patientEvents = events.where((e) => e.patientId == patientId).toList();
+    final patientEvents = events
+        .where((e) => e.patientId == patientId)
+        .toList();
     // Sort strictly chronological
-    patientEvents.sort((a, b) => a.clientCreatedAt.compareTo(b.clientCreatedAt));
+    patientEvents.sort(
+      (a, b) => a.clientCreatedAt.compareTo(b.clientCreatedAt),
+    );
 
     for (final event in patientEvents) {
       final loopId = event.loopId;
       final loop = loopId != null ? loopMap[loopId] : null;
-      final loopTitle = loop?.title ?? (loopId != null ? 'Loop $loopId' : 'Patient Record');
+      final loopTitle =
+          loop?.title ?? (loopId != null ? 'Loop $loopId' : 'Patient Record');
       final loopUrgency = loop?.urgency ?? LoopUrgency.routine;
       final loopState = loop?.state ?? LoopState.raised;
 
@@ -188,7 +195,8 @@ class AskOraviEngine {
             entryType: TimelineEntryType.loopOpened,
             authorId: event.authorId,
             authorRole: event.initialOwnerRole,
-            verbatimText: '${event.title}${event.description.isNotEmpty ? ": ${event.description}" : ""}',
+            verbatimText:
+                '${event.title}${event.description.isNotEmpty ? ": ${event.description}" : ""}',
             timestamp: event.clientCreatedAt,
             metadata: {'loopType': event.loopType.name},
           ),
@@ -222,7 +230,8 @@ class AskOraviEngine {
             entryType: TimelineEntryType.callLog,
             authorId: event.callerId,
             authorRole: event.callerRole,
-            verbatimText: 'Spoke with ${event.recipientId} (${event.recipientRole}): "${event.outcomeNote}"',
+            verbatimText:
+                'Spoke with ${event.recipientId} (${event.recipientRole}): "${event.outcomeNote}"',
             timestamp: event.clientCreatedAt,
             metadata: {
               'recipientId': event.recipientId,
@@ -243,7 +252,8 @@ class AskOraviEngine {
             entryType: TimelineEntryType.escalationRaised,
             authorId: event.authorId,
             authorRole: _inferCadreRole(event.authorId),
-            verbatimText: 'Escalated to ${event.targetRole} (${event.initialTargetUserId}): ${event.escalationReason}',
+            verbatimText:
+                'Escalated to ${event.targetRole} (${event.initialTargetUserId}): ${event.escalationReason}',
             timestamp: event.clientCreatedAt,
             metadata: {
               'targetRole': event.targetRole,
@@ -272,7 +282,9 @@ class AskOraviEngine {
         );
       } else if (event is LoopClosedEvent) {
         final reasonStr = event.reasonCode.name;
-        final noteStr = event.freeTextNote?.isNotEmpty == true ? ' ("${event.freeTextNote}")' : '';
+        final noteStr = event.freeTextNote?.isNotEmpty == true
+            ? ' ("${event.freeTextNote}")'
+            : '';
         entries.add(
           PatientTimelineEntry(
             id: event.eventId,
@@ -356,11 +368,15 @@ class AskOraviEngine {
     final lowerQuery = queryString.toLowerCase().trim();
 
     if (effectiveSince == null) {
-      if (lowerQuery.contains('last 8 hours') || lowerQuery.contains('masaa 8')) {
+      if (lowerQuery.contains('last 8 hours') ||
+          lowerQuery.contains('masaa 8')) {
         effectiveSince = DateTime.now().subtract(const Duration(hours: 8));
-      } else if (lowerQuery.contains('last 24 hours') || lowerQuery.contains('masaa 24') || lowerQuery.contains('today')) {
+      } else if (lowerQuery.contains('last 24 hours') ||
+          lowerQuery.contains('masaa 24') ||
+          lowerQuery.contains('today')) {
         effectiveSince = DateTime.now().subtract(const Duration(hours: 24));
-      } else if (lowerQuery.contains('last 4 hours') || lowerQuery.contains('masaa 4')) {
+      } else if (lowerQuery.contains('last 4 hours') ||
+          lowerQuery.contains('masaa 4')) {
         effectiveSince = DateTime.now().subtract(const Duration(hours: 4));
       }
     }
@@ -374,7 +390,7 @@ class AskOraviEngine {
         ? allEntries.where((e) => e.timestamp.isAfter(effectiveSince!)).toList()
         : allEntries;
 
-    final isGeneralBriefing = 
+    final isGeneralBriefing =
         lowerQuery.contains('what should i know') ||
         lowerQuery.contains('what do i need to know') ||
         lowerQuery.contains('tell me what i need to know') ||
@@ -388,20 +404,24 @@ class AskOraviEngine {
         lowerQuery.contains('who is this patient') ||
         lowerQuery.contains('updates');
 
-    final isGeneralWindowCatchUp = effectiveSince != null &&
-        (expandedTerms.isEmpty || isGeneralBriefing);
+    final isGeneralWindowCatchUp =
+        effectiveSince != null && (expandedTerms.isEmpty || isGeneralBriefing);
 
     if (isGeneralBriefing || isGeneralWindowCatchUp || expandedTerms.isEmpty) {
       // If general catch-up question or no specific terms found, return all in window (PRD Example 2)
       matchingQuotes.addAll(allMessagesAndEvents);
     } else {
       for (final entry in allMessagesAndEvents) {
-        final textLower = '${entry.verbatimText} ${entry.loopTitle}'.toLowerCase();
+        final textLower = '${entry.verbatimText} ${entry.loopTitle}'
+            .toLowerCase();
         final matches = expandedTerms.any((term) {
           // Token or substring match
           if (term.length <= 3) {
             // Strict word boundary for short abbreviations like UO, O2, BP, Hb
-            final pattern = RegExp('\\b${RegExp.escape(term)}\\b', caseSensitive: false);
+            final pattern = RegExp(
+              '\\b${RegExp.escape(term)}\\b',
+              caseSensitive: false,
+            );
             return pattern.hasMatch(textLower);
           }
           return textLower.contains(term);
@@ -416,9 +436,13 @@ class AskOraviEngine {
     // 5. Automatic Verification (FR-194):
     // Ensure every single quote matches raw event data
     for (final quote in matchingQuotes) {
-      final existsInRaw = events.any((e) => e.eventId == quote.id || e.patientId == patientId);
+      final existsInRaw = events.any(
+        (e) => e.eventId == quote.id || e.patientId == patientId,
+      );
       if (!existsInRaw) {
-        throw StateError('Verification failed: quote ${quote.id} does not exist in event store.');
+        throw StateError(
+          'Verification failed: quote ${quote.id} does not exist in event store.',
+        );
       }
     }
 
@@ -428,11 +452,18 @@ class AskOraviEngine {
     // Detector A: Repeated openings and closings (Reopen count >= 1)
     for (final loop in loops) {
       if (loop.reopenCount > 0) {
-        final reopenEntries = allEntries.where((e) => e.loopId == loop.loopId && e.entryType == TimelineEntryType.loopReopened).toList();
+        final reopenEntries = allEntries
+            .where(
+              (e) =>
+                  e.loopId == loop.loopId &&
+                  e.entryType == TimelineEntryType.loopReopened,
+            )
+            .toList();
         systemPatterns.add(
           SystemPatternCount(
             label: 'System count: Repeated loop',
-            description: 'Thread "${loop.title}" was opened, closed, and reopened ${loop.reopenCount} time(s).',
+            description:
+                'Thread "${loop.title}" was opened, closed, and reopened ${loop.reopenCount} time(s).',
             count: loop.reopenCount,
             supportingQuotes: reopenEntries,
           ),
@@ -442,12 +473,20 @@ class AskOraviEngine {
 
     // Detector B: Unacknowledged Escalations
     for (final loop in loops) {
-      if (loop.activeEscalation != null && !loop.activeEscalation!.isAcknowledged) {
-        final escEntries = allEntries.where((e) => e.loopId == loop.loopId && e.entryType == TimelineEntryType.escalationRaised).toList();
+      if (loop.activeEscalation != null &&
+          !loop.activeEscalation!.isAcknowledged) {
+        final escEntries = allEntries
+            .where(
+              (e) =>
+                  e.loopId == loop.loopId &&
+                  e.entryType == TimelineEntryType.escalationRaised,
+            )
+            .toList();
         systemPatterns.add(
           SystemPatternCount(
             label: 'System status: Unacknowledged Escalation',
-            description: 'Loop "${loop.title}" was escalated to ${loop.activeEscalation!.targetRole} and is not yet acknowledged.',
+            description:
+                'Loop "${loop.title}" was escalated to ${loop.activeEscalation!.targetRole} and is not yet acknowledged.',
             count: 1,
             supportingQuotes: escEntries,
           ),
@@ -461,16 +500,24 @@ class AskOraviEngine {
       systemPatterns.add(
         SystemPatternCount(
           label: 'System status: Open Loops',
-          description: '$openLoopsCount loop(s) currently open for this patient.',
+          description:
+              '$openLoopsCount loop(s) currently open for this patient.',
           count: openLoopsCount,
         ),
       );
     }
 
     // 7. Compute Coverage Metadata (FR-36)
-    final uniqueThreads = allEntries.map((e) => e.loopId).whereType<String>().toSet();
-    final startTime = allEntries.isNotEmpty ? allEntries.first.timestamp : patient.admittedAt;
-    final endTime = allEntries.isNotEmpty ? allEntries.last.timestamp : DateTime.now();
+    final uniqueThreads = allEntries
+        .map((e) => e.loopId)
+        .whereType<String>()
+        .toSet();
+    final startTime = allEntries.isNotEmpty
+        ? allEntries.first.timestamp
+        : patient.admittedAt;
+    final endTime = allEntries.isNotEmpty
+        ? allEntries.last.timestamp
+        : DateTime.now();
 
     final coverage = CoverageMetadata(
       termsSearched: expandedTerms.toList(),
@@ -490,7 +537,7 @@ class AskOraviEngine {
 
       if (isGeneralBriefing) {
         absenceMessage =
-            '${patient.nameOrInitials} (${patient.bedNumber}) was admitted: "${patient.shortAdmittingNote}". '
+            '${patient.patientInitials} (${patient.bedNumber}) was admitted: "${patient.shortAdmittingNote}". '
             '$keyAlertsText '
             'There are currently no active medical issues or open loops for this patient.';
       } else {
@@ -504,7 +551,9 @@ class AskOraviEngine {
 
     // Determine primary doctor for quick action button
     final doctorId = loops.any((l) => l.currentOwnerRole.contains('doc'))
-        ? loops.firstWhere((l) => l.currentOwnerRole.contains('doc')).currentOwnerId
+        ? loops
+              .firstWhere((l) => l.currentOwnerRole.contains('doc'))
+              .currentOwnerId
         : 'Dr Otieno';
 
     return AskOraviResult(
@@ -524,11 +573,21 @@ class AskOraviEngine {
 
   static String _inferCadreRole(String authorId) {
     final lower = authorId.toLowerCase();
-    if (lower.contains('doc') || lower.contains('otieno')) return 'doctor_on_call';
-    if (lower.contains('nurse')) return 'ward_nurse';
-    if (lower.contains('charge') || lower.contains('matron')) return 'ward_in_charge';
-    if (lower.contains('pharm')) return 'pharmacist';
-    if (lower.contains('lab')) return 'lab_technician';
+    if (lower.contains('doc') || lower.contains('otieno')) {
+      return 'doctor_on_call';
+    }
+    if (lower.contains('nurse')) {
+      return 'ward_nurse';
+    }
+    if (lower.contains('charge') || lower.contains('matron')) {
+      return 'ward_in_charge';
+    }
+    if (lower.contains('pharm')) {
+      return 'pharmacist';
+    }
+    if (lower.contains('lab')) {
+      return 'lab_technician';
+    }
     return 'clinician';
   }
 }

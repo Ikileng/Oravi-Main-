@@ -1,14 +1,27 @@
+import 'package:uuid/uuid.dart';
+
 import 'database/database.dart';
 import '../domain/events/domain_events.dart';
 import '../domain/events/oravi_event.dart';
 import '../domain/models/loop_enums.dart';
 import '../domain/projections/projections.dart';
 import '../domain/reducers/oravi_domain_reducer.dart';
-import 'mock/seeded_ward_data.dart';
 import '../domain/search/ward_search_engine.dart';
 import '../domain/timeline/ask_oravi_engine.dart';
 import '../domain/timeline/patient_timeline_entry.dart';
 
+int _compareEventsByAuthority(OraviEvent a, OraviEvent b) {
+  if (a.serverSeq != null && b.serverSeq != null) {
+    final bySequence = a.serverSeq!.compareTo(b.serverSeq!);
+    if (bySequence != 0) return bySequence;
+  } else if (a.serverSeq != null) {
+    return -1;
+  } else if (b.serverSeq != null) {
+    return 1;
+  }
+  final byClientTime = a.clientCreatedAt.compareTo(b.clientCreatedAt);
+  return byClientTime != 0 ? byClientTime : a.eventId.compareTo(b.eventId);
+}
 
 /// In-memory offline event-sourced repository implementing the client event-store pattern.
 ///
@@ -17,39 +30,62 @@ import '../domain/timeline/patient_timeline_entry.dart';
 /// - The phone is a full working offline copy.
 /// - Current patient and loop projections are deterministically computed on-the-fly.
 class LocalWardRepository {
+  static String _newId(String prefix) => '$prefix-${const Uuid().v7()}';
+
   final List<OraviEvent> _events = [];
   final OraviLocalDatabase? database;
 
-  LocalWardRepository({
-    this.database,
-    bool seedInitialData = true,
-  }) {
-    if (seedInitialData) {
-      _events.addAll(SeededWardData.getInitialEvents());
-    }
-  }
+  LocalWardRepository({this.database});
 
-  /// Initializes repository from SQLite database, seeding initial ward if empty.
-  Future<void> initialize({bool seedInitialData = true}) async {
+  /// Restores saved events from the local database.
+  Future<void> initialize() async {
     if (database != null) {
       final stored = await database!.getAllStoredEvents();
-      if (stored.isEmpty && seedInitialData) {
-        final initial = SeededWardData.getInitialEvents();
-        for (final event in initial) {
-          await database!.appendEventWithOutbox(event);
-          _events.add(event);
-        }
-      } else {
-        _events.clear();
-        _events.addAll(stored);
-      }
+      _events
+        ..clear()
+        ..addAll(stored);
+      _events.sort(_compareEventsByAuthority);
     }
   }
 
   /// Appends an event to the local immutable event log and queues to SQLite outbox.
-  void appendEvent(OraviEvent event) {
-    _events.add(event);
-    database?.appendEventWithOutbox(event);
+  Future<void> appendEvent(OraviEvent event) => appendEvents([event]);
+
+  /// Persists related events atomically before exposing them to the UI.
+  Future<void> appendEvents(List<OraviEvent> events) async {
+    _validateEvents(events);
+    if (database != null) {
+      await database!.appendEventsWithOutbox(events);
+    }
+    _events.addAll(events);
+  }
+
+  void _validateEvents(List<OraviEvent> pendingEvents) {
+    final affectedLoopIds = pendingEvents
+        .map((event) => event.loopId)
+        .whereType<String>()
+        .toSet();
+
+    for (final loopId in affectedLoopIds) {
+      final existingEvents = _events
+          .where((event) => event.loopId == loopId)
+          .toList();
+      final newEvents = pendingEvents
+          .where((event) => event.loopId == loopId)
+          .toList();
+      final allEvents = [...existingEvents, ...newEvents];
+      final patientIds = allEvents.map((event) => event.patientId).toSet();
+      if (patientIds.length != 1) {
+        throw StateError('A medical issue cannot move between patients.');
+      }
+
+      final projection = OraviDomainReducer.reduceLoopEvents(allEvents);
+      if (projection == null) {
+        throw StateError(
+          'A medical issue must be raised before it is updated.',
+        );
+      }
+    }
   }
 
   /// Reloads events from SQLite storage (e.g. after remote pull sync).
@@ -75,7 +111,9 @@ class LocalWardRepository {
     final patients = <PatientStateProjection>[];
     for (final entry in patientEventsMap.entries) {
       final projection = OraviDomainReducer.reducePatientEvents(entry.value);
-      if (projection != null && projection.wardId == wardId && !projection.isDischarged) {
+      if (projection != null &&
+          projection.wardId == wardId &&
+          !projection.isDischarged) {
         patients.add(projection);
       }
     }
@@ -118,7 +156,7 @@ class LocalWardRepository {
   }
 
   /// Appends a new message to a loop thread.
-  void postMessage({
+  Future<void> postMessage({
     required String patientId,
     required String loopId,
     required String authorId,
@@ -130,14 +168,79 @@ class LocalWardRepository {
       loopId: loopId,
       authorId: authorId,
       deviceId: deviceId,
-      messageId: 'MSG-${DateTime.now().millisecondsSinceEpoch}',
+      messageId: _newId('MSG'),
       content: content,
     );
-    appendEvent(event);
+    return appendEvent(event);
+  }
+
+  Future<void> acknowledgeLoop({
+    required String patientId,
+    required String loopId,
+    required String authorId,
+    required String deviceId,
+  }) {
+    return appendEvent(
+      LoopAcknowledgedEvent(
+        patientId: patientId,
+        loopId: loopId,
+        authorId: authorId,
+        deviceId: deviceId,
+      ),
+    );
+  }
+
+  Future<void> startLoopWork({
+    required String patientId,
+    required String loopId,
+    required String authorId,
+    required String deviceId,
+  }) {
+    final matchingLoops = getLoopsForPatient(
+      patientId,
+    ).where((loop) => loop.loopId == loopId);
+    if (matchingLoops.isNotEmpty &&
+        matchingLoops.first.state == LoopState.inProgress) {
+      return Future<void>.value();
+    }
+
+    return appendEvent(
+      LoopWorkStartedEvent(
+        patientId: patientId,
+        loopId: loopId,
+        authorId: authorId,
+        deviceId: deviceId,
+      ),
+    );
+  }
+
+  Future<void> changeLoopOwner({
+    required String patientId,
+    required String loopId,
+    required String authorId,
+    required String deviceId,
+    required String newOwnerId,
+    required String newOwnerRole,
+    required String transferReason,
+  }) {
+    if (newOwnerId.trim().isEmpty || transferReason.trim().isEmpty) {
+      throw ArgumentError('An owner and reassignment reason are required.');
+    }
+    return appendEvent(
+      LoopOwnerChangedEvent(
+        patientId: patientId,
+        loopId: loopId,
+        authorId: authorId,
+        deviceId: deviceId,
+        newOwnerId: newOwnerId,
+        newOwnerRole: newOwnerRole,
+        transferReason: transferReason.trim(),
+      ),
+    );
   }
 
   /// Creates a new open loop for a patient.
-  void openLoop({
+  Future<void> openLoop({
     required String patientId,
     required String authorId,
     required String deviceId,
@@ -150,7 +253,7 @@ class LocalWardRepository {
   }) {
     final event = LoopOpenedEvent(
       patientId: patientId,
-      loopId: 'LOOP-${DateTime.now().millisecondsSinceEpoch}',
+      loopId: _newId('LOOP'),
       authorId: authorId,
       deviceId: deviceId,
       title: title,
@@ -160,11 +263,11 @@ class LocalWardRepository {
       initialOwnerId: initialOwnerId,
       initialOwnerRole: initialOwnerRole,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   /// Closes an open loop with mandatory reason code & free-text validation.
-  void closeLoop({
+  Future<void> closeLoop({
     required String patientId,
     required String loopId,
     required String authorId,
@@ -182,17 +285,32 @@ class LocalWardRepository {
       freeTextNote: freeTextNote,
       resolutionType: resolutionType,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   /// Confirms closure of a Critical (STAT) loop (PRD FR-51).
-  void confirmCriticalClosure({
+  Future<void> confirmCriticalClosure({
     required String patientId,
     required String loopId,
     required String authorId,
     required String deviceId,
     required String confirmedByRole,
   }) {
+    LoopStateProjection? loop;
+    for (final candidate in getLoopsForPatient(patientId)) {
+      if (candidate.loopId == loopId) {
+        loop = candidate;
+        break;
+      }
+    }
+    if (loop == null ||
+        (confirmedByRole != 'charge_nurse' &&
+            authorId != loop.openedByUserId)) {
+      throw StateError(
+        'Only the issue opener or a charge nurse can confirm this closure.',
+      );
+    }
+
     final event = LoopClosureConfirmedEvent(
       patientId: patientId,
       loopId: loopId,
@@ -200,11 +318,11 @@ class LocalWardRepository {
       deviceId: deviceId,
       confirmedByRole: confirmedByRole,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   /// Reopens a closed loop with mandatory reason (PRD FR-50).
-  void reopenLoop({
+  Future<void> reopenLoop({
     required String patientId,
     required String loopId,
     required String authorId,
@@ -218,11 +336,11 @@ class LocalWardRepository {
       deviceId: deviceId,
       reopenReason: reopenReason,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   /// Logs telephone contact and mandatory verbal outcome note (PRD FR-54).
-  void logCallOutcome({
+  Future<void> logCallOutcome({
     required String patientId,
     required String loopId,
     required String callerId,
@@ -238,7 +356,7 @@ class LocalWardRepository {
       loopId: loopId,
       authorId: callerId,
       deviceId: deviceId,
-      callId: 'CALL-${DateTime.now().millisecondsSinceEpoch}',
+      callId: _newId('CALL'),
       callerId: callerId,
       callerRole: callerRole,
       recipientId: recipientId,
@@ -246,7 +364,7 @@ class LocalWardRepository {
       outcomeNote: outcomeNote,
       durationSeconds: durationSeconds,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   // ==========================================
@@ -254,14 +372,14 @@ class LocalWardRepository {
   // ==========================================
 
   /// Initiates a shift handoff session pairing outgoing and incoming nurse (PRD FR-11).
-  HandoffSessionProjection startHandoffSession({
+  Future<HandoffSessionProjection> startHandoffSession({
     required String wardId,
     required String outgoingNurseId,
     required String incomingNurseId,
     required String authorId,
     required String deviceId,
-  }) {
-    final sessionId = 'HANDOFF-${DateTime.now().millisecondsSinceEpoch}';
+  }) async {
+    final sessionId = _newId('HANDOFF');
     final event = HandoffStartedEvent(
       patientId: wardId,
       authorId: authorId,
@@ -271,12 +389,12 @@ class LocalWardRepository {
       outgoingNurseId: outgoingNurseId,
       incomingNurseId: incomingNurseId,
     );
-    appendEvent(event);
+    await appendEvent(event);
     return getActiveHandoffSession(wardId)!;
   }
 
   /// Accepts a bed during a handoff session and transfers open loops (PRD FR-12 & FR-14).
-  void acceptBedInHandoff({
+  Future<void> acceptBedInHandoff({
     required String handoffSessionId,
     required String wardId,
     required String bedNumber,
@@ -296,11 +414,11 @@ class LocalWardRepository {
       nothingPendingConfirmed: nothingPendingConfirmed,
       transferredLoopIds: transferredLoopIds,
     );
-    appendEvent(event);
+    final events = <OraviEvent>[event];
 
     // PRD FR-12 & FR-17: Incoming nurse accepts ownership of all transferred loops
     for (final loopId in transferredLoopIds) {
-      appendEvent(
+      events.add(
         LoopOwnerChangedEvent(
           patientId: patientId,
           loopId: loopId,
@@ -312,10 +430,11 @@ class LocalWardRepository {
         ),
       );
     }
+    return appendEvents(events);
   }
 
   /// Finalizes and cryptographically locks a handoff session (PRD FR-14 & FR-16).
-  void completeHandoffSession({
+  Future<void> completeHandoffSession({
     required String handoffSessionId,
     required String wardId,
     required String authorId,
@@ -331,16 +450,18 @@ class LocalWardRepository {
       totalBedsHandedOver: totalBedsHandedOver,
       totalLoopsTransferred: totalLoopsTransferred,
     );
-    appendEvent(event);
+    return appendEvent(event);
   }
 
   /// Returns the current active (unlocked) handoff session for the ward, if one exists.
   HandoffSessionProjection? getActiveHandoffSession(String wardId) {
     // Find all handoff events
-    final handoffEvents = _events.where((e) =>
-        e is HandoffStartedEvent ||
-        e is HandoffBedAcceptedEvent ||
-        e is HandoffCompletedEvent);
+    final handoffEvents = _events.where(
+      (e) =>
+          e is HandoffStartedEvent ||
+          e is HandoffBedAcceptedEvent ||
+          e is HandoffCompletedEvent,
+    );
 
     // Group events by sessionId
     final sessionMap = <String, List<OraviEvent>>{};
@@ -383,7 +504,9 @@ class LocalWardRepository {
     required String queryString,
     DateTime? since,
   }) {
-    final patientEvents = _events.where((e) => e.patientId == patientId).toList();
+    final patientEvents = _events
+        .where((e) => e.patientId == patientId)
+        .toList();
     final patient = OraviDomainReducer.reducePatientEvents(patientEvents);
     if (patient == null) {
       throw StateError('Patient not found for id $patientId');

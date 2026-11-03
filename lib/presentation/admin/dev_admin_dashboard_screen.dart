@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/auth/staff_auth_service.dart';
-import '../../data/database/database_provider.dart';
 import '../../domain/models/staff_profile.dart';
 import '../providers/auth_providers.dart';
 import '../whiteboard/digital_whiteboard_screen.dart';
@@ -10,8 +8,7 @@ import '../whiteboard/digital_whiteboard_screen.dart';
 class DevUserItem {
   final String staffId;
   final String name;
-  final String email;
-  final String role; // 'Nurse' | 'Doctor' | 'Ward Manager' | 'Administrator'
+  final String role; // Nurse | Doctor | Charge Nurse
   final String ward;
   final bool isActive;
   final String lastLogin;
@@ -20,17 +17,15 @@ class DevUserItem {
   const DevUserItem({
     required this.staffId,
     required this.name,
-    required this.email,
     required this.role,
     this.ward = 'Medical',
     this.isActive = true,
     this.lastLogin = 'Today, 09:12 AM',
-    this.pin = '1234',
+    this.pin = '',
   });
 
   DevUserItem copyWith({
     String? name,
-    String? email,
     String? role,
     String? ward,
     bool? isActive,
@@ -40,7 +35,6 @@ class DevUserItem {
     return DevUserItem(
       staffId: staffId,
       name: name ?? this.name,
-      email: email ?? this.email,
       role: role ?? this.role,
       ward: ward ?? this.ward,
       isActive: isActive ?? this.isActive,
@@ -54,143 +48,50 @@ class DevUserItem {
 class DevUsersNotifier extends Notifier<List<DevUserItem>> {
   @override
   List<DevUserItem> build() {
-    _loadFromDatabase();
-    return [
-      const DevUserItem(
-        staffId: 'NUR-403',
-        name: 'Nurse X (Faith Njeri)',
-        email: 'nurse.x@oravi.dev',
-        role: 'Nurse',
-        ward: 'Medical',
-        isActive: true,
-        lastLogin: 'Today, 09:12 AM',
-        pin: '1111',
-      ),
-      const DevUserItem(
-        staffId: 'NUR-401',
-        name: 'Nurse Y (Mary Wanjiku)',
-        email: 'nurse.y@oravi.dev',
-        role: 'Nurse',
-        ward: 'Surgical',
-        isActive: true,
-        lastLogin: 'Today, 08:47 AM',
-        pin: '1234',
-      ),
-      const DevUserItem(
-        staffId: 'DOC-401',
-        name: 'Dr. A (Dr. James Kamau)',
-        email: 'doctor.a@oravi.dev',
-        role: 'Doctor',
-        ward: 'Medical',
-        isActive: true,
-        lastLogin: 'Today, 08:20 AM',
-        pin: '9090',
-      ),
-      const DevUserItem(
-        staffId: 'NUR-402',
-        name: 'Manager (Grace Achieng)',
-        email: 'manager@oravi.dev',
-        role: 'Ward Manager',
-        ward: 'Both',
-        isActive: true,
-        lastLogin: 'Today, 07:55 AM',
-        pin: '5678',
-      ),
-      const DevUserItem(
-        staffId: 'ADM-001',
-        name: 'Admin',
-        email: 'admin@oravi.dev',
-        role: 'Administrator',
-        ward: 'N/A',
-        isActive: true,
-        lastLogin: 'Today, 07:32 AM',
-        pin: '0000',
-      ),
-    ];
+    final token = ref.read(authAccessTokenProvider);
+    if (token != null) _loadFromBackend(token);
+    return const [];
   }
 
-  Future<void> _loadFromDatabase() async {
-    final db = ref.read(localDatabaseProvider);
-    final rows = await db.getAllStaff();
-    if (rows.isNotEmpty) {
-      state = rows.map((r) {
-        String displayRole = 'Nurse';
-        if (r.role == 'doctor_on_call') displayRole = 'Doctor';
-        if (r.role == 'charge_nurse') displayRole = 'Ward Manager';
-        if (r.role == 'admin') displayRole = 'Administrator';
-
-        return DevUserItem(
-          staffId: r.staffId,
-          name: r.name,
-          email: r.email ?? '${r.name.toLowerCase().replaceAll(' ', '.')}@oravi.dev',
-          role: displayRole,
-          ward: r.wardId,
-          isActive: r.isActive,
-          lastLogin: 'Today',
-          pin: r.pin,
-        );
-      }).toList();
+  Future<void> _loadFromBackend(String token) async {
+    try {
+      final staff = await ref.read(staffAuthServiceProvider).getProvisionedStaff(token);
+      state = staff.map(_toUserItem).toList();
+    } catch (_) {
+      state = const [];
     }
   }
 
-  void addUser(DevUserItem user) {
-    state = [user, ...state];
-
-    // Map role to clinical domain role
-    String domainRole = 'ward_nurse';
-    if (user.role == 'Doctor') domainRole = 'doctor_on_call';
-    if (user.role == 'Ward Manager') domainRole = 'charge_nurse';
-
-    // Sync to clinical auth service
-    StaffAuthService.addStaffUser(
-      StaffProfile(
-        staffId: user.staffId,
-        name: user.name,
-        role: domainRole,
-        wardId: 'WARD-4B',
-        avatarColor: user.role == 'Doctor'
-            ? '#7C3AED'
-            : (user.role == 'Ward Manager' ? '#EA580C' : '#059669'),
-        initials: user.name
-            .split(' ')
-            .take(2)
-            .map((e) => e.isNotEmpty ? e[0] : '')
-            .join()
-            .toUpperCase(),
-        isActive: user.isActive,
-      ),
-      user.pin,
-      email: user.email,
+  DevUserItem _toUserItem(StaffProfile staff) {
+    final displayRole = switch (staff.role) {
+      'doctor_on_call' => 'Doctor',
+      'charge_nurse' => 'Charge Nurse',
+      _ => 'Nurse',
+    };
+    return DevUserItem(
+      staffId: staff.staffId,
+      name: staff.name,
+      role: displayRole,
+      ward: staff.wardId.isEmpty ? 'Not assigned' : staff.wardId,
+      isActive: staff.isActive,
+      lastLogin: '—',
     );
   }
 
-  void resetPin(String staffId, String newPin) {
-    state = state.map((u) {
-      if (u.staffId == staffId) {
-        return u.copyWith(pin: newPin);
-      }
-      return u;
-    }).toList();
-
-    StaffAuthService.updateStaffPin(staffId, newPin);
+  Future<void> addUser({required String staffId, required String name, required String role, required String pin}) async {
+    final token = ref.read(authAccessTokenProvider);
+    if (token == null) throw StateError('Sign in as Dev Admin to provision staff.');
+    final domainRole = switch (role) {
+      'Doctor' => 'doctor_on_call',
+      'Charge Nurse' => 'charge_nurse',
+      _ => 'ward_nurse',
+    };
+    final staff = await ref.read(staffAuthServiceProvider).createClinicalStaff(
+      token: token, staffId: staffId, name: name, role: domainRole, pin: pin,
+    );
+    state = [_toUserItem(staff), ...state];
   }
 
-  void toggleActive(String staffId) {
-    state = state.map((u) {
-      if (u.staffId == staffId) {
-        final updated = u.copyWith(isActive: !u.isActive);
-        return updated;
-      }
-      return u;
-    }).toList();
-
-    StaffAuthService.toggleStaffActive(staffId);
-  }
-
-  void deleteUser(String staffId) {
-    state = state.where((u) => u.staffId != staffId).toList();
-    StaffAuthService.deleteStaff(staffId);
-  }
 }
 
 final devUsersProvider =
@@ -218,6 +119,16 @@ class _DevAdminDashboardScreenState
 
   @override
   Widget build(BuildContext context) {
+    final signedInStaff = ref.watch(authenticatedStaffProvider);
+    if (signedInStaff?.role != 'dev_admin') {
+      return const Scaffold(
+        backgroundColor: Color(0xFF070E1E),
+        body: Center(
+          child: Text('Sign in with a Dev Admin Digital ID to open user management.',
+              textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
+        ),
+      );
+    }
     final users = ref.watch(devUsersProvider);
 
     // Calculate metrics
@@ -227,7 +138,7 @@ class _DevAdminDashboardScreenState
 
     final nurses = users.where((u) => u.role == 'Nurse').toList();
     final doctors = users.where((u) => u.role == 'Doctor').toList();
-    final wardManagers = users.where((u) => u.role == 'Ward Manager').toList();
+    final wardManagers = users.where((u) => u.role == 'Charge Nurse').toList();
 
     return Scaffold(
       key: _scaffoldKey,
@@ -500,9 +411,9 @@ class _DevAdminDashboardScreenState
           ),
           const SizedBox(width: 8),
 
-          // Ward Manager
+          // Charge Nurse
           _buildKpiCard(
-            title: 'Ward Manager',
+            title: 'Charge Nurse',
             value: '$managerCount',
             subText: '● Active: $managerActive',
             icon: Icons.shield_outlined,
@@ -571,137 +482,20 @@ class _DevAdminDashboardScreenState
   }
 
   // ==========================================
-  // SYSTEM OVERVIEW & RECENT ACTIVITY
+  // LIVE SYSTEM OVERVIEW
   // ==========================================
   Widget _buildOverviewAndActivityRow() {
-    return Column(
-      children: [
-        // System Overview Panel
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0B1426),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF162540)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.insights, size: 15, color: Color(0xFF38BDF8)),
-                  SizedBox(width: 6),
-                  Text('System Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(child: _buildTile(icon: Icons.people, title: 'Patients', value: '15', sub: 'Admitted ↑ 2 today', color: const Color(0xFF38BDF8))),
-                  const SizedBox(width: 8),
-                  Expanded(child: _buildTile(icon: Icons.bed, title: 'Beds', value: '10', sub: '8 occupied · 2 available', color: const Color(0xFFA855F7))),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(child: _buildTile(icon: Icons.apartment, title: 'Wards', value: '2', sub: 'Medical Ward · Surgical Ward', color: const Color(0xFF10B981))),
-                  const SizedBox(width: 8),
-                  Expanded(child: _buildTile(icon: Icons.access_time, title: 'Active Shifts', value: '2', sub: 'Day | Night', color: const Color(0xFFF59E0B))),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
-        // Recent Activity Panel
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0B1426),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF162540)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.bolt, size: 15, color: Color(0xFF38BDF8)),
-                      SizedBox(width: 6),
-                      Text('Recent Activity', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                    ],
-                  ),
-                  Text('View all', style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8), fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              _buildActivityItem(icon: Icons.person_add, iconColor: const Color(0xFF10B981), title: 'New user created', detail: 'Nurse Y (nurse.y@oravi.dev)', time: '10:12 AM'),
-              _buildActivityItem(icon: Icons.swap_horiz, iconColor: const Color(0xFFA855F7), title: 'Ward assignment updated', detail: 'Bed 26 → Nurse X', time: '09:45 AM'),
-              _buildActivityItem(icon: Icons.chat_bubble_outline, iconColor: const Color(0xFF38BDF8), title: 'New message', detail: 'From Dr. A to Nurse X', time: '09:32 AM'),
-              _buildActivityItem(icon: Icons.person_pin, iconColor: const Color(0xFFF97316), title: 'Patient admitted', detail: 'J.K. (Bed 25)', time: '08:50 AM'),
-              _buildActivityItem(icon: Icons.cloud_done, iconColor: const Color(0xFF14B8A6), title: 'System backup completed', detail: 'Database and local cache', time: '06:20 AM'),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTile({required IconData icon, required String title, required String value, required String sub, required Color color}) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF101C33),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF1E2E4E)),
+        color: const Color(0xFF0B1426),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF162540)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 14, color: color),
-              const SizedBox(width: 4),
-              Text(title, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 2),
-          Text(sub, style: const TextStyle(fontSize: 9, color: Color(0xFF64748B)), overflow: TextOverflow.ellipsis),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityItem({required IconData icon, required Color iconColor, required String title, required String detail, required String time}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 12,
-            backgroundColor: iconColor.withValues(alpha: 0.15),
-            child: Icon(icon, size: 12, color: iconColor),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text(detail, style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)), overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-          Text(time, style: const TextStyle(fontSize: 9, color: Color(0xFF64748B))),
-        ],
+      child: const Text(
+        'Live clinical census and activity are not available in this admin view.',
+        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
       ),
     );
   }
@@ -890,7 +684,7 @@ class _DevAdminDashboardScreenState
               return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
-                  width: 620,
+                  width: 490,
                   child: Column(
                     children: [
                       Container(
@@ -899,7 +693,6 @@ class _DevAdminDashboardScreenState
                         child: const Row(
                           children: [
                             SizedBox(width: 140, child: Text('Name', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
-                            SizedBox(width: 130, child: Text('Email', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
                             SizedBox(width: 90, child: Text('Role', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
                             SizedBox(width: 65, child: Text('Status', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
                             SizedBox(width: 95, child: Text('Last Login', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
@@ -926,7 +719,7 @@ class _DevAdminDashboardScreenState
     if (user.role == 'Doctor') {
       roleBg = const Color(0xFFA855F7).withValues(alpha: 0.2);
       roleText = const Color(0xFFC084FC);
-    } else if (user.role == 'Ward Manager') {
+    } else if (user.role == 'Charge Nurse') {
       roleBg = const Color(0xFFEA580C).withValues(alpha: 0.2);
       roleText = const Color(0xFFFB923C);
     } else if (user.role == 'Administrator') {
@@ -959,7 +752,7 @@ class _DevAdminDashboardScreenState
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'PIN: ${user.pin} · ID: ${user.staffId}',
+                    'Staff ID: ${user.staffId}',
                     style: const TextStyle(fontSize: 9, color: Color(0xFF64748B)),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1030,7 +823,7 @@ class _DevAdminDashboardScreenState
     if (user.role == 'Doctor') {
       roleBg = const Color(0xFFA855F7).withValues(alpha: 0.2);
       roleText = const Color(0xFFC084FC);
-    } else if (user.role == 'Ward Manager') {
+    } else if (user.role == 'Charge Nurse') {
       roleBg = const Color(0xFFEA580C).withValues(alpha: 0.2);
       roleText = const Color(0xFFFB923C);
     } else if (user.role == 'Administrator') {
@@ -1052,15 +845,9 @@ class _DevAdminDashboardScreenState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(user.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white), overflow: TextOverflow.ellipsis),
-                Text('PIN: ${user.pin} · ID: ${user.staffId}', style: const TextStyle(fontSize: 9, color: Color(0xFF64748B))),
+                Text('Staff ID: ${user.staffId}', style: const TextStyle(fontSize: 9, color: Color(0xFF64748B))),
               ],
             ),
-          ),
-
-          // Email
-          SizedBox(
-            width: 130,
-            child: Text(user.email, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)), overflow: TextOverflow.ellipsis),
           ),
 
           // Role Badge
@@ -1123,69 +910,25 @@ class _DevAdminDashboardScreenState
   }
 
   // ==========================================
-  // USER ACTIONS MODAL (PIN RESET, ACTIVE TOGGLE, DELETE)
+  // USER PROFILE DETAILS
   // ==========================================
   void _showUserActionModal(DevUserItem user) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(18),
-          decoration: const BoxDecoration(
-            color: Color(0xFF0F172A),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            border: Border(top: BorderSide(color: Color(0xFF1E293B))),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(user.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-              Text('Role: ${user.role} · Staff ID: ${user.staffId}', style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
-              const SizedBox(height: 14),
-
-              // Reset PIN Option
-              ListTile(
-                leading: const Icon(Icons.password, color: Color(0xFF38BDF8)),
-                title: const Text('Reset 4-Digit Quick PIN', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                subtitle: Text('Current PIN: ${user.pin}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _showResetPinDialog(user);
-                },
-              ),
-
-              // Toggle Active/Inactive Status Option
-              ListTile(
-                leading: Icon(user.isActive ? Icons.block : Icons.check_circle, color: user.isActive ? const Color(0xFFEF4444) : const Color(0xFF10B981)),
-                title: Text(user.isActive ? 'Deactivate Account' : 'Activate Account', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                subtitle: Text(user.isActive ? 'Temporarily lock account from login' : 'Restore full login capabilities', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  ref.read(devUsersProvider.notifier).toggleActive(user.staffId);
-                  ref.invalidate(wardStaffListProvider);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${user.name} is now ${user.isActive ? 'Deactivated' : 'Active'}')),
-                  );
-                },
-              ),
-
-              // Delete User Option
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
-                title: const Text('Delete User Account', style: TextStyle(color: Color(0xFFEF4444), fontSize: 13, fontWeight: FontWeight.bold)),
-                subtitle: const Text('Remove account from dev directory', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  ref.read(devUsersProvider.notifier).deleteUser(user.staffId);
-                  ref.invalidate(wardStaffListProvider);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Deleted ${user.name}')),
-                  );
-                },
-              ),
-            ],
+              const SizedBox(height: 6),
+              Text('${user.role} · ${user.staffId}', style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+              const SizedBox(height: 8),
+              const Text('PINs are never displayed after account creation.', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close'))),
+            ]),
           ),
         );
       },
@@ -1195,62 +938,12 @@ class _DevAdminDashboardScreenState
   // ==========================================
   // RESET PIN DIALOG
   // ==========================================
-  void _showResetPinDialog(DevUserItem user) {
-    final pinController = TextEditingController(text: user.pin);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFF1E293B))),
-        title: Text('Reset PIN for ${user.name}', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Enter new 4-digit development PIN:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: pinController,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              style: const TextStyle(color: Colors.white, fontSize: 16, letterSpacing: 4),
-              decoration: const InputDecoration(
-                filled: true,
-                fillColor: Color(0xFF1E293B),
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
-            onPressed: () {
-              final newPin = pinController.text.trim();
-              if (newPin.length == 4) {
-                ref.read(devUsersProvider.notifier).resetPin(user.staffId, newPin);
-                ref.invalidate(wardStaffListProvider);
-                Navigator.of(ctx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('PIN updated to $newPin for ${user.name}')),
-                );
-              }
-            },
-            child: const Text('Save PIN', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ==========================================
   // CREATE / ADD USER DIALOG
   // ==========================================
   void _showAddUserDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
-    final pinCtrl = TextEditingController(text: '1234');
+    final pinCtrl = TextEditingController();
     String selectedRole = 'Nurse';
 
     showDialog(
@@ -1290,28 +983,11 @@ class _DevAdminDashboardScreenState
                     ),
                     const SizedBox(height: 10),
 
-                    // Email / Handle
-                    const Text('Email / Dev Handle', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    TextField(
-                      controller: emailCtrl,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                      decoration: const InputDecoration(
-                        hintText: 'e.g. brenda.m@oravi.dev',
-                        hintStyle: TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                        filled: true,
-                        fillColor: Color(0xFF1E293B),
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
                     // Role Selector
                     const Text('Staff Role', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     Row(
-                      children: ['Nurse', 'Doctor', 'Ward Manager'].map((role) {
+                      children: ['Nurse', 'Doctor', 'Charge Nurse'].map((role) {
                         final isSel = selectedRole == role;
                         return Expanded(
                           child: InkWell(
@@ -1359,30 +1035,30 @@ class _DevAdminDashboardScreenState
                 TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
-                  onPressed: () {
+                  onPressed: () async {
                     final name = nameCtrl.text.trim();
-                    final email = emailCtrl.text.trim();
                     final pin = pinCtrl.text.trim();
 
                     if (name.isNotEmpty && pin.length == 4) {
-                      final generatedId = 'DEV-${DateTime.now().millisecondsSinceEpoch % 10000}';
-                      ref.read(devUsersProvider.notifier).addUser(
-                            DevUserItem(
-                              staffId: generatedId,
-                              name: name,
-                              email: email.isNotEmpty ? email : '${name.toLowerCase().replaceAll(' ', '.')}@oravi.dev',
-                              role: selectedRole,
-                              ward: 'Medical',
-                              isActive: true,
-                              lastLogin: 'Just now',
-                              pin: pin,
-                            ),
-                          );
-                      ref.invalidate(wardStaffListProvider);
-                      Navigator.of(ctx).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Created $selectedRole: $name (PIN: $pin)')),
+                    final generatedId = 'ORV-${DateTime.now().millisecondsSinceEpoch}';
+                    try {
+                      await ref.read(devUsersProvider.notifier).addUser(
+                        staffId: generatedId, name: name, role: selectedRole, pin: pin,
                       );
+                      ref.invalidate(wardStaffListProvider);
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Created $selectedRole Digital ID for $name.')),
+                        );
+                      }
+                    } catch (error) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text('Could not create account: $error')),
+                        );
+                      }
+                    }
                     }
                   },
                   child: const Text('Create User', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
