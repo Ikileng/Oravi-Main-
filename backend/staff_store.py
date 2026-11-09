@@ -2,6 +2,7 @@ import hashlib
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 from .models import StaffProfile
@@ -14,6 +15,7 @@ class StaffStore:
         else:
             self.db_path = db_path
 
+        self._lock = threading.RLock()
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.row_factory = sqlite3.Row
@@ -21,7 +23,7 @@ class StaffStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS staff_users (
@@ -66,6 +68,28 @@ class StaffStore:
                     FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
                 )"""
             )
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS fcm_device_tokens (
+                    staff_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    fid TEXT NOT NULL UNIQUE,
+                    platform TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (staff_id, device_id),
+                    FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
+                )"""
+            )
+            fcm_columns = {
+                row["name"]
+                for row in self.conn.execute(
+                    "PRAGMA table_info(fcm_device_tokens)"
+                ).fetchall()
+            }
+            if "token" in fcm_columns and "fid" not in fcm_columns:
+                self.conn.execute(
+                    "ALTER TABLE fcm_device_tokens RENAME COLUMN token TO fid"
+                )
+                self.conn.execute("DELETE FROM fcm_device_tokens")
 
     @staticmethod
     def hash_pin(pin: str, salt: str) -> str:
@@ -156,10 +180,112 @@ class StaffStore:
     def get_active_clinical_staff(self) -> List[StaffProfile]:
         return self.get_staff_for_ward("")
 
+    def get_active_staff_by_ids(self, staff_ids: List[str]) -> List[StaffProfile]:
+        if not staff_ids:
+            return []
+        placeholders = ",".join("?" for _ in staff_ids)
+        with self.conn:
+            rows = self.conn.execute(
+                f"""SELECT staff_id, name, role, ward_id, avatar_color, initials, is_active
+                    FROM staff_users
+                    WHERE is_active = 1 AND role != 'dev_admin'
+                      AND staff_id IN ({placeholders})
+                    ORDER BY role DESC, name ASC""",
+                staff_ids,
+            ).fetchall()
+        return [
+            StaffProfile(
+                staff_id=row["staff_id"],
+                name=row["name"],
+                role=row["role"],
+                ward_id=row["ward_id"],
+                avatar_color=row["avatar_color"],
+                initials=row["initials"],
+                is_active=bool(row["is_active"]),
+            )
+            for row in rows
+        ]
+
+    def get_charge_nurses_for_ward(self, ward_id: str) -> List[StaffProfile]:
+        with self.conn:
+            rows = self.conn.execute(
+                """SELECT u.staff_id, u.name, u.role, u.ward_id, u.avatar_color,
+                          u.initials, u.is_active
+                   FROM staff_users u
+                   JOIN staff_ward_preferences p ON p.staff_id = u.staff_id
+                   WHERE u.role = 'charge_nurse' AND u.is_active = 1
+                     AND p.ward_id = ?
+                   ORDER BY u.name""",
+                (ward_id,),
+            ).fetchall()
+        return [
+            StaffProfile(
+                staff_id=row["staff_id"],
+                name=row["name"],
+                role=row["role"],
+                ward_id=row["ward_id"],
+                avatar_color=row["avatar_color"],
+                initials=row["initials"],
+                is_active=bool(row["is_active"]),
+            )
+            for row in rows
+        ]
+
+    def register_fcm_installation(
+        self, staff_id: str, device_id: str, fid: str, platform: str
+    ) -> bool:
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM fcm_device_tokens WHERE fid = ? AND staff_id != ?",
+                (fid, staff_id),
+            )
+            cursor = self.conn.execute(
+                """INSERT INTO fcm_device_tokens
+                   (staff_id, device_id, fid, platform, updated_at)
+                   SELECT staff_id, ?, ?, ?, ? FROM staff_users
+                   WHERE staff_id = ? AND is_active = 1 AND role != 'dev_admin'
+                   ON CONFLICT(staff_id, device_id) DO UPDATE SET
+                       fid = excluded.fid, platform = excluded.platform,
+                       updated_at = excluded.updated_at""",
+                (device_id, fid, platform, now, staff_id),
+            )
+        return cursor.rowcount == 1
+
+    def get_fcm_fids_for_staff(self, staff_id: str) -> List[str]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT fid FROM fcm_device_tokens WHERE staff_id = ?",
+                (staff_id,),
+            ).fetchall()
+        return [str(row["fid"]) for row in rows]
+
+    def remove_fcm_installation(self, staff_id: str, device_id: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM fcm_device_tokens WHERE staff_id = ? AND device_id = ?",
+                (staff_id, device_id),
+            )
+
+    def remove_fcm_fid(self, fid: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM fcm_device_tokens WHERE fid = ?",
+                (fid,),
+            )
+
     def is_active_clinical_staff(self, staff_id: str) -> bool:
         row = self.conn.execute(
             """SELECT 1 FROM staff_users
                WHERE staff_id = ? AND is_active = 1 AND role != 'dev_admin'""",
+            (staff_id,),
+        ).fetchone()
+        return row is not None
+
+    def is_active_doctor(self, staff_id: str) -> bool:
+        row = self.conn.execute(
+            """SELECT 1 FROM staff_users
+               WHERE staff_id = ? AND is_active = 1 AND role = 'doctor_on_call'""",
             (staff_id,),
         ).fetchone()
         return row is not None

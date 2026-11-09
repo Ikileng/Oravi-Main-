@@ -5,10 +5,7 @@ import '../../domain/projections/projections.dart';
 import '../providers/ward_providers.dart';
 import '../theme/clinical_theme.dart';
 
-/// Modal dialog strictly implementing PRD FR-46 & FR-47:
-/// - Closing requires a reason chosen from a short list that depends on thread type.
-/// - Mandatory free-text note strictly enforced for 'medication given', 'action taken', and 'other'.
-/// - Reason chips never carry clinical judgment ('result received', not 'result normal').
+/// Requires a typed closure reason and an explicit resolution outcome.
 class CloseLoopDialog extends StatefulWidget {
   final LoopStateProjection loop;
 
@@ -19,24 +16,24 @@ class CloseLoopDialog extends StatefulWidget {
 }
 
 class _CloseLoopDialogState extends State<CloseLoopDialog> {
-  ClosureReasonCode _selectedReason = ClosureReasonCode.resultReceived;
+  final TextEditingController _reasonController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+  ClosureResolutionType _resolutionType = ClosureResolutionType.resolved;
   String? _validationError;
   bool _isSaving = false;
 
   @override
   void dispose() {
+    _reasonController.dispose();
     _noteController.dispose();
     super.dispose();
   }
 
   Future<void> _submitClosure(WidgetRef ref) async {
     if (_isSaving) return;
-    if (_selectedReason.requiresFreeTextNote &&
-        _noteController.text.trim().isEmpty) {
+    if (_reasonController.text.trim().isEmpty) {
       setState(() {
-        _validationError =
-            'A clinical note is mandatory when selecting "${_selectedReason.wireName}".';
+        _validationError = 'Enter a reason before closing this medical issue.';
       });
       return;
     }
@@ -48,7 +45,8 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
           .closeLoop(
             patientId: widget.loop.patientId,
             loopId: widget.loop.loopId,
-            reasonCode: _selectedReason,
+            closureReason: _reasonController.text.trim(),
+            resolutionType: _resolutionType,
             freeTextNote: _noteController.text.trim().isNotEmpty
                 ? _noteController.text.trim()
                 : null,
@@ -83,7 +81,7 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Close Loop: ${widget.loop.title}',
+                  'Close Medical Issue: ${widget.loop.title}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -118,7 +116,7 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'STAT Critical Loop: Will require confirmation by the opener or senior in charge (PRD FR-51).',
+                            'Critical medical issues require confirmation by the doctor assigned to this patient on the ward board.',
                             style: TextStyle(
                               color: ClinicalTheme.criticalRed,
                               fontSize: 12,
@@ -129,55 +127,79 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                     ),
                   ),
                 const Text(
-                  'Select Closure Reason (FR-46):',
+                  'Closure reason (required):',
                   style: TextStyle(
-                    color: ClinicalTheme.textSecondary,
+                    color: ClinicalTheme.textPrimary,
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _reasonController,
+                  maxLines: 3,
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Describe why this issue is being closed...',
+                    hintStyle: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
+                    filled: true,
+                    fillColor: ClinicalTheme.surfaceElevated,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: ClinicalTheme.border),
+                    ),
+                  ),
+                  onChanged: (_) {
+                    if (_validationError != null) {
+                      setState(() => _validationError = null);
+                    }
+                  },
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Outcome (required):',
+                  style: TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
                 Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: ClosureReasonCode.values.map((reason) {
-                    final isSelected = _selectedReason == reason;
+                  spacing: 8,
+                  children: ClosureResolutionType.values.map((outcome) {
+                    final selected = outcome == _resolutionType;
                     return ChoiceChip(
                       label: Text(
-                        _reasonLabel(reason),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isSelected
-                              ? Colors.white
-                              : ClinicalTheme.textSecondary,
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
+                        outcome == ClosureResolutionType.resolved
+                            ? 'Resolved'
+                            : 'Closed without resolution',
                       ),
-                      selected: isSelected,
+                      selected: selected,
                       selectedColor: ClinicalTheme.routineTeal,
                       backgroundColor: ClinicalTheme.surfaceElevated,
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() {
-                            _selectedReason = reason;
-                            _validationError = null;
-                          });
-                        }
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? Colors.white
+                            : ClinicalTheme.textSecondary,
+                      ),
+                      onSelected: (value) {
+                        if (value) setState(() => _resolutionType = outcome);
                       },
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  _selectedReason.requiresFreeTextNote
-                      ? 'Clinical Action Note (Mandatory):'
-                      : 'Clinical Action Note (Optional):',
+                const SizedBox(height: 14),
+                const Text(
+                  'Additional clinical note (optional):',
                   style: TextStyle(
-                    color: _selectedReason.requiresFreeTextNote
-                        ? ClinicalTheme.urgentAmber
-                        : ClinicalTheme.textSecondary,
+                    color: ClinicalTheme.textSecondary,
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
@@ -191,7 +213,7 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
                     fontSize: 13,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'e.g., 2g IV Ceftriaxone given, site clean...',
+                    hintText: 'Add relevant clinical context...',
                     hintStyle: const TextStyle(
                       color: ClinicalTheme.textMuted,
                       fontSize: 12,
@@ -243,23 +265,6 @@ class _CloseLoopDialogState extends State<CloseLoopDialog> {
       },
     );
   }
-
-  String _reasonLabel(ClosureReasonCode reason) {
-    switch (reason) {
-      case ClosureReasonCode.medicationGiven:
-        return 'Medication Given *';
-      case ClosureReasonCode.resultReceived:
-        return 'Result Received';
-      case ClosureReasonCode.doctorReviewed:
-        return 'Doctor Reviewed';
-      case ClosureReasonCode.actionTaken:
-        return 'Action Taken *';
-      case ClosureReasonCode.duplicateOrCreatedInError:
-        return 'Duplicate / Error';
-      case ClosureReasonCode.other:
-        return 'Other *';
-    }
-  }
 }
 
 /// Modal dialog strictly implementing PRD FR-50 & FR-53:
@@ -290,7 +295,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
     if (text.isEmpty) {
       setState(
         () => _error =
-            'A clinical reason is strictly required to reopen a closed loop.',
+            'A clinical reason is required to reopen a closed medical issue.',
       );
       return;
     }
@@ -305,7 +310,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
             reopenReason: text,
           );
       if (mounted) {
-        Navigator.of(context).pop();
+        Navigator.of(context).pop(true);
       }
     } catch (_) {
       if (mounted) {
@@ -330,7 +335,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
               Icon(Icons.replay, color: ClinicalTheme.urgentAmber),
               SizedBox(width: 8),
               Text(
-                'Reopen Closed Loop',
+                'Reopen Closed Medical Issue',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ],
@@ -340,7 +345,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Previous closure: ${widget.loop.closureReason?.wireName ?? "closed"}',
+                'Previous closure: ${widget.loop.closureReasonText ?? widget.loop.closureReason?.wireName ?? "closed"}',
                 style: const TextStyle(
                   color: ClinicalTheme.textMuted,
                   fontSize: 12,
@@ -356,7 +361,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
                 ),
               const SizedBox(height: 12),
               const Text(
-                'Why is this loop being reopened? (Mandatory)',
+                'Why is this medical issue being reopened? (Required)',
                 style: TextStyle(
                   color: ClinicalTheme.textPrimary,
                   fontSize: 13,
@@ -414,7 +419,7 @@ class _ReopenLoopDialogState extends State<ReopenLoopDialog> {
                 foregroundColor: Colors.black,
               ),
               onPressed: _isSaving ? null : () => _submitReopen(ref),
-              child: Text(_isSaving ? 'Saving…' : 'Reopen Loop'),
+              child: Text(_isSaving ? 'Saving…' : 'Reopen Medical Issue'),
             ),
           ],
         );

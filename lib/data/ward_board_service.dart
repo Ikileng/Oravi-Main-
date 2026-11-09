@@ -67,7 +67,9 @@ class WardBoardService {
               ? decoded['detail'] ?? decoded['error']
               : null;
           throw HttpException(
-            detail is String ? detail : 'Ward service returned HTTP ${response.statusCode}.',
+            detail is String
+                ? detail
+                : 'Ward service returned HTTP ${response.statusCode}.',
             uri: uri,
           );
         }
@@ -95,7 +97,9 @@ class WardBoardService {
     if (token == null) throw StateError('Sign in to load configured wards.');
     final response = await _request('GET', '/api/v1/wards');
     if (response is! List) {
-      throw const FormatException('Ward service returned an invalid ward list.');
+      throw const FormatException(
+        'Ward service returned an invalid ward list.',
+      );
     }
     return response
         .map((item) => HospitalWard.fromMap(item as Map<String, dynamic>))
@@ -105,7 +109,9 @@ class WardBoardService {
   Future<HospitalWard?> getPreferredWard() async {
     final response = await _request('GET', '/api/v1/staff/me/ward-context');
     if (response is! Map<String, dynamic>) {
-      throw const FormatException('Ward service returned an invalid ward context.');
+      throw const FormatException(
+        'Ward service returned an invalid ward context.',
+      );
     }
     final ward = response['ward'];
     return ward is Map<String, dynamic> ? HospitalWard.fromMap(ward) : null;
@@ -129,7 +135,9 @@ class WardBoardService {
       '/api/v1/staff/me/active-assignment?${query.query}',
     );
     if (response is! Map<String, dynamic>) {
-      throw const FormatException('Ward service returned an invalid assignment.');
+      throw const FormatException(
+        'Ward service returned an invalid assignment.',
+      );
     }
     final assignment = response['active_assignment'];
     return assignment is Map<String, dynamic> ? assignment : null;
@@ -151,6 +159,24 @@ class WardBoardService {
     return response;
   }
 
+  Future<List<Map<String, dynamic>>> getCarriedForwardIssues() async {
+    final response = await _request('GET', '/api/v1/medical-issues/carried');
+    if (response is! Map<String, dynamic> ||
+        response['issues'] is! List<dynamic>) {
+      throw const FormatException(
+        'The server returned an invalid carried Medical Issues response.',
+      );
+    }
+    return (response['issues'] as List<dynamic>).map((item) {
+      if (item is! Map<String, dynamic>) {
+        throw const FormatException(
+          'The server returned an invalid carried Medical Issue.',
+        );
+      }
+      return item;
+    }).toList();
+  }
+
   Future<List<StaffProfile>> getStaffForWard(
     String wardId, {
     required String date,
@@ -162,7 +188,9 @@ class WardBoardService {
       '/api/v1/wards/${Uri.encodeComponent(wardId)}/staff?${query.query}',
     );
     if (response is! Map<String, dynamic>) {
-      throw const FormatException('Ward service returned an invalid staff list.');
+      throw const FormatException(
+        'Ward service returned an invalid staff list.',
+      );
     }
     final raw = response['staff'];
     if (raw is! List) return [];
@@ -171,11 +199,78 @@ class WardBoardService {
         .toList();
   }
 
+  Future<List<StaffProfile>> getStaffForPatient({
+    required String patientId,
+    required String date,
+  }) async {
+    final query = Uri(queryParameters: {'date': date});
+    final response = await _request(
+      'GET',
+      '/api/v1/patients/${Uri.encodeComponent(patientId)}/staff?${query.query}',
+    );
+    if (response is! Map<String, dynamic>) {
+      throw const FormatException(
+        'Patient staff service returned an invalid list.',
+      );
+    }
+    final raw = response['staff'];
+    if (raw is! List) {
+      throw const FormatException(
+        'Patient staff service returned no staff list.',
+      );
+    }
+    return raw
+        .map((item) => StaffProfile.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> registerFcmInstallation({
+    required String fid,
+    required String deviceId,
+    required String platform,
+  }) async {
+    await _request(
+      'POST',
+      '/api/v1/staff/me/fcm-installation',
+      payload: {'fid': fid, 'device_id': deviceId, 'platform': platform},
+    );
+  }
+
+  Future<void> removeFcmInstallation({required String deviceId}) async {
+    await _request(
+      'DELETE',
+      '/api/v1/staff/me/fcm-installation',
+      payload: {'device_id': deviceId},
+    );
+  }
+
+  Future<Map<String, dynamic>> getMedicalIssueThread({
+    required String patientId,
+    required String loopId,
+  }) async {
+    final response = await _request(
+      'GET',
+      '/api/v1/patients/${Uri.encodeComponent(patientId)}/medical-issues/${Uri.encodeComponent(loopId)}',
+    );
+    if (response is! Map<String, dynamic> ||
+        response['patient_id'] != patientId ||
+        response['loop_id'] != loopId ||
+        response['events'] is! List) {
+      throw const FormatException(
+        'The server returned an invalid Medical Issue thread.',
+      );
+    }
+    return response;
+  }
+
   Future<void> acceptHandoffBeds({
     required String allocationId,
     required String outgoingStaffId,
     required String incomingAccessToken,
     required List<String> bedNumbers,
+    required String handoffSessionId,
+    required String patientId,
+    required List<String> transferredLoopIds,
   }) async {
     await _request(
       'POST',
@@ -183,10 +278,10 @@ class WardBoardService {
       payload: {
         'outgoing_nurse_id': outgoingStaffId,
         'beds': bedNumbers,
+        'handoff_session_id': handoffSessionId,
+        'transferred_loop_ids_by_patient': {patientId: transferredLoopIds},
       },
-      extraHeaders: {
-        'X-Incoming-Authorization': 'Bearer $incomingAccessToken',
-      },
+      extraHeaders: {'X-Incoming-Authorization': 'Bearer $incomingAccessToken'},
     );
   }
 
@@ -197,6 +292,7 @@ class WardBoardService {
     required String staffId,
     required List<WhiteboardBedAssignment> assignments,
     required Map<String, dynamic> supportRoster,
+    List<Map<String, String>> carryForwardIssues = const [],
   }) async {
     await _request(
       'POST',
@@ -222,6 +318,7 @@ class WardBoardService {
             'status': assignment.status,
           };
         }).toList(),
+        'carry_forward_issues': carryForwardIssues,
       },
     );
   }

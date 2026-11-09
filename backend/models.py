@@ -122,6 +122,7 @@ class ShiftAllocationModel:
     published_at: str
     bed_assignments: List[Dict[str, Any]]
     support_roster: Dict[str, Any]
+    carry_forward_issues: List[Dict[str, Any]] = field(default_factory=list)
 
 @dataclass
 class AllocationConflictCheckResponse:

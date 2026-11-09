@@ -79,11 +79,17 @@ class _TestWardBoardService extends WardBoardService {
   }) async => _testStaff;
 
   @override
+  Future<List<Map<String, dynamic>>> getCarriedForwardIssues() async => [];
+
+  @override
   Future<void> acceptHandoffBeds({
     required String allocationId,
     required String outgoingStaffId,
     required String incomingAccessToken,
     required List<String> bedNumbers,
+    required String handoffSessionId,
+    required String patientId,
+    required List<String> transferredLoopIds,
   }) async {}
 }
 
@@ -168,18 +174,17 @@ void main() {
 
     // Verify the bedside identifiers are bed number and initials only.
     expect(find.text('01'), findsOneWidget);
-    expect(find.text('J.K.'), findsNWidgets(2));
+    expect(find.text('J.K.'), findsOneWidget);
     expect(find.text('ADM-2026-8812'), findsNothing);
 
-    expect(find.text('02'), findsOneWidget);
-    expect(find.text('P.O.'), findsOneWidget);
+    expect(find.text('02'), findsNothing);
+    expect(find.text('P.O.'), findsNothing);
     expect(find.text('ADM-2026-8834'), findsNothing);
 
     // Verify the open Medical Issue count on Bed 1.
     expect(find.text('1 pending'), findsWidgets);
 
-    // Beds without open Medical Issues are identified as clear.
-    expect(find.text('All clear'), findsWidgets);
+    expect(find.text('All clear'), findsNothing);
   });
 
   testWidgets('Tapping a bed row opens PatientDetailScreen with loops', (
@@ -190,8 +195,10 @@ void main() {
     // Open Bed 1 using the visible patient identity.
     await tester.tap(find.text('01'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Open issue thread (1)'));
+    await tester.pumpAndSettle();
 
-    // Verify detail screen loaded with loop title
+    // Verify detail screen and explicitly opened Medical Issue thread.
     expect(find.textContaining('Bed 1 — J.K.'), findsOneWidget);
     expect(find.text('ADM-2026-8812'), findsNothing);
     expect(find.text('Maintain SpO2 > 92% on nasal cannula'), findsOneWidget);
@@ -238,8 +245,8 @@ void main() {
       await tester.tap(find.text('Verify'));
       await tester.pumpAndSettle();
 
-      // Verify Step 2: Bed 1 Walkthrough with SBAR
-      expect(find.textContaining('Bed 1 of 5: Bed 1'), findsOneWidget);
+      // The outgoing nurse only hands over patients currently assigned to them.
+      expect(find.textContaining('Bed 1 of 1: Bed 1'), findsOneWidget);
       expect(find.text('ADM-2026-8812'), findsNothing);
       expect(find.text('SBAR SUMMARY (Compiled without AI)'), findsOneWidget);
       expect(find.text('S (Situation)'), findsOneWidget);
@@ -311,25 +318,25 @@ void main() {
       // Verify Ward Search sheet is open
       expect(find.text('WARD SEARCH'), findsOneWidget);
 
-      // Enter 'cross-match' in search field
+      // Search within the patient's assignment scope.
       final textFieldFinder = find.byType(TextField);
-      await tester.enterText(textFieldFinder, 'cross-match');
+      await tester.enterText(textFieldFinder, 'SpO2');
       await tester.pumpAndSettle();
 
-      // Verify Bed 2 (STAT repeat Hb & cross-match) appears in Ward Search sheet
+      // Verify the assigned Bed 1 Medical Issue appears in search.
       final patientInSheet = find.descendant(
         of: find.byType(WardSearchSheet),
-        matching: find.text('P.O.'),
+        matching: find.text('J.K.'),
       );
       expect(patientInSheet, findsOneWidget);
       expect(find.text('ADM-2026-8834'), findsNothing);
 
-      // Tap Bed 2 search result
+      // Tap Bed 1 search result
       await tester.tap(patientInSheet);
       await tester.pumpAndSettle();
 
-      // Verify navigated to Bed 2 detail screen
-      expect(find.textContaining('Bed 2 — P.O.'), findsOneWidget);
+      // Verify navigated to Bed 1 detail screen
+      expect(find.textContaining('Bed 1 — J.K.'), findsOneWidget);
     },
   );
 }

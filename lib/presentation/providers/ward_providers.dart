@@ -24,6 +24,8 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
     onRemoteEventsReceived: () async {
       await repo.reloadFromDatabase();
       ref.read(wardControllerProvider.notifier).refresh();
+      ref.invalidate(wardBoardProvider);
+      ref.invalidate(carriedForwardIssuesProvider('owned'));
     },
   );
   engine.startPeriodicSync(interval: const Duration(seconds: 10));
@@ -41,12 +43,6 @@ final localWardRepositoryProvider = Provider<LocalWardRepository>((ref) {
   final db = ref.watch(localDatabaseProvider);
   return LocalWardRepository(database: db);
 });
-
-/// Installed device identifier loaded from the app's local support directory.
-final localDeviceIdProvider = Provider<String>(
-  (ref) =>
-      throw StateError('The app device identity has not been initialized.'),
-);
 
 /// Notifier that manages ward state versioning and triggers UI updates on mutations.
 class WardController extends Notifier<int> {
@@ -67,6 +63,7 @@ class WardController extends Notifier<int> {
     required String patientId,
     required String loopId,
     required String content,
+    List<String> mentionedStaffIds = const [],
   }) async {
     await ref
         .read(localWardRepositoryProvider)
@@ -76,6 +73,7 @@ class WardController extends Notifier<int> {
           authorId: _currentStaff.staffId,
           deviceId: _currentDeviceId,
           content: content,
+          mentionedStaffIds: mentionedStaffIds,
         );
     refresh();
   }
@@ -86,6 +84,7 @@ class WardController extends Notifier<int> {
     required String description,
     required LoopType loopType,
     required LoopUrgency urgency,
+    String? linkedLoopId,
   }) async {
     await ref
         .read(localWardRepositoryProvider)
@@ -99,6 +98,7 @@ class WardController extends Notifier<int> {
           urgency: urgency,
           initialOwnerId: _currentStaff.staffId,
           initialOwnerRole: _currentStaff.role,
+          linkedLoopId: linkedLoopId,
         );
     refresh();
   }
@@ -110,10 +110,26 @@ class WardController extends Notifier<int> {
     final staff = _currentStaff;
     await ref
         .read(localWardRepositoryProvider)
-        .acknowledgeLoop(
+        .acknowledgeLoopForUser(
           patientId: patientId,
           loopId: loopId,
-          authorId: staff.staffId,
+          staffId: staff.staffId,
+          deviceId: _currentDeviceId,
+        );
+    refresh();
+  }
+
+  Future<void> recordLoopRead({
+    required String patientId,
+    required String loopId,
+  }) async {
+    final staff = _currentStaff;
+    await ref
+        .read(localWardRepositoryProvider)
+        .recordLoopRead(
+          patientId: patientId,
+          loopId: loopId,
+          staffId: staff.staffId,
           deviceId: _currentDeviceId,
         );
     refresh();
@@ -159,9 +175,9 @@ class WardController extends Notifier<int> {
   Future<void> closeLoop({
     required String patientId,
     required String loopId,
-    required ClosureReasonCode reasonCode,
+    required String closureReason,
+    required ClosureResolutionType resolutionType,
     String? freeTextNote,
-    ClosureResolutionType resolutionType = ClosureResolutionType.resolved,
   }) async {
     await ref
         .read(localWardRepositoryProvider)
@@ -170,9 +186,9 @@ class WardController extends Notifier<int> {
           loopId: loopId,
           authorId: _currentStaff.staffId,
           deviceId: _currentDeviceId,
-          reasonCode: reasonCode,
-          freeTextNote: freeTextNote,
+          closureReason: closureReason,
           resolutionType: resolutionType,
+          freeTextNote: freeTextNote,
         );
     refresh();
   }
@@ -190,11 +206,17 @@ class WardController extends Notifier<int> {
         break;
       }
     }
+    final boardAssignedDoctorId = ref
+        .read(whiteboardAssignmentsProvider)
+        .where((bed) => bed.patientId == patientId)
+        .map((bed) => bed.admittingDoctor)
+        .where((doctorId) => doctorId.isNotEmpty && doctorId != '-')
+        .firstOrNull;
     if (loop == null ||
-        (staff.role != 'charge_nurse' &&
-            staff.staffId != loop.openedByUserId)) {
+        boardAssignedDoctorId == null ||
+        staff.staffId != boardAssignedDoctorId) {
       throw StateError(
-        'Only the issue opener or a charge nurse can confirm this closure.',
+        'Only the board-assigned doctor can confirm this closure. Assign a doctor before confirming.',
       );
     }
 
@@ -204,6 +226,7 @@ class WardController extends Notifier<int> {
       authorId: staff.staffId,
       deviceId: _currentDeviceId,
       confirmedByRole: staff.role,
+      boardAssignedDoctorId: boardAssignedDoctorId,
     );
     refresh();
   }
@@ -273,7 +296,6 @@ class WardController extends Notifier<int> {
     required String patientId,
     required String incomingNurseId,
     required bool nothingPendingConfirmed,
-    required List<String> transferredLoopIds,
   }) async {
     final wardId = ref.read(selectedWardProvider).wardId;
     if (wardId.isEmpty) throw StateError('Select an assigned ward first.');
@@ -288,7 +310,6 @@ class WardController extends Notifier<int> {
           incomingNurseId: incomingNurseId,
           deviceId: _currentDeviceId,
           nothingPendingConfirmed: nothingPendingConfirmed,
-          transferredLoopIds: transferredLoopIds,
         );
     refresh();
   }
@@ -349,6 +370,51 @@ final wardPatientsProvider = Provider<List<PatientStateProjection>>((ref) {
       .toList();
 });
 
+final currentUserPatientIdsProvider = Provider<Set<String>>((ref) {
+  final staff = ref.watch(authenticatedStaffProvider);
+  if (staff == null) return const {};
+  if (staff.role == 'charge_nurse' &&
+      ref.watch(wardContextNeedsConfirmationProvider)) {
+    return const {};
+  }
+  final isDayShift = ref.watch(selectedShiftTypeProvider) == 'day';
+  return ref
+      .watch(whiteboardAssignmentsProvider)
+      .where((bed) {
+        if (staff.role == 'charge_nurse') return true;
+        if (staff.role == 'doctor_on_call') {
+          return bed.admittingDoctor == staff.staffId;
+        }
+        return staff.role == 'ward_nurse' &&
+            (isDayShift ? bed.dayShiftNurseId : bed.nightShiftNurseId) ==
+                staff.staffId;
+      })
+      .map((bed) => bed.patientId)
+      .whereType<String>()
+      .toSet();
+});
+
+final currentNurseShiftPatientsProvider =
+    Provider<List<PatientStateProjection>>((ref) {
+      final staff = ref.watch(authenticatedStaffProvider);
+      if (staff == null) return const [];
+      final isDayShift = ref.watch(selectedShiftTypeProvider) == 'day';
+      final assignedPatientIds = ref
+          .watch(whiteboardAssignmentsProvider)
+          .where(
+            (bed) =>
+                (isDayShift ? bed.dayShiftNurseId : bed.nightShiftNurseId) ==
+                staff.staffId,
+          )
+          .map((bed) => bed.patientId)
+          .whereType<String>()
+          .toSet();
+      return ref
+          .watch(wardPatientsProvider)
+          .where((patient) => assignedPatientIds.contains(patient.patientId))
+          .toList();
+    });
+
 /// Reactive family provider yielding loops for a specific patient.
 final patientLoopsProvider = Provider.family<List<LoopStateProjection>, String>(
   (ref, patientId) {
@@ -402,7 +468,11 @@ final wardSearchResultsProvider = Provider<List<WardSearchResult>>((ref) {
   final repo = ref.watch(localWardRepositoryProvider);
   final wardId = ref.watch(selectedWardProvider).wardId;
   if (wardId.isEmpty) return [];
-  return repo.searchWard(wardId: wardId, query: query);
+  return repo.searchWard(
+    wardId: wardId,
+    query: query,
+    allowedPatientIds: ref.watch(currentUserPatientIdsProvider),
+  );
 });
 
 /// Provider for model-assisted Ask Oravi backend service (Milestone 5).

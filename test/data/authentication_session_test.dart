@@ -92,7 +92,10 @@ void main() {
         ),
       );
       final container = ProviderContainer(
-        overrides: [staffAuthServiceProvider.overrideWithValue(service)],
+        overrides: [
+          staffAuthServiceProvider.overrideWithValue(service),
+          localDeviceIdProvider.overrideWithValue('DEVICE-auth-test'),
+        ],
       );
       addTearDown(container.dispose);
 

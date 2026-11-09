@@ -243,8 +243,9 @@ class SyncEngine {
   }
 
   /// Pulls new events created by other ward devices since highest serverSeq stored.
-  Future<int> pullEvents() async {
-    if (wardId.isEmpty) return 0;
+  Future<int> pullEvents({String? wardIdOverride}) async {
+    final requestedWardId = wardIdOverride ?? wardId;
+    if (requestedWardId.isEmpty) return 0;
     final accessToken = getAccessToken?.call();
     if (mockPullHandler == null && accessToken == null) return 0;
     final sinceSeq = await _db.getHighestServerSeq();
@@ -262,7 +263,7 @@ class SyncEngine {
               ? base.substring(0, base.length - 1)
               : base;
           final uri = Uri.parse(
-            '$cleanBase/api/v1/sync/pull?ward_id=$wardId&since_seq=$sinceSeq&limit=100',
+            '$cleanBase/api/v1/sync/pull?ward_id=${Uri.encodeQueryComponent(requestedWardId)}&since_seq=$sinceSeq&limit=100',
           );
 
           final request = await client.getUrl(uri).timeout(timeout);
@@ -296,7 +297,7 @@ class SyncEngine {
   }
 
   /// Complete bidirectional sync cycle: flushes outbox, then pulls remote events.
-  Future<SyncResult> syncAll() async {
+  Future<SyncResult> syncAll({String? wardIdOverride}) async {
     if (mockPushHandler == null &&
         mockPullHandler == null &&
         getAccessToken?.call() == null) {
@@ -333,7 +334,7 @@ class SyncEngine {
 
     try {
       pushed = await pushOutbox();
-      pulled = await pullEvents();
+      pulled = await pullEvents(wardIdOverride: wardIdOverride);
       if (pulled > 0) {
         await onRemoteEventsReceived?.call();
       }

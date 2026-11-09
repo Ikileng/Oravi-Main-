@@ -1,9 +1,83 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/notifications/medical_issue_push_service.dart';
 import '../../data/auth/staff_auth_service.dart';
 import '../../data/ward_board_service.dart';
 import '../../domain/models/staff_profile.dart';
 import '../../domain/models/hospital_ward.dart';
 import 'ward_context_providers.dart';
+
+final localDeviceIdProvider = Provider<String>(
+  (ref) =>
+      throw StateError('The app device identity has not been initialized.'),
+);
+
+class MedicalIssuePushController extends Notifier<String?> {
+  Future<void> _pendingOperation = Future<void>.value();
+
+  @override
+  String? build() => null;
+
+  Future<void> register({
+    required String accessToken,
+    required String deviceId,
+  }) => _queue(() async {
+    try {
+      await ref
+          .read(medicalIssuePushServiceProvider)
+          .register(
+            accessToken: accessToken,
+            deviceId: deviceId,
+            onError: (message) {
+              if (ref.mounted) state = message;
+            },
+          );
+      if (!ref.mounted) return;
+      state = null;
+    } catch (error) {
+      if (!ref.mounted) return;
+      state =
+          'Medical Issue alerts could not be enabled (${error.runtimeType}). Check Firebase setup and notification permission.';
+    }
+  });
+
+  Future<void> unregister({
+    required String accessToken,
+    required String deviceId,
+  }) => _queue(() async {
+    try {
+      await ref
+          .read(medicalIssuePushServiceProvider)
+          .unregister(accessToken: accessToken, deviceId: deviceId);
+      if (!ref.mounted) return;
+      state = null;
+    } catch (error) {
+      if (!ref.mounted) return;
+      state =
+          'Medical Issue alerts could not be fully disabled (${error.runtimeType}).';
+    }
+  });
+
+  Future<void> _queue(Future<void> Function() operation) {
+    final next = _pendingOperation.then((_) => operation());
+    _pendingOperation = next;
+    return next;
+  }
+}
+
+final medicalIssuePushServiceProvider = Provider<MedicalIssuePushService>((
+  ref,
+) {
+  final service = MedicalIssuePushService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final medicalIssuePushControllerProvider =
+    NotifierProvider<MedicalIssuePushController, String?>(
+      MedicalIssuePushController.new,
+    );
 
 /// Provider for backend staff authentication and account management.
 final staffAuthServiceProvider = Provider<StaffAuthService>(
@@ -15,6 +89,15 @@ final wardStaffListProvider = FutureProvider<List<StaffProfile>>((ref) async {
   final service = ref.watch(staffAuthServiceProvider);
   return service.getStaffForWard('');
 });
+
+final patientStaffListProvider =
+    FutureProvider.family<List<StaffProfile>, String>((ref, patientId) async {
+      final service = WardBoardService(
+        getAccessToken: () => ref.read(authAccessTokenProvider),
+      );
+      final date = DateTime.now().toIso8601String().substring(0, 10);
+      return service.getStaffForPatient(patientId: patientId, date: date);
+    });
 
 /// Currently authenticated clinical staff member on this device.
 class AuthenticatedStaffNotifier extends Notifier<StaffProfile?> {
@@ -91,6 +174,16 @@ class AuthController extends Notifier<AuthState> {
       ref
           .read(authAccessTokenProvider.notifier)
           .setToken(!token.startsWith('offline_token_') ? token : null);
+      if (!token.startsWith('offline_token_')) {
+        unawaited(
+          ref
+              .read(medicalIssuePushControllerProvider.notifier)
+              .register(
+                accessToken: token,
+                deviceId: ref.read(localDeviceIdProvider),
+              ),
+        );
+      }
       final boardService = WardBoardService(
         getAccessToken: () => ref.read(authAccessTokenProvider),
       );
@@ -158,10 +251,23 @@ class AuthController extends Notifier<AuthState> {
   }
 
   void logout() {
+    final token = ref.read(authAccessTokenProvider);
+    if (token != null) {
+      unawaited(
+        ref
+            .read(medicalIssuePushControllerProvider.notifier)
+            .unregister(
+              accessToken: token,
+              deviceId: ref.read(localDeviceIdProvider),
+            ),
+      );
+    }
     ref.read(authenticatedStaffProvider.notifier).setStaff(null);
     ref.read(authAccessTokenProvider.notifier).setToken(null);
     ref.read(selectedWardProvider.notifier).selectWard(_noWard());
-    ref.read(wardContextNeedsConfirmationProvider.notifier).setNeedsConfirmation(false);
+    ref
+        .read(wardContextNeedsConfirmationProvider.notifier)
+        .setNeedsConfirmation(false);
     ref.read(wardContextErrorProvider.notifier).setError(null);
     state = const AuthState();
   }
