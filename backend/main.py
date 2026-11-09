@@ -1,11 +1,14 @@
+import asyncio
+import logging
 import os
 import secrets
 import sqlite3
+import uuid
 from datetime import date
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI, Query, HTTPException, Header, Depends, status
 from .models import (
-    SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
+    CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
     StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile,
     HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse
 )
@@ -13,6 +16,12 @@ from .event_store import EventStore
 from .staff_store import StaffStore
 from .ward_store import WardStore
 from .services.llm_service import LLMService
+from .services.fcm_service import FcmService
+from .services.medical_issue_validation import (
+    carried_forward_owner_id,
+    open_medical_issue_ids,
+    validate_medical_issue_event,
+)
 
 app = FastAPI(
     title="Oravi Ward Sync and Clinical Auth API",
@@ -28,6 +37,8 @@ store = EventStore(db_path=database_path)
 staff_store = StaffStore(db_path=database_path)
 ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
+fcm_service = FcmService()
+logger = logging.getLogger(__name__)
 
 
 def require_staff(authorization: str = Header(default="")) -> StaffProfile:
@@ -61,9 +72,334 @@ def _staff_can_access_ward(
         profile.staff_id, ward_id, assignment_date
     )
 
+
+def _patient_assignment_for_user(
+    profile: StaffProfile, patient_id: str, assignment_date: str
+):
+    assignment = ward_store.get_patient_assignment(patient_id, assignment_date)
+    if assignment is None:
+        return None
+    if profile.role == "charge_nurse":
+        if staff_store.get_ward_preference(profile.staff_id) == assignment["ward_id"]:
+            return assignment
+        return None
+    if (
+        profile.staff_id in assignment["staff_ids"]
+        and staff_store.is_active_clinical_staff(profile.staff_id)
+    ):
+        return assignment
+    return None
+
+
+def _staff_can_access_patient(
+    profile: StaffProfile, patient_id: str, assignment_date: str
+) -> bool:
+    return _patient_assignment_for_user(profile, patient_id, assignment_date) is not None
+
+
+def _staff_can_access_carried_issue(
+    staff_id: str, patient_id: str, loop_id: str
+) -> bool:
+    if not staff_store.is_active_clinical_staff(staff_id):
+        return False
+    history = store.get_loop_events(patient_id, loop_id)
+    return carried_forward_owner_id(history) == staff_id
+
+
+def _authorized_patient_staff_ids(patient_id: str, assignment_date: str) -> set[str]:
+    assignment = ward_store.get_patient_assignment(patient_id, assignment_date)
+    if assignment is None:
+        return set()
+    staff_ids = set(assignment["staff_ids"])
+    charge_nurses = staff_store.get_charge_nurses_for_ward(assignment["ward_id"])
+    staff_ids.update(charge_nurse.staff_id for charge_nurse in charge_nurses)
+    return {
+        staff_id
+        for staff_id in staff_ids
+        if staff_store.is_active_clinical_staff(staff_id)
+        or staff_id in {nurse.staff_id for nurse in charge_nurses}
+    }
+
+
+def _notification_recipients_for_events(events) -> dict[str, list[str]]:
+    histories: dict[tuple[str, str], list] = {}
+    recipients_by_event: dict[str, list[str]] = {}
+    quiet_event_types = {
+        "LoopRead",
+        "LoopUserAcknowledged",
+        "LoopAcknowledged",
+    }
+    for event in events:
+        if not event.loop_id or event.type in quiet_event_types:
+            continue
+        issue_key = (event.patient_id, event.loop_id)
+        history = histories.get(issue_key)
+        if history is None:
+            history = store.get_loop_events(*issue_key)
+        assignment_date = event.client_created_at[:10]
+        authorized = _authorized_patient_staff_ids(
+            event.patient_id, assignment_date
+        )
+        if not authorized:
+            carried_owner = carried_forward_owner_id(history)
+            if carried_owner and staff_store.is_active_clinical_staff(
+                carried_owner
+            ):
+                authorized = {carried_owner}
+        participants: set[str] = set()
+        mentioned: set[str] = set()
+        owner_id = event.author_id
+        urgency = ""
+        for prior in history:
+            if prior.type == "LoopOpened":
+                owner_id = str(
+                    prior.payload.get("initial_owner_id") or prior.author_id
+                )
+                urgency = str(prior.payload.get("urgency") or "")
+            elif prior.type == "LoopOwnerChanged":
+                owner_id = str(prior.payload.get("new_owner_id") or owner_id)
+            if prior.type not in quiet_event_types:
+                participants.add(prior.author_id)
+            mentioned.update(
+                str(staff_id)
+                for staff_id in prior.payload.get("mentioned_staff_ids", [])
+                if staff_id
+            )
+
+        participants.add(event.author_id)
+        mentioned.update(
+            str(staff_id)
+            for staff_id in event.payload.get("mentioned_staff_ids", [])
+            if staff_id
+        )
+        if event.type == "LoopOwnerChanged":
+            owner_id = str(event.payload.get("new_owner_id") or owner_id)
+            participants.add(owner_id)
+
+        if event.type == "LoopOpened":
+            owner_id = str(event.payload.get("initial_owner_id") or event.author_id)
+            urgency = str(event.payload.get("urgency") or "")
+            all_clinicians = set(authorized)
+            recipients = all_clinicians
+        elif urgency == "critical":
+            recipients = set(authorized)
+        else:
+            recipients = {owner_id, *participants, *mentioned, event.author_id}
+
+        recipients_by_event[event.event_id] = sorted(recipients & authorized)
+        history = [*history, event]
+        histories[issue_key] = history
+    return recipients_by_event
+
+
+def _validate_patient_issue_events(
+    events, allowed_carry_forward_event_ids: Optional[set[str]] = None
+) -> None:
+    allowed_carry_forward_event_ids = allowed_carry_forward_event_ids or set()
+    histories: dict[tuple[str, str], list] = {}
+    for event in events:
+        if not event.loop_id:
+            continue
+        is_carry_forward = event.payload.get("carry_forward") is True
+        if (
+            is_carry_forward
+            and event.event_id not in allowed_carry_forward_event_ids
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Carry-forward ownership must be recorded with the board update.",
+            )
+        issue_key = (event.patient_id, event.loop_id)
+        history = histories.get(issue_key)
+        if history is None:
+            history = store.get_loop_events(*issue_key)
+        if any(prior.event_id == event.event_id for prior in history):
+            continue
+        assignment = ward_store.get_patient_assignment(
+            event.patient_id, event.client_created_at[:10]
+        )
+        if assignment is None:
+            if not _staff_can_access_carried_issue(
+                event.author_id,
+                event.patient_id,
+                event.loop_id,
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Medical Issues require a current board assignment or carried ownership.",
+                )
+            authorized_staff_ids = {event.author_id}
+            profile = staff_store.get_active_staff_by_ids([event.author_id])[0]
+            board_doctor_ids = (
+                {event.author_id} if profile.role == "doctor_on_call" else set()
+            )
+        else:
+            authorized_staff_ids = set(assignment["staff_ids"])
+            charge_nurses = staff_store.get_charge_nurses_for_ward(
+                assignment["ward_id"]
+            )
+            authorized_staff_ids.update(item.staff_id for item in charge_nurses)
+            authorized_staff_ids = {
+                staff_id
+                for staff_id in authorized_staff_ids
+                if staff_store.is_active_clinical_staff(staff_id)
+                or staff_id in {item.staff_id for item in charge_nurses}
+            }
+            board_doctor_ids = set(assignment["doctor_ids"])
+        if is_carry_forward:
+            target_owner = event.payload.get("new_owner_id")
+            if (
+                not isinstance(target_owner, str)
+                or not staff_store.is_active_clinical_staff(target_owner)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="The carried issue owner must be an active clinician.",
+                )
+            authorized_staff_ids.add(target_owner)
+        try:
+            validate_medical_issue_event(
+                history,
+                event,
+                authorized_staff_ids,
+                board_doctor_ids,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        history = [*history, event]
+        histories[issue_key] = history
+
+
+def _carried_forward_issue_references(
+    staff_id: str,
+    ward_id: str | None = None,
+    *,
+    include_events: bool = False,
+):
+    references = []
+    for patient_id, loop_id in store.get_carried_forward_issue_candidates(staff_id):
+        history = store.get_loop_events(patient_id, loop_id)
+        if carried_forward_owner_id(history) != staff_id:
+            continue
+        issue_ward_id = store.get_patient_ward(patient_id)
+        if not issue_ward_id or (ward_id and issue_ward_id != ward_id):
+            continue
+        opened = next(
+            (event for event in history if event.type == "LoopOpened"),
+            None,
+        )
+        if opened is None:
+            continue
+        reference = {
+            "patient_id": patient_id,
+            "ward_id": issue_ward_id,
+            "loop_id": loop_id,
+            "title": str(opened.payload.get("title") or "Medical Issue"),
+            "urgency": str(opened.payload.get("urgency") or "routine"),
+            "is_open": loop_id in open_medical_issue_ids(history),
+        }
+        if include_events:
+            reference["events"] = [event.to_dict() for event in history]
+        references.append(reference)
+    return references
+
+
+def _dispatch_due_medical_issue_notifications() -> None:
+    for notification in store.get_due_medical_issue_notifications():
+        notification_id = int(notification["notification_id"])
+        staff_id = str(notification["staff_id"])
+        fids = staff_store.get_fcm_fids_for_staff(staff_id)
+        delivered_fids = store.get_delivered_medical_issue_fids(notification_id)
+        if not fids and not delivered_fids:
+            store.mark_medical_issue_notification_failed(
+                notification_id, "Recipient has no registered installation."
+            )
+            continue
+        delivery_errors = set()
+        for fid in fids:
+            if fid in delivered_fids:
+                continue
+            try:
+                delivered = fcm_service.send_medical_issue_alert(
+                    fid,
+                    str(notification["patient_id"]),
+                    str(notification["loop_id"]),
+                )
+                if not delivered:
+                    staff_store.remove_fcm_fid(fid)
+                store.mark_medical_issue_notification_fid_delivered(
+                    notification_id, fid
+                )
+            except Exception as error:
+                delivery_errors.add(type(error).__name__)
+                logger.error(
+                    "Medical issue notification delivery failed for staff %s (%s).",
+                    staff_id,
+                    type(error).__name__,
+                )
+        if delivery_errors:
+            error_types = ", ".join(sorted(delivery_errors))
+            store.mark_medical_issue_notification_failed(
+                notification_id,
+                f"FCM delivery failed for one or more installations ({error_types}).",
+            )
+            continue
+        try:
+            store.mark_medical_issue_notification_delivered(notification_id)
+        except Exception as error:
+            logger.error(
+                "Medical issue notification delivery failed for staff %s (%s).",
+                staff_id,
+                type(error).__name__,
+            )
+            store.mark_medical_issue_notification_failed(
+                notification_id,
+                f"Could not update notification delivery state ({type(error).__name__}).",
+            )
+
+
+async def _medical_issue_notification_worker() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_dispatch_due_medical_issue_notifications)
+        except Exception as error:
+            logger.error(
+                "Medical issue notification worker failed (%s).",
+                type(error).__name__,
+            )
+        await asyncio.sleep(15)
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "oravi-backend", "version": "0.3.0"}
+    return {
+        "status": "ok",
+        "service": "oravi-backend",
+        "version": "0.3.0",
+        "medical_issue_push_configured": bool(
+            os.getenv("FIREBASE_PROJECT_ID")
+            or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+            or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        ),
+    }
+
+
+@app.on_event("startup")
+async def start_medical_issue_notification_worker():
+    app.state.medical_issue_notification_worker = asyncio.create_task(
+        _medical_issue_notification_worker()
+    )
+
+
+@app.on_event("shutdown")
+async def stop_medical_issue_notification_worker():
+    worker = getattr(app.state, "medical_issue_notification_worker", None)
+    if worker is not None:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
 
 # --- Hospital Wards & Shift Allocation Endpoints ---
 
@@ -159,6 +495,50 @@ def get_ward_board(ward_id: str, date: str, shift_type: str, profile: StaffProfi
     return board or {"ward_id": ward_id, "date": date, "shift_type": shift_type,
                      "bed_assignments": [], "responsibilities": {}}
 
+
+@app.get("/api/v1/patients/{patient_id}/staff")
+def get_patient_clinicians(
+    patient_id: str,
+    date: str = Query(..., description="Current board date in YYYY-MM-DD format"),
+    profile: StaffProfile = Depends(require_staff),
+):
+    assignment = _patient_assignment_for_user(profile, patient_id, date)
+    if assignment is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this patient.")
+    staff_ids = set(assignment["staff_ids"])
+    charge_nurses = staff_store.get_charge_nurses_for_ward(assignment["ward_id"])
+    staff_ids.update(charge_nurse.staff_id for charge_nurse in charge_nurses)
+    return {
+        "patient_id": patient_id,
+        "staff": [
+            staff.__dict__
+            for staff in staff_store.get_active_staff_by_ids(sorted(staff_ids))
+        ],
+    }
+
+
+@app.get("/api/v1/patients/{patient_id}/medical-issues/{loop_id}")
+def get_medical_issue_thread(
+    patient_id: str,
+    loop_id: str,
+    profile: StaffProfile = Depends(require_staff),
+):
+    history = store.get_loop_events(patient_id, loop_id)
+    if not history or not (
+        _staff_can_access_patient(profile, patient_id, date.today().isoformat())
+        or _staff_can_access_carried_issue(profile.staff_id, patient_id, loop_id)
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Medical Issue thread was not found or is not assigned to you.",
+        )
+    return {
+        "patient_id": patient_id,
+        "ward_id": store.get_patient_ward(patient_id),
+        "loop_id": loop_id,
+        "events": [event.to_dict() for event in history],
+    }
+
 @app.get("/api/v1/allocations/check-conflict", response_model=AllocationConflictCheckResponse)
 def check_shift_conflict(
     nurse_id: str = Query(..., description="Staff ID of the nurse to check"),
@@ -194,11 +574,114 @@ def publish_allocation(allocation: ShiftAllocationModel, profile: StaffProfile =
         for item in allocation.bed_assignments
     ):
         raise HTTPException(status_code=400, detail="Every assigned staff member must have an active clinical account.")
+    if any(
+        item.get("admitting_doctor")
+        and not staff_store.is_active_doctor(item["admitting_doctor"])
+        for item in allocation.bed_assignments
+    ):
+        raise HTTPException(status_code=400, detail="Every assigned doctor must have an active doctor account.")
     try:
-        success = ward_store.publish_shift_allocation(allocation)
+        with store._lock:
+            removed_patient_ids = ward_store.patient_ids_removed_by_allocation(
+                allocation
+            )
+            expected_issue_keys: set[tuple[str, str]] = set()
+            for patient_id in removed_patient_ids:
+                if store.get_patient_ward(patient_id) != allocation.ward_id:
+                    raise ValueError(
+                        "A removed patient must have a verified ward history."
+                    )
+                history = store.get_patient_events(patient_id)
+                expected_issue_keys.update(
+                    (patient_id, loop_id)
+                    for loop_id in open_medical_issue_ids(history)
+                )
+
+            carry_forward_owners = {}
+            for item in allocation.carry_forward_issues:
+                patient_id = item.get("patient_id")
+                loop_id = item.get("loop_id")
+                owner_id = item.get("owner_id")
+                reason = item.get("reason", "")
+                if (
+                    not isinstance(patient_id, str)
+                    or not isinstance(loop_id, str)
+                    or not isinstance(owner_id, str)
+                    or not isinstance(reason, str)
+                ):
+                    raise ValueError("Carry-forward issue details are invalid.")
+                issue_key = (patient_id, loop_id)
+                if issue_key in carry_forward_owners:
+                    raise ValueError(
+                        "Each open Medical Issue must have one named owner."
+                    )
+                if not staff_store.is_active_clinical_staff(owner_id):
+                    raise ValueError(
+                        "The named owner must be an active clinical staff member."
+                    )
+                carry_forward_owners[issue_key] = (owner_id, reason.strip())
+
+            if set(carry_forward_owners) != expected_issue_keys:
+                raise ValueError(
+                    "Every open Medical Issue must be carried forward to a named owner "
+                    "before the patient leaves all boards."
+                )
+
+            carry_forward_events = []
+            notification_staff_ids_by_event = {}
+            for (patient_id, loop_id), (owner_id, reason) in sorted(
+                carry_forward_owners.items()
+            ):
+                owner = staff_store.get_active_staff_by_ids([owner_id])[0]
+                event = CanonicalEvent(
+                    event_id=str(uuid.uuid4()),
+                    patient_id=patient_id,
+                    type="LoopOwnerChanged",
+                    author_id=profile.staff_id,
+                    device_id=f"BOARD-{allocation.allocation_id}",
+                    client_created_at=allocation.published_at,
+                    loop_id=loop_id,
+                    payload={
+                        "new_owner_id": owner.staff_id,
+                        "new_owner_role": owner.role,
+                        "transfer_reason": reason,
+                        "carry_forward": True,
+                    },
+                )
+                carry_forward_events.append(event)
+                notification_staff_ids_by_event[event.event_id] = [owner_id]
+
+            _validate_patient_issue_events(
+                carry_forward_events,
+                {event.event_id for event in carry_forward_events},
+            )
+
+            def publish_atomically(connection):
+                if ward_store.patient_ids_removed_by_allocation(
+                    allocation, connection=connection
+                ) != removed_patient_ids:
+                    raise ValueError(
+                        "The ward board changed while carry-forward was being prepared. "
+                        "Reload and try again."
+                    )
+                ward_store.publish_shift_allocation(
+                    allocation, connection=connection
+                )
+
+            store.append_events(
+                carry_forward_events,
+                notification_staff_ids_by_event,
+                transaction_action=publish_atomically,
+            )
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return {"success": success, "allocation_id": allocation.allocation_id}
+    return {
+        "success": True,
+        "allocation_id": allocation.allocation_id,
+        "carry_forward_events": [
+            event.to_dict() for event in carry_forward_events
+        ],
+    }
 
 @app.get("/api/v1/nurses/{nurse_id}/active-shift")
 def get_nurse_active_shift(
@@ -242,6 +725,10 @@ def accept_handoff_beds(
         )
     outgoing_nurse_id = payload.get("outgoing_nurse_id")
     beds = payload.get("beds")
+    handoff_session_id = payload.get("handoff_session_id")
+    transferred_loop_ids_by_patient = payload.get(
+        "transferred_loop_ids_by_patient"
+    )
     if (
         not isinstance(outgoing_nurse_id, str)
         or outgoing_nurse_id != profile.staff_id
@@ -249,6 +736,9 @@ def accept_handoff_beds(
         or not isinstance(beds, list)
         or not beds
         or not all(isinstance(bed, str) and bed for bed in beds)
+        or not isinstance(handoff_session_id, str)
+        or not handoff_session_id.strip()
+        or not isinstance(transferred_loop_ids_by_patient, dict)
     ):
         raise HTTPException(
             status_code=400,
@@ -265,12 +755,54 @@ def accept_handoff_beds(
             status_code=401,
             detail="Verify the incoming nurse's identity before accepting the handoff.",
         )
+    handoff_start = store.get_handoff_started_event(handoff_session_id)
+    if (
+        handoff_start is None
+        or handoff_start.author_id != outgoing_nurse_id
+        or handoff_start.payload.get("outgoing_nurse_id") != outgoing_nurse_id
+        or handoff_start.payload.get("incoming_nurse_id")
+        != incoming_profile.staff_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The handoff session does not match the verified nurses.",
+        )
+    issue_lists: dict[str, list[str]] = {}
+    for patient_id, loop_ids in transferred_loop_ids_by_patient.items():
+        if (
+            not isinstance(patient_id, str)
+            or not isinstance(loop_ids, list)
+            or not all(isinstance(loop_id, str) for loop_id in loop_ids)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Transferred Medical Issue IDs must be valid patient lists.",
+            )
+        if not store.patient_belongs_to_ward(
+            patient_id, str(handoff_start.payload.get("ward_id", ""))
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="A selected patient does not belong to this handoff ward.",
+            )
+        expected_loop_ids = open_medical_issue_ids(
+            store.get_patient_events(patient_id)
+        )
+        if set(loop_ids) != expected_loop_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="All open Medical Issues must be included in the handoff.",
+            )
+        issue_lists[patient_id] = loop_ids
     try:
         updated = ward_store.transfer_handoff_beds(
             allocation_id=allocation_id,
             outgoing_nurse_id=outgoing_nurse_id,
             incoming_nurse_id=incoming_profile.staff_id,
             beds=beds,
+            handoff_session_id=handoff_session_id,
+            transferred_loop_ids_by_patient=issue_lists,
+            expected_ward_id=str(handoff_start.payload["ward_id"]),
         )
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -325,6 +857,39 @@ def logout_staff(authorization: str = Header(default="")):
     staff_store.revoke_session(token)
     return {"success": True}
 
+
+@app.post("/api/v1/staff/me/fcm-installation")
+def register_fcm_device_token(
+    payload: dict, profile: StaffProfile = Depends(require_staff)
+):
+    fid = payload.get("fid")
+    device_id = payload.get("device_id")
+    platform = payload.get("platform")
+    if (
+        not isinstance(fid, str)
+        or not 20 <= len(fid) <= 256
+        or not isinstance(device_id, str)
+        or not 1 <= len(device_id) <= 200
+        or platform not in {"android", "ios", "macos"}
+    ):
+        raise HTTPException(status_code=400, detail="A valid Firebase installation is required.")
+    if not staff_store.register_fcm_installation(
+        profile.staff_id, device_id, fid, platform
+    ):
+        raise HTTPException(status_code=409, detail="The staff account is unavailable.")
+    return {"success": True}
+
+
+@app.delete("/api/v1/staff/me/fcm-installation")
+def remove_fcm_device_token(
+    payload: dict, profile: StaffProfile = Depends(require_staff)
+):
+    device_id = payload.get("device_id")
+    if not isinstance(device_id, str) or not 1 <= len(device_id) <= 200:
+        raise HTTPException(status_code=400, detail="A valid device ID is required.")
+    staff_store.remove_fcm_installation(profile.staff_id, device_id)
+    return {"success": True}
+
 @app.post("/api/v1/admin/staff", response_model=StaffProfile)
 def create_staff_member(request: CreateStaffRequest, admin: StaffProfile = Depends(require_dev_admin)):
     try:
@@ -345,20 +910,101 @@ def create_staff_member(request: CreateStaffRequest, admin: StaffProfile = Depen
 
 @app.post("/api/v1/sync/push", response_model=SyncPushResponse)
 def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_staff)):
-    patient_wards = {}
     for event in request.events:
-        ward_id = event.payload.get("ward_id") or patient_wards.get(event.patient_id)
-        if ward_id is None:
-            ward_id = store.get_patient_ward(event.patient_id)
-        event_date = event.client_created_at[:10]
-        if (
-            event.author_id != profile.staff_id
-            or not ward_id
-            or not _staff_can_access_ward(profile, ward_id, event_date)
-        ):
-            raise HTTPException(status_code=403, detail="Events must belong to your account and assigned ward.")
-        patient_wards[event.patient_id] = ward_id
-    acks = store.append_events(request.events)
+        access_date = event.client_created_at[:10]
+        handoff_session_id = event.payload.get("handoff_session_id")
+        handoff_start = (
+            store.get_handoff_started_event(handoff_session_id)
+            if isinstance(handoff_session_id, str)
+            else None
+        )
+        is_completed_handoff = event.type == "HandoffCompleted"
+        is_accepted_bed = event.type == "HandoffBedAccepted"
+        is_transferred_issue = (
+            event.type == "LoopOwnerChanged"
+            and isinstance(handoff_session_id, str)
+        )
+        if is_completed_handoff:
+            payload = event.payload
+            authorized = bool(
+                handoff_start
+                and handoff_start.payload.get("ward_id") == event.patient_id
+                and handoff_start.payload.get("outgoing_nurse_id")
+                == profile.staff_id
+                and isinstance(payload.get("total_beds_handed_over"), int)
+                and not isinstance(payload.get("total_beds_handed_over"), bool)
+                and isinstance(payload.get("total_loops_transferred"), int)
+                and not isinstance(payload.get("total_loops_transferred"), bool)
+                and ward_store.handoff_has_no_unaccepted_patients(
+                    handoff_session_id,
+                    profile.staff_id,
+                    event.patient_id,
+                    access_date,
+                    payload["total_beds_handed_over"],
+                    payload["total_loops_transferred"],
+                )
+            )
+        elif is_accepted_bed or is_transferred_issue:
+            authorized = bool(
+                handoff_start
+                and handoff_start.payload.get("outgoing_nurse_id")
+                == profile.staff_id
+                and event.author_id == profile.staff_id
+                and ward_store.authorizes_handoff_event(
+                    handoff_session_id=handoff_session_id,
+                    patient_id=event.patient_id,
+                    author_id=event.author_id,
+                    event_type=event.type,
+                    loop_id=event.loop_id,
+                    new_owner_id=event.payload.get("new_owner_id"),
+                    bed_number=event.payload.get("bed_number"),
+                    transferred_loop_ids=event.payload.get(
+                        "transferred_loop_ids"
+                    ),
+                )
+                and (
+                    event.type != "HandoffBedAccepted"
+                    or (
+                        isinstance(
+                            event.payload.get("nothing_pending_confirmed"), bool
+                        )
+                        and event.payload["nothing_pending_confirmed"]
+                        == (not event.payload.get("transferred_loop_ids"))
+                    )
+                )
+            )
+        else:
+            is_ward_handoff = event.type == "HandoffStarted"
+            ward_id = (
+                event.payload.get("ward_id")
+                if is_ward_handoff
+                else None
+            )
+            authorized = (
+                _staff_can_access_ward(
+                    profile, ward_id or event.patient_id, access_date
+                )
+                if is_ward_handoff
+                else _staff_can_access_patient(
+                    profile, event.patient_id, access_date
+                )
+                or bool(
+                    event.loop_id
+                    and _staff_can_access_carried_issue(
+                        profile.staff_id, event.patient_id, event.loop_id
+                    )
+                )
+            )
+        if event.author_id != profile.staff_id or not authorized:
+            raise HTTPException(
+                status_code=403,
+                detail="Events must belong to your account and an assigned patient.",
+            )
+    _validate_patient_issue_events(request.events)
+    notifications = _notification_recipients_for_events(request.events)
+    acks = store.append_events(
+        request.events, notification_staff_ids_by_event=notifications
+    )
     return SyncPushResponse(
         status="success",
         acknowledged_count=len(acks),
@@ -372,23 +1018,65 @@ def sync_pull(
     limit: int = Query(100, description="Max batch size"),
     profile: StaffProfile = Depends(require_staff),
 ):
-    if not _staff_can_access_ward(
-        profile, ward_id, date.today().isoformat()
-    ):
+    assignment_date = date.today().isoformat()
+    has_patient_access = _staff_can_access_ward(
+        profile, ward_id, assignment_date
+    )
+    carried_issues = _carried_forward_issue_references(
+        profile.staff_id, include_events=False
+    )
+    has_handoff_audit_access = ward_store.has_handoff_audit_access(
+        profile.staff_id, ward_id, assignment_date
+    )
+    if not has_patient_access and not has_handoff_audit_access and not carried_issues:
         raise HTTPException(status_code=403, detail="You do not have access to this ward.")
-    events, latest_seq = store.get_events_since(since_seq=since_seq, limit=limit, ward_id=ward_id)
+    if not has_patient_access:
+        patient_ids = set()
+    elif profile.role == "charge_nurse":
+        patient_ids = set(ward_store.get_patient_ids_for_ward(ward_id, assignment_date))
+    else:
+        patient_ids = set(
+            ward_store.get_patient_ids_for_staff(
+                profile.staff_id, assignment_date, ward_id
+            )
+        )
+    events, latest_seq = store.get_events_since(
+        since_seq=since_seq,
+        limit=limit,
+        ward_id=(
+            ward_id
+            if has_patient_access or has_handoff_audit_access
+            else None
+        ),
+        patient_ids=patient_ids,
+        issue_refs={
+            (item["patient_id"], item["loop_id"])
+            for item in carried_issues
+        },
+    )
     return SyncPullResponse(
         ward_id=ward_id,
         latest_seq=latest_seq,
         events=events,
     )
 
+@app.get("/api/v1/medical-issues/carried")
+def get_carried_forward_issues(
+    profile: StaffProfile = Depends(require_staff),
+):
+    """Returns carried issues, exposing only their thread events to the named owner."""
+    return {
+        "issues": _carried_forward_issue_references(
+            profile.staff_id, include_events=True
+        )
+    }
+
 @app.post("/api/v1/patients/{patient_id}/ask", response_model=AskResponse)
 def ask_patient_record(patient_id: str, request: AskRequest, profile: StaffProfile = Depends(require_staff)):
     patient_ward = store.get_patient_ward(patient_id)
     if (
         not patient_ward
-        or not _staff_can_access_ward(profile, patient_ward, date.today().isoformat())
+        or not _staff_can_access_patient(profile, patient_id, date.today().isoformat())
         or not store.patient_belongs_to_ward(patient_id, patient_ward)
     ):
         raise HTTPException(status_code=404, detail="Medical issue or patient context was not found in your ward.")

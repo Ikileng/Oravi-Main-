@@ -52,6 +52,22 @@ class OraviDomainReducer {
             state: nextState,
             updatedAt: event.clientCreatedAt,
           );
+        } else if (event is LoopReadEvent) {
+          current = current.copyWith(
+            readByUserIds: {
+              ...current.readByUserIds,
+              event.authorId: event.clientCreatedAt,
+            },
+            updatedAt: event.clientCreatedAt,
+          );
+        } else if (event is LoopUserAcknowledgedEvent) {
+          current = current.copyWith(
+            acknowledgedByUserIds: {
+              ...current.acknowledgedByUserIds,
+              event.authorId: event.clientCreatedAt,
+            },
+            updatedAt: event.clientCreatedAt,
+          );
         } else if (event is LoopWorkStartedEvent) {
           final nextState = LoopStateMachine.transitionOnStartWork(
             currentState: current.state,
@@ -83,6 +99,7 @@ class OraviDomainReducer {
             createdAt: event.clientCreatedAt,
             quotedMessageId: event.quotedMessageId,
             roleMentions: event.roleMentions,
+            mentionedStaffIds: event.mentionedStaffIds,
           );
           current = current.copyWith(
             messages: [...current.messages, message],
@@ -125,11 +142,13 @@ class OraviDomainReducer {
             currentState: current.state,
             urgency: current.urgency,
             reasonCode: event.reasonCode,
+            closureReason: event.closureReason,
             freeTextNote: event.freeTextNote,
           );
           current = current.copyWith(
             state: nextState,
             closureReason: event.reasonCode,
+            closureReasonText: event.closureReason,
             closureNote: event.freeTextNote,
             resolutionType: event.resolutionType,
             closedByUserId: event.authorId,

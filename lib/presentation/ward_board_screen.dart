@@ -4,6 +4,7 @@ import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
 import '../domain/models/whiteboard_models.dart';
 import '../domain/projections/projections.dart';
+import '../data/database/database_provider.dart';
 import 'handoff_wizard_screen.dart';
 import 'lockscreen/digital_id_lockscreen.dart';
 import 'patient_detail_screen.dart';
@@ -39,10 +40,12 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     final patients = ref.watch(wardPatientsProvider);
     final currentWard = ref.watch(selectedWardProvider);
     final authStaff = ref.watch(authenticatedStaffProvider);
+    final accessiblePatientIds = ref.watch(currentUserPatientIdsProvider);
     final roster = ref.watch(wardSupportRosterProvider);
     final whiteboardBeds = ref.watch(whiteboardAssignmentsProvider);
     final boardState = ref.watch(wardBoardProvider);
     final staffState = ref.watch(boardStaffListProvider);
+    final carriedIssuesState = ref.watch(carriedForwardIssuesProvider('owned'));
     final staffNames = {
       for (final member in staffState.asData?.value ?? const <StaffProfile>[])
         member.staffId: member.name,
@@ -61,18 +64,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     final nurseName = authStaff?.name ?? 'Your shift';
 
     // Calculate dynamic counts
-    final totalPatients = patients.length;
+    final myPatients = patients
+        .where((patient) => accessiblePatientIds.contains(patient.patientId))
+        .toList();
+    final totalPatients = myPatients.length;
     // Calculate pending tasks and completed tasks from patient loops
     int pendingTasksCount = 0;
     int completedTasksCount = 0;
 
-    for (final p in patients) {
+    for (final p in myPatients) {
       final loops = ref.watch(patientLoopsProvider(p.patientId));
       pendingTasksCount += loops.where((l) => l.isOpen).length;
     }
 
     // Filtered patient list
-    final filteredPatients = patients.where((p) {
+    final filteredPatients = myPatients.where((p) {
       final loops = ref.watch(patientLoopsProvider(p.patientId));
       final hasOpen = loops.any((l) => l.isOpen);
       if (_activeFilterIndex == 1) return hasOpen;
@@ -100,6 +106,8 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   children: [
                     _buildGreetingSection(nurseName),
                     const SizedBox(height: 14),
+                    if (authStaff != null)
+                      _buildCarriedForwardIssues(carriedIssuesState),
                     if (currentWard.wardId.isEmpty)
                       _buildNoWardPanel(authStaff)
                     else if (ref.watch(wardContextNeedsConfirmationProvider))
@@ -120,7 +128,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                       _buildPatientListSection(
                         filteredPatients,
                         doctorMap,
-                        hasAnyPatients: patients.isNotEmpty,
+                        hasAnyPatients: myPatients.isNotEmpty,
                       ),
                       const SizedBox(height: 18),
                       _buildWardResponsibilitiesGrid(roster),
@@ -139,6 +147,124 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildCarriedForwardIssues(
+    AsyncValue<List<Map<String, dynamic>>> state,
+  ) {
+    if (state.isLoading) return const SizedBox.shrink();
+    if (state.hasError) {
+      return Card(
+        child: ListTile(
+          title: const Text('Carried Medical Issues could not be loaded'),
+          trailing: IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () =>
+                ref.invalidate(carriedForwardIssuesProvider('owned')),
+          ),
+        ),
+      );
+    }
+    final issues = (state.asData?.value ?? const [])
+        .where((issue) => issue['is_open'] == true)
+        .toList();
+    if (issues.isEmpty) return const SizedBox.shrink();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'Medical Issues assigned to you',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            for (final issue in issues)
+              ListTile(
+                leading: const Icon(Icons.assignment_late_outlined),
+                title: Text(issue['title'] as String? ?? 'Medical Issue'),
+                subtitle: Text(
+                  'Patient ${issue['patient_id']} · ${issue['urgency']} urgency · issue thread access only',
+                ),
+                onTap: () => _openCarriedForwardIssue(issue),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCarriedForwardIssue(Map<String, dynamic> issue) async {
+    try {
+      final patientId = issue['patient_id'] as String;
+      final loopId = issue['loop_id'] as String;
+      final carriedIssues = await ref
+          .read(wardBoardServiceProvider)
+          .getCarriedForwardIssues();
+      final carriedIssue = carriedIssues
+          .where((candidate) => candidate['loop_id'] == loopId)
+          .firstOrNull;
+      if (carriedIssue == null || carriedIssue['patient_id'] != patientId) {
+        throw StateError(
+          'This Medical Issue is no longer assigned to your account.',
+        );
+      }
+      final rawEvents = carriedIssue['events'];
+      if (rawEvents is! List) {
+        throw const FormatException(
+          'The server returned an invalid carried Medical Issue thread.',
+        );
+      }
+      final issueEvents = rawEvents.map((event) {
+        if (event is! Map<String, dynamic>) {
+          throw const FormatException(
+            'The server returned an invalid Medical Issue event.',
+          );
+        }
+        return event;
+      }).toList();
+      await ref.read(localDatabaseProvider).insertRemoteEvents(issueEvents);
+      await ref.read(localWardRepositoryProvider).reloadFromDatabase();
+      ref.read(wardControllerProvider.notifier).refresh();
+      final loop = ref
+          .read(localWardRepositoryProvider)
+          .getLoopsForPatient(patientId)
+          .where((candidate) => candidate.loopId == loopId)
+          .firstOrNull;
+      if (loop == null) {
+        throw StateError(
+          'The assigned Medical Issue thread is not available on this device yet. Try again when online.',
+        );
+      }
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PatientDetailScreen(
+            patient: PatientStateProjection(
+              patientId: patientId,
+              wardId: issue['ward_id'] as String? ?? '',
+              bedNumber: 'Carried issue',
+              patientInitials: '',
+              age: 0,
+              sex: '',
+              shortAdmittingNote: '',
+              admittedAt: loop.createdAt,
+              updatedAt: loop.updatedAt,
+            ),
+            issueOnlyLoopIds: {loopId},
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open the assigned issue: $error')),
+      );
+    }
   }
 
   Widget _buildNoWardPanel(StaffProfile? staff) {
@@ -222,10 +348,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             textAlign: TextAlign.center,
             style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
           ),
-          if (action != null) ...[
-            const SizedBox(height: 12),
-            action,
-          ],
+          if (action != null) ...[const SizedBox(height: 12), action],
         ],
       ),
     );
@@ -708,8 +831,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // ==========================================
   Widget _buildPatientListSection(
     List<PatientStateProjection> patients,
-    Map<String, String> doctorMap,
-    {
+    Map<String, String> doctorMap, {
     required bool hasAnyPatients,
   }) {
     return Column(
@@ -1052,7 +1174,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Ward Manager',
-                nurseName: roster.wardManager.isNotEmpty ? roster.wardManager : '-',
+                nurseName: roster.wardManager.isNotEmpty
+                    ? roster.wardManager
+                    : '-',
                 icon: Icons.person,
                 iconColor: const Color(0xFF38BDF8),
                 phone: '',
@@ -1062,7 +1186,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Team Leader',
-                nurseName: roster.teamLeader.isNotEmpty ? roster.teamLeader : '-',
+                nurseName: roster.teamLeader.isNotEmpty
+                    ? roster.teamLeader
+                    : '-',
                 icon: Icons.people_outline,
                 iconColor: const Color(0xFFA855F7),
                 phone: '',
@@ -1076,7 +1202,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Duty Leader',
-                nurseName: roster.dutyLeader.isNotEmpty ? roster.dutyLeader : '-',
+                nurseName: roster.dutyLeader.isNotEmpty
+                    ? roster.dutyLeader
+                    : '-',
                 icon: Icons.person_outline,
                 iconColor: const Color(0xFFF97316),
                 phone: '',
@@ -1086,7 +1214,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Discharge Nurse',
-                nurseName: roster.dischargeNurse.isNotEmpty ? roster.dischargeNurse : '-',
+                nurseName: roster.dischargeNurse.isNotEmpty
+                    ? roster.dischargeNurse
+                    : '-',
                 icon: Icons.assignment_turned_in_outlined,
                 iconColor: const Color(0xFF34D399),
                 phone: '',
@@ -1110,7 +1240,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             Expanded(
               child: _buildResponsibilityCard(
                 title: 'Nurse In-Charge',
-                nurseName: roster.inchargeNurseDay.isNotEmpty ? roster.inchargeNurseDay : '-',
+                nurseName: roster.inchargeNurseDay.isNotEmpty
+                    ? roster.inchargeNurseDay
+                    : '-',
                 icon: Icons.shield_outlined,
                 iconColor: const Color(0xFF818CF8),
                 phone: '',
@@ -1130,13 +1262,15 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     required String phone,
   }) {
     return InkWell(
-      onTap: phone.isEmpty ? null : () => _showContactActionSheet(
-        roleTitle: title,
-        nurseName: nurseName,
-        icon: icon,
-        iconColor: iconColor,
-        phoneNumber: phone,
-      ),
+      onTap: phone.isEmpty
+          ? null
+          : () => _showContactActionSheet(
+              roleTitle: title,
+              nurseName: nurseName,
+              icon: icon,
+              iconColor: iconColor,
+              phoneNumber: phone,
+            ),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),

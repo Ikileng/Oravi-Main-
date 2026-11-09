@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/staff_profile.dart';
 import '../../domain/models/whiteboard_models.dart';
+import '../../domain/projections/projections.dart';
 import '../providers/whiteboard_providers.dart';
 import '../providers/auth_providers.dart';
 import '../providers/ward_context_providers.dart';
+import '../providers/ward_providers.dart';
 import '../widgets/ward_support_roster_sheet.dart';
 import '../widgets/ward_selection_dialog.dart';
 
@@ -13,10 +15,12 @@ class DigitalWhiteboardScreen extends ConsumerStatefulWidget {
   const DigitalWhiteboardScreen({super.key});
 
   @override
-  ConsumerState<DigitalWhiteboardScreen> createState() => _DigitalWhiteboardScreenState();
+  ConsumerState<DigitalWhiteboardScreen> createState() =>
+      _DigitalWhiteboardScreenState();
 }
 
-class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScreen> {
+class _DigitalWhiteboardScreenState
+    extends ConsumerState<DigitalWhiteboardScreen> {
   int _activeNavIndex = 0;
 
   // Precise Column Widths & Grid Line styling matching user reference design
@@ -25,7 +29,8 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   static const double _kColDoctorWidth = 112.0;
   static const double _kColDayShiftWidth = 84.0;
   static const double _kColNightShiftWidth = 84.0;
-  static const double _kTotalTableWidth = _kColBedWidth +
+  static const double _kTotalTableWidth =
+      _kColBedWidth +
       _kColInitialsWidth +
       _kColDoctorWidth +
       _kColDayShiftWidth +
@@ -52,10 +57,24 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     final hasWriteAccess = currentStaff?.isChargeNurse ?? false;
 
     // Calculate dynamic KPI counters
-    final occupiedCount = beds.where((b) => b.patientInitials.trim().isNotEmpty && b.patientInitials.trim() != '-').length;
+    final occupiedCount = beds
+        .where(
+          (b) =>
+              b.patientInitials.trim().isNotEmpty &&
+              b.patientInitials.trim() != '-',
+        )
+        .length;
     final availableCount = beds.length - occupiedCount;
-    final dayNursesCount = beds.map((b) => b.dayShiftNurseId).where((id) => id != null && id.isNotEmpty).toSet().length;
-    final nightNursesCount = beds.map((b) => b.nightShiftNurseId).where((id) => id != null && id.isNotEmpty).toSet().length;
+    final dayNursesCount = beds
+        .map((b) => b.dayShiftNurseId)
+        .where((id) => id != null && id.isNotEmpty)
+        .toSet()
+        .length;
+    final nightNursesCount = beds
+        .map((b) => b.nightShiftNurseId)
+        .where((id) => id != null && id.isNotEmpty)
+        .toSet()
+        .length;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0F1D),
@@ -69,7 +88,10 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             Expanded(
               child: SingleChildScrollView(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0,
+                    vertical: 8.0,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -144,7 +166,11 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 borderRadius: BorderRadius.circular(8),
                 child: const Padding(
                   padding: EdgeInsets.all(4.0),
-                  child: Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white),
+                  child: Icon(
+                    Icons.arrow_back_ios_new,
+                    size: 18,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -157,29 +183,43 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                   children: [
                     const Text(
                       'Ward Board',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     // Tappable Ward Switcher with search & autofilter
                     InkWell(
-                      onTap: hasWriteAccess ? () {
-                        showDialog(
-                          context: context,
-                          builder: (_) => const WardSelectionDialog(),
-                        );
-                      } : null,
+                      onTap: hasWriteAccess
+                          ? () {
+                              showDialog(
+                                context: context,
+                                builder: (_) => const WardSelectionDialog(),
+                              );
+                            }
+                          : null,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
                             child: Text(
                               currentWard.name,
-                              style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF94A3B8),
+                                fontWeight: FontWeight.w500,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF94A3B8)),
+                          const Icon(
+                            Icons.keyboard_arrow_down,
+                            size: 16,
+                            color: Color(0xFF94A3B8),
+                          ),
                         ],
                       ),
                     ),
@@ -193,7 +233,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 decoration: BoxDecoration(
                   color: const Color(0xFF064E3B).withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.5)),
+                  border: Border.all(
+                    color: const Color(0xFF059669).withValues(alpha: 0.5),
+                  ),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
@@ -202,10 +244,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                     SizedBox(width: 4),
                     Text(
                       'Synced',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF34D399), fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF34D399),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     SizedBox(width: 4),
-                    Icon(Icons.cloud_upload_outlined, size: 13, color: Color(0xFF34D399)),
+                    Icon(
+                      Icons.cloud_upload_outlined,
+                      size: 13,
+                      color: Color(0xFF34D399),
+                    ),
                   ],
                 ),
               ),
@@ -223,10 +273,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 children: [
                   Text(
                     DateTime.now().toLocal().toString().split(' ').first,
-                    style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF94A3B8),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   SizedBox(width: 6),
-                  Icon(Icons.calendar_month_outlined, size: 15, color: Color(0xFF38BDF8)),
+                  Icon(
+                    Icons.calendar_month_outlined,
+                    size: 15,
+                    color: Color(0xFF38BDF8),
+                  ),
                 ],
               ),
 
@@ -238,17 +296,29 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 child: Row(
                   children: [
                     Icon(
-                      isDayShift ? Icons.wb_sunny_outlined : Icons.nightlight_round,
+                      isDayShift
+                          ? Icons.wb_sunny_outlined
+                          : Icons.nightlight_round,
                       size: 14,
-                      color: isDayShift ? const Color(0xFFFBBF24) : const Color(0xFF818CF8),
+                      color: isDayShift
+                          ? const Color(0xFFFBBF24)
+                          : const Color(0xFF818CF8),
                     ),
                     const SizedBox(width: 4),
                     Text(
                       isDayShift ? 'Day Shift' : 'Night Shift',
-                      style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(width: 2),
-                    const Icon(Icons.keyboard_arrow_down, size: 14, color: Color(0xFF94A3B8)),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 14,
+                      color: Color(0xFF94A3B8),
+                    ),
                   ],
                 ),
               ),
@@ -408,14 +478,24 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   }
 
   Widget _buildTableHeader() {
-    const headerStyle = TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8));
-    const subHeaderStyle = TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF64748B));
+    const headerStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.bold,
+      color: Color(0xFF94A3B8),
+    );
+    const subHeaderStyle = TextStyle(
+      fontSize: 10,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF64748B),
+    );
 
     return Container(
       height: 48,
       decoration: const BoxDecoration(
         color: Color(0xFF111C33),
-        border: Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
+        border: Border(
+          bottom: BorderSide(color: _kGridBorderColor, width: 1.0),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -424,27 +504,41 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColBedWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.center,
-            child: const Text('Bed /\nRoom', textAlign: TextAlign.center, style: headerStyle),
+            child: const Text(
+              'Bed /\nRoom',
+              textAlign: TextAlign.center,
+              style: headerStyle,
+            ),
           ),
 
           // 2. Patient Initials
           Container(
             width: _kColInitialsWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.center,
-            child: const Text('Patient\nInitials', textAlign: TextAlign.center, style: headerStyle),
+            child: const Text(
+              'Patient\nInitials',
+              textAlign: TextAlign.center,
+              style: headerStyle,
+            ),
           ),
 
           // 3. Doctor
           Container(
             width: _kColDoctorWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.only(left: 12),
@@ -455,7 +549,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColDayShiftWidth + _kColNightShiftWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             child: Column(
               children: [
@@ -463,7 +559,12 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                   child: Container(
                     alignment: Alignment.center,
                     decoration: const BoxDecoration(
-                      border: Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
+                      border: Border(
+                        bottom: BorderSide(
+                          color: _kGridBorderColor,
+                          width: 1.0,
+                        ),
+                      ),
                     ),
                     child: const Text('Nurses', style: headerStyle),
                   ),
@@ -475,7 +576,12 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                         child: Container(
                           alignment: Alignment.center,
                           decoration: const BoxDecoration(
-                            border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+                            border: Border(
+                              right: BorderSide(
+                                color: _kGridBorderColor,
+                                width: 1.0,
+                              ),
+                            ),
                           ),
                           child: const Text('Day Shift', style: subHeaderStyle),
                         ),
@@ -483,7 +589,10 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                       Expanded(
                         child: Container(
                           alignment: Alignment.center,
-                          child: const Text('Night Shift', style: subHeaderStyle),
+                          child: const Text(
+                            'Night Shift',
+                            style: subHeaderStyle,
+                          ),
                         ),
                       ),
                     ],
@@ -492,7 +601,6 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               ],
             ),
           ),
-
         ],
       ),
     );
@@ -507,7 +615,8 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   ) {
     // Determine vertical status stripe color
     // Green = Occupied & Assigned, Yellow = Pending/Review, Dark Slate = Available
-    final isAvailable = bed.patientInitials.trim() == '-' || bed.patientInitials.trim().isEmpty;
+    final isAvailable =
+        bed.patientInitials.trim() == '-' || bed.patientInitials.trim().isEmpty;
     final isPending = bed.status == 'pending';
     final stripeColor = isAvailable
         ? const Color(0xFF334155)
@@ -516,10 +625,14 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: index % 2 == 0 ? const Color(0xFF0C1425) : const Color(0xFF0F182E),
+        color: index % 2 == 0
+            ? const Color(0xFF0C1425)
+            : const Color(0xFF0F182E),
         border: isLastRow
             ? null
-            : const Border(bottom: BorderSide(color: _kGridBorderColor, width: 1.0)),
+            : const Border(
+                bottom: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -528,7 +641,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColBedWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Row(
@@ -551,12 +666,19 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E293B),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF334155), width: 0.8),
+                    border: Border.all(
+                      color: const Color(0xFF334155),
+                      width: 0.8,
+                    ),
                   ),
                   child: Center(
                     child: Text(
                       bed.bedNumber,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -568,14 +690,22 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColInitialsWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             child: InkWell(
-              onTap: hasWriteAccess ? () => _showStrictInitialsDialog(bed) : () => _notifyReadOnly(),
+              onTap: hasWriteAccess
+                  ? () => _showStrictInitialsDialog(bed)
+                  : () => _notifyReadOnly(),
               child: Center(
                 child: Text(
                   bed.patientInitials.isNotEmpty ? bed.patientInitials : '-',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -585,17 +715,25 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColDoctorWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: InkWell(
-              onTap: hasWriteAccess ? () => _showDoctorSelectionSheet(bed) : () => _notifyReadOnly(),
+              onTap: hasWriteAccess
+                  ? () => _showDoctorSelectionSheet(bed)
+                  : () => _notifyReadOnly(),
               child: Text(
                 bed.admittingDoctor.isNotEmpty
                     ? staffNames[bed.admittingDoctor] ?? bed.admittingDoctor
                     : '-',
-                style: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFCBD5E1),
+                  fontWeight: FontWeight.w500,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -605,7 +743,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColDayShiftWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.center,
             child: _buildNursePill(
@@ -621,7 +761,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
           Container(
             width: _kColNightShiftWidth,
             decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _kGridBorderColor, width: 1.0)),
+              border: Border(
+                right: BorderSide(color: _kGridBorderColor, width: 1.0),
+              ),
             ),
             alignment: Alignment.center,
             child: _buildNursePill(
@@ -632,14 +774,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               onTap: () => _showNurseSelectionSheet(bed, isDay: false),
             ),
           ),
-
         ],
       ),
     );
   }
 
-  Widget _buildNursePill({required String? nurseName, required bool hasWriteAccess, required VoidCallback onTap}) {
-    final hasNurse = nurseName != null && nurseName.isNotEmpty && nurseName != '-';
+  Widget _buildNursePill({
+    required String? nurseName,
+    required bool hasWriteAccess,
+    required VoidCallback onTap,
+  }) {
+    final hasNurse =
+        nurseName != null && nurseName.isNotEmpty && nurseName != '-';
     return InkWell(
       onTap: hasWriteAccess ? onTap : () => _notifyReadOnly(),
       borderRadius: BorderRadius.circular(16),
@@ -652,7 +798,11 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         ),
         child: Text(
           hasNurse ? nurseName : '-',
-          style: const TextStyle(fontSize: 11, color: Color(0xFF7DD3FC), fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 11,
+            color: Color(0xFF7DD3FC),
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -661,16 +811,49 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   // ==========================================
   // KPI SUMMARY CARDS ROW
   // ==========================================
-  Widget _buildKpiCardsRow(int occupied, int available, int dayNurses, int nightNurses) {
+  Widget _buildKpiCardsRow(
+    int occupied,
+    int available,
+    int dayNurses,
+    int nightNurses,
+  ) {
     return Row(
       children: [
-        Expanded(child: _buildKpiCard('Occupied Beds', '$occupied', Icons.bed, const Color(0xFF38BDF8))),
+        Expanded(
+          child: _buildKpiCard(
+            'Occupied Beds',
+            '$occupied',
+            Icons.bed,
+            const Color(0xFF38BDF8),
+          ),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _buildKpiCard('Available Beds', '$available', Icons.bed_outlined, const Color(0xFF94A3B8))),
+        Expanded(
+          child: _buildKpiCard(
+            'Available Beds',
+            '$available',
+            Icons.bed_outlined,
+            const Color(0xFF94A3B8),
+          ),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _buildKpiCard('Day Nurses', '$dayNurses', Icons.people_outline, const Color(0xFF38BDF8))),
+        Expanded(
+          child: _buildKpiCard(
+            'Day Nurses',
+            '$dayNurses',
+            Icons.people_outline,
+            const Color(0xFF38BDF8),
+          ),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _buildKpiCard('Night Nurses', '$nightNurses', Icons.people_outline, const Color(0xFF818CF8))),
+        Expanded(
+          child: _buildKpiCard(
+            'Night Nurses',
+            '$nightNurses',
+            Icons.people_outline,
+            const Color(0xFF818CF8),
+          ),
+        ),
       ],
     );
   }
@@ -692,14 +875,22 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               const SizedBox(width: 4),
               Text(
                 value,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 3),
           Text(
             label,
-            style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+            style: const TextStyle(
+              fontSize: 9,
+              color: Color(0xFF94A3B8),
+              fontWeight: FontWeight.w500,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
         ],
@@ -730,11 +921,19 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             children: [
               const Row(
                 children: [
-                  Icon(Icons.assignment_outlined, size: 15, color: Color(0xFF38BDF8)),
+                  Icon(
+                    Icons.assignment_outlined,
+                    size: 15,
+                    color: Color(0xFF38BDF8),
+                  ),
                   SizedBox(width: 6),
                   Text(
                     'Ward Responsibilities',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ],
               ),
@@ -753,11 +952,19 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 },
                 child: const Row(
                   children: [
-                    Icon(Icons.phone_in_talk, size: 13, color: Color(0xFF34D399)),
+                    Icon(
+                      Icons.phone_in_talk,
+                      size: 13,
+                      color: Color(0xFF34D399),
+                    ),
                     SizedBox(width: 4),
                     Text(
                       'Support Team',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF34D399), fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF34D399),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -795,7 +1002,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Discharge Nurse',
-                  nurse: staffNames[roster.dischargeNurse] ?? roster.dischargeNurse,
+                  nurse:
+                      staffNames[roster.dischargeNurse] ??
+                      roster.dischargeNurse,
                   icon: Icons.assignment_turned_in,
                   color: const Color(0xFF34D399),
                   roleKey: 'discharge_nurse',
@@ -811,7 +1020,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                 ),
                 _buildResponsibilityChip(
                   title: 'Nurse In-Charge',
-                  nurse: staffNames[roster.inchargeNurseDay] ?? roster.inchargeNurseDay,
+                  nurse:
+                      staffNames[roster.inchargeNurseDay] ??
+                      roster.inchargeNurseDay,
                   icon: Icons.person,
                   color: const Color(0xFF93C5FD),
                   roleKey: 'incharge',
@@ -855,9 +1066,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(title, style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8))),
-                Text(nurse.isNotEmpty ? nurse : '-',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                ),
+                Text(
+                  nurse.isNotEmpty ? nurse : '-',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
               ],
             ),
           ],
@@ -887,7 +1107,11 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               SizedBox(width: 8),
               Text(
                 'Read-Only Mode • Maintained by Nurse In-Charge',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -907,12 +1131,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         icon: const Icon(Icons.swap_horiz, color: Colors.white, size: 20),
         label: const Text(
           'Update Ward Assignments',
-          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Ward assignments successfully published and updated!'),
+              content: Text(
+                'Ward assignments successfully published and updated!',
+              ),
               backgroundColor: Color(0xFF059669),
             ),
           );
@@ -963,10 +1193,7 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             icon: Icon(Icons.chat_bubble_outline),
             label: 'Messages',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.more_horiz),
-            label: 'More',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
         ],
       ),
     );
@@ -979,7 +1206,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   void _notifyReadOnly() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Read-Only View: Only the Nurse In-Charge has writing capabilities on the board.'),
+        content: Text(
+          'Read-Only View: Only the Nurse In-Charge has writing capabilities on the board.',
+        ),
         duration: Duration(seconds: 2),
       ),
     );
@@ -987,20 +1216,31 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
 
   /// Strictly typed manual initials dialog (no autofill)
   void _showStrictInitialsDialog(WhiteboardBedAssignment bed) {
-    final controller = TextEditingController(text: bed.patientInitials == '-' ? '' : bed.patientInitials);
-    final patientIdController = TextEditingController(text: bed.patientId ?? '');
+    final controller = TextEditingController(
+      text: bed.patientInitials == '-' ? '' : bed.patientInitials,
+    );
+    final patientIdController = TextEditingController(
+      text: bed.patientId ?? '',
+    );
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
-        title: Text('Bed ${bed.bedNumber}: Patient', style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(
+          'Bed ${bed.bedNumber}: Patient',
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: controller,
               textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
               decoration: const InputDecoration(
                 labelText: 'Patient initials',
                 hintText: 'e.g. J.N or M.G',
@@ -1014,7 +1254,8 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
               style: const TextStyle(color: Colors.white, fontSize: 14),
               decoration: const InputDecoration(
                 labelText: 'Internal patient ID (optional)',
-                helperText: 'Reuse an existing ID for transfers; leave blank to generate a new one.',
+                helperText:
+                    'Reuse an existing ID for transfers; leave blank to generate a new one.',
                 helperStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
               ),
             ),
@@ -1023,21 +1264,43 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF94A3B8)),
+            ),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0284C7),
+            ),
             onPressed: () async {
               final initials = controller.text.trim().toUpperCase();
               try {
-                await ref.read(wardBoardProvider.notifier).updateAssignment(
-                  bed.bedNumber,
-                  patientInitials: initials == '-' ? '' : initials,
-                  patientId: patientIdController.text.trim(),
-                  status: initials.isEmpty || initials == '-'
-                      ? 'available'
-                      : 'accepted',
-                );
+                var carryForwardIssues = <Map<String, String>>[];
+                final suppliedPatientId = patientIdController.text.trim();
+                final removesCurrentPatient =
+                    initials.isEmpty ||
+                    initials == '-' ||
+                    (suppliedPatientId.isNotEmpty &&
+                        suppliedPatientId != bed.patientId) ||
+                    (suppliedPatientId.isEmpty &&
+                        initials != bed.patientInitials);
+                if (removesCurrentPatient && bed.patientId != null) {
+                  final selected = await _prepareCarryForwardIssues(bed);
+                  if (selected == null) return;
+                  carryForwardIssues = selected;
+                }
+                await ref
+                    .read(wardBoardProvider.notifier)
+                    .updateAssignment(
+                      bed.bedNumber,
+                      patientInitials: initials == '-' ? '' : initials,
+                      patientId: patientIdController.text.trim(),
+                      status: initials.isEmpty || initials == '-'
+                          ? 'available'
+                          : 'accepted',
+                      carryForwardIssues: carryForwardIssues,
+                    );
                 if (ctx.mounted) Navigator.of(ctx).pop();
               } catch (error) {
                 _showSaveError(error);
@@ -1050,11 +1313,161 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
     );
   }
 
+  Future<List<Map<String, String>>?> _prepareCarryForwardIssues(
+    WhiteboardBedAssignment bed,
+  ) async {
+    final ward = ref.read(selectedWardProvider);
+    final shift = ref.read(selectedShiftTypeProvider);
+    final otherBoard = await ref
+        .read(wardBoardServiceProvider)
+        .getBoard(
+          wardId: ward.wardId,
+          date: activeWardShiftDate(),
+          shiftType: shift == 'day' ? 'night' : 'day',
+        );
+    final otherAssignments = otherBoard['bed_assignments'];
+    if (otherAssignments is! List) {
+      throw const FormatException(
+        'The other shift board could not be verified before removing this patient.',
+      );
+    }
+    if (otherAssignments.any(
+      (assignment) =>
+          assignment is Map<String, dynamic> &&
+          assignment['patient_id'] == bed.patientId,
+    )) {
+      return [];
+    }
+
+    final openIssues = ref
+        .read(patientLoopsProvider(bed.patientId!))
+        .where((issue) => issue.isOpen)
+        .toList();
+    if (openIssues.isEmpty) return [];
+
+    final clinicians = (await ref.read(wardStaffListProvider.future))
+        .where(
+          (staff) =>
+              staff.isActive &&
+              {
+                'ward_nurse',
+                'charge_nurse',
+                'doctor_on_call',
+              }.contains(staff.role),
+        )
+        .toList();
+    if (clinicians.isEmpty) {
+      throw StateError(
+        'No active clinician is available to own the patient’s open Medical Issues.',
+      );
+    }
+    return _showCarryForwardOwnerDialog(openIssues, clinicians, bed.patientId!);
+  }
+
+  Future<List<Map<String, String>>?> _showCarryForwardOwnerDialog(
+    List<LoopStateProjection> issues,
+    List<StaffProfile> clinicians,
+    String patientId,
+  ) async {
+    final owners = <String, String?>{};
+    final reasons = {
+      for (final issue in issues) issue.loopId: TextEditingController(),
+    };
+    try {
+      return await showDialog<List<Map<String, String>>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Assign owners before removing patient'),
+            content: SizedBox(
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'This is the patient’s last board assignment. Every open Medical Issue needs a named clinician owner. The owner will have access to that issue thread only.',
+                    ),
+                    const SizedBox(height: 12),
+                    for (final issue in issues) ...[
+                      Text(
+                        issue.title,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      DropdownButtonFormField<String>(
+                        initialValue: owners[issue.loopId],
+                        decoration: const InputDecoration(
+                          labelText: 'Named owner',
+                        ),
+                        items: clinicians
+                            .map(
+                              (staff) => DropdownMenuItem(
+                                value: staff.staffId,
+                                child: Text(
+                                  '${staff.name} — ${staff.formattedRole}',
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) =>
+                            setDialogState(() => owners[issue.loopId] = value),
+                      ),
+                      TextField(
+                        controller: reasons[issue.loopId],
+                        decoration: const InputDecoration(
+                          labelText: 'Reason (optional)',
+                        ),
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed:
+                    owners.length == issues.length &&
+                        owners.values.every((owner) => owner != null)
+                    ? () {
+                        Navigator.of(dialogContext).pop([
+                          for (final issue in issues)
+                            {
+                              'patient_id': patientId,
+                              'loop_id': issue.loopId,
+                              'owner_id': owners[issue.loopId]!,
+                              'reason': reasons[issue.loopId]!.text.trim(),
+                            },
+                        ]);
+                      }
+                    : null,
+                child: const Text('Assign and remove'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      for (final controller in reasons.values) {
+        controller.dispose();
+      }
+    }
+  }
+
   /// Doctor selection sheet with real-time autofilter
   void _showDoctorSelectionSheet(WhiteboardBedAssignment bed) {
     final doctors = _availableStaff(doctorOnly: true);
     if (doctors.isEmpty) {
-      _showSaveError(StateError('No active doctors are available for this ward.'));
+      _showSaveError(
+        StateError('No active doctors are available for this ward.'),
+      );
       return;
     }
     _showAutofilterSelectionSheet(
@@ -1062,23 +1475,28 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
       options: doctors.map(_staffOptionLabel).toList(),
       currentValue: _staffLabelForId(doctors, bed.admittingDoctor),
       onSelect: (selected) {
-        final doctor = doctors
-            .firstWhere((member) => _staffOptionLabel(member) == selected);
+        final doctor = doctors.firstWhere(
+          (member) => _staffOptionLabel(member) == selected,
+        );
         _saveBoardChange(
-          () => ref.read(wardBoardProvider.notifier).updateAssignment(
-            bed.bedNumber,
-            doctor: doctor.staffId,
-          ),
+          () => ref
+              .read(wardBoardProvider.notifier)
+              .updateAssignment(bed.bedNumber, doctor: doctor.staffId),
         );
       },
     );
   }
 
   /// Nurse selection sheet with real-time autofilter
-  void _showNurseSelectionSheet(WhiteboardBedAssignment bed, {required bool isDay}) {
+  void _showNurseSelectionSheet(
+    WhiteboardBedAssignment bed, {
+    required bool isDay,
+  }) {
     final nurses = _availableStaff();
     if (nurses.isEmpty) {
-      _showSaveError(StateError('No active nurses are available for this ward.'));
+      _showSaveError(
+        StateError('No active nurses are available for this ward.'),
+      );
       return;
     }
     _showAutofilterSelectionSheet(
@@ -1089,13 +1507,13 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
         isDay ? bed.dayShiftNurseId : bed.nightShiftNurseId,
       ),
       onSelect: (selected) {
-        final nurse = nurses
-            .firstWhere((member) => _staffOptionLabel(member) == selected);
+        final nurse = nurses.firstWhere(
+          (member) => _staffOptionLabel(member) == selected,
+        );
         _saveBoardChange(
-          () => ref.read(wardBoardProvider.notifier).updateAssignment(
-            bed.bedNumber,
-            nurseId: nurse.staffId,
-          ),
+          () => ref
+              .read(wardBoardProvider.notifier)
+              .updateAssignment(bed.bedNumber, nurseId: nurse.staffId),
         );
       },
     );
@@ -1105,7 +1523,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
   void _showRoleAssignmentSheet(String title, String roleKey) {
     final nurses = _availableStaff();
     if (nurses.isEmpty) {
-      _showSaveError(StateError('No active nurses are available for this ward.'));
+      _showSaveError(
+        StateError('No active nurses are available for this ward.'),
+      );
       return;
     }
     _showAutofilterSelectionSheet(
@@ -1113,8 +1533,9 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
       options: nurses.map(_staffOptionLabel).toList(),
       currentValue: '',
       onSelect: (selected) {
-        final nurse = nurses
-            .firstWhere((member) => _staffOptionLabel(member) == selected);
+        final nurse = nurses.firstWhere(
+          (member) => _staffOptionLabel(member) == selected,
+        );
         final currentRoster = ref.read(wardSupportRosterProvider);
         late final WardSupportRoster updatedRoster;
         switch (roleKey) {
@@ -1172,7 +1593,8 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
             return;
         }
         _saveBoardChange(
-          () => ref.read(wardSupportRosterProvider.notifier)
+          () => ref
+              .read(wardSupportRosterProvider.notifier)
               .updateRoster(updatedRoster),
         );
       },
@@ -1224,12 +1646,18 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1E293B),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) {
         String filter = '';
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            final filtered = options.where((opt) => opt.toLowerCase().contains(filter.toLowerCase())).toList();
+            final filtered = options
+                .where(
+                  (opt) => opt.toLowerCase().contains(filter.toLowerCase()),
+                )
+                .toList();
             return Padding(
               padding: EdgeInsets.only(
                 top: 16,
@@ -1244,9 +1672,20 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                       IconButton(
-                        icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 20),
+                        icon: const Icon(
+                          Icons.close,
+                          color: Color(0xFF94A3B8),
+                          size: 20,
+                        ),
                         onPressed: () => Navigator.of(ctx).pop(),
                       ),
                     ],
@@ -1264,10 +1703,20 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                       decoration: const InputDecoration(
                         hintText: 'Type to filter...',
-                        hintStyle: TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                        prefixIcon: Icon(Icons.search, color: Color(0xFF94A3B8), size: 18),
+                        hintStyle: TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 13,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: Color(0xFF94A3B8),
+                          size: 18,
+                        ),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                       ),
                       onChanged: (val) {
                         setModalState(() => filter = val);
@@ -1286,16 +1735,29 @@ class _DigitalWhiteboardScreenState extends ConsumerState<DigitalWhiteboardScree
                         final isSelected = opt == currentValue;
                         return ListTile(
                           dense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           title: Text(
                             opt,
                             style: TextStyle(
-                              color: isSelected ? const Color(0xFF38BDF8) : Colors.white,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              color: isSelected
+                                  ? const Color(0xFF38BDF8)
+                                  : Colors.white,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.w500,
                               fontSize: 14,
                             ),
                           ),
-                          trailing: isSelected ? const Icon(Icons.check, color: Color(0xFF38BDF8), size: 18) : null,
+                          trailing: isSelected
+                              ? const Icon(
+                                  Icons.check,
+                                  color: Color(0xFF38BDF8),
+                                  size: 18,
+                                )
+                              : null,
                           onTap: () {
                             onSelect(opt);
                             Navigator.of(ctx).pop();

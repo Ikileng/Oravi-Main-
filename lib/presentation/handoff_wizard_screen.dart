@@ -12,7 +12,7 @@ import 'theme/clinical_theme.dart';
 
 /// Shift Handoff Wizard strictly implementing PRD Section 7.3:
 /// - FR-11: Pairs outgoing and incoming nurse and walks the board bed by bed.
-/// - FR-12: Bulk acceptance for Routine loops; mandatory individual acceptance for Critical loops.
+/// - FR-12: Transfers every unfinished Medical Issue; critical issues require individual acceptance.
 /// - FR-13: SBAR summary automatically compiled from structured entries.
 /// - FR-14: Explicit timestamped confirmation per bed ('nothing pending' or 'N loops transferred').
 /// - FR-16: Completed handoff is locked; corrections are appended.
@@ -34,7 +34,6 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   String? _incomingAcceptanceToken;
 
   // Per-bed review state during stepper
-  final Set<String> _selectedLoopIds = {};
   final Set<String> _acknowledgedCriticalLoopIds = {};
 
   @override
@@ -131,13 +130,12 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   }
 
   void _resetBedSelection() {
-    _selectedLoopIds.clear();
     _acknowledgedCriticalLoopIds.clear();
   }
 
   @override
   Widget build(BuildContext context) {
-    final patients = ref.watch(wardPatientsProvider);
+    final patients = ref.watch(currentNurseShiftPatientsProvider);
     final session = ref.watch(activeHandoffSessionProvider);
     final ward = ref.watch(selectedWardProvider);
     final boardState = ref.watch(wardBoardProvider);
@@ -176,7 +174,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
           ? _handoffMessage(
               'The ward board could not be loaded: ${boardState.error}',
             )
-          : patients.isEmpty
+          : _currentStep == 0 && patients.isEmpty
           ? _handoffMessage(
               'There are no patients assigned to hand over for this shift.',
             )
@@ -532,7 +530,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Open Loops & Acceptance Protocol (FR-12)
+              // Every unfinished issue transfers with the patient.
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -544,24 +542,6 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (routineLoops.isNotEmpty)
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      icon: const Icon(Icons.select_all, size: 16),
-                      label: const Text(
-                        'Bulk Accept Routine',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _selectedLoopIds.addAll(
-                            routineLoops.map((l) => l.loopId),
-                          );
-                        });
-                      },
-                    ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -592,7 +572,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   ),
                 )
               else ...[
-                // Critical Loops: Individual Mandatory Acceptance (FR-12)
+                // Critical issues still require individual verbal acceptance.
                 ...criticalLoops.map((loop) {
                   final isAcked = _acknowledgedCriticalLoopIds.contains(
                     loop.loopId,
@@ -677,12 +657,10 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                               setState(() {
                                 if (val == true) {
                                   _acknowledgedCriticalLoopIds.add(loop.loopId);
-                                  _selectedLoopIds.add(loop.loopId);
                                 } else {
                                   _acknowledgedCriticalLoopIds.remove(
                                     loop.loopId,
                                   );
-                                  _selectedLoopIds.remove(loop.loopId);
                                 }
                               });
                             },
@@ -693,24 +671,21 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   );
                 }),
 
-                // Routine & Urgent Loops
+                // Routine and urgent issues transfer automatically with the bed.
                 ...routineLoops.map((loop) {
-                  final isSelected = _selectedLoopIds.contains(loop.loopId);
                   return Card(
                     color: ClinicalTheme.surface,
                     margin: const EdgeInsets.only(bottom: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(
-                        color: isSelected
-                            ? ClinicalTheme.nurseBlue
-                            : ClinicalTheme.border,
-                      ),
+                      side: const BorderSide(color: ClinicalTheme.border),
                     ),
-                    child: CheckboxListTile(
+                    child: ListTile(
                       dense: true,
-                      value: isSelected,
-                      activeColor: ClinicalTheme.nurseBlue,
+                      leading: const Icon(
+                        Icons.medical_services_outlined,
+                        color: ClinicalTheme.nurseBlue,
+                      ),
                       title: Text(
                         '[${loop.urgency.name.toUpperCase()}] ${loop.title}',
                         style: const TextStyle(
@@ -726,15 +701,6 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                           fontSize: 11,
                         ),
                       ),
-                      onChanged: (val) {
-                        setState(() {
-                          if (val == true) {
-                            _selectedLoopIds.add(loop.loopId);
-                          } else {
-                            _selectedLoopIds.remove(loop.loopId);
-                          }
-                        });
-                      },
                     ),
                   );
                 }),
@@ -783,8 +749,8 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                     icon: const Icon(Icons.arrow_forward),
                     label: Text(
                       allCriticalAcknowledged
-                          ? 'Confirm: Transfer ${_selectedLoopIds.length} Issue(s) (${patient.bedNumber})'
-                          : 'Acknowledge Critical STAT Loop First',
+                          ? 'Confirm: Transfer ${openLoops.length} Issue(s) (${patient.bedNumber})'
+                          : 'Acknowledge Critical Medical Issue First',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     onPressed: allCriticalAcknowledged
@@ -820,6 +786,13 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             bedNumbers: [patient.bedNumber],
             outgoingStaffId: _outgoingNurse,
             incomingAccessToken: incomingToken,
+            handoffSessionId: sessionId,
+            patientId: patient.patientId,
+            transferredLoopIds: ref
+                .read(patientLoopsProvider(patient.patientId))
+                .where((loop) => loop.isOpen)
+                .map((loop) => loop.loopId)
+                .toList(),
           );
       await ref
           .read(wardControllerProvider.notifier)
@@ -829,9 +802,6 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
             patientId: patient.patientId,
             incomingNurseId: _incomingNurse,
             nothingPendingConfirmed: nothingPending,
-            transferredLoopIds: nothingPending
-                ? const []
-                : _selectedLoopIds.toList(),
           );
     } catch (error) {
       _showHandoffError('Could not save this bed handoff: $error');
@@ -839,10 +809,10 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
     }
     if (!mounted) return;
 
-    final patients = ref.read(wardPatientsProvider);
-    if (_currentBedIndex + 1 < patients.length) {
+    final patients = ref.read(currentNurseShiftPatientsProvider);
+    if (patients.isNotEmpty) {
       setState(() {
-        _currentBedIndex++;
+        _currentBedIndex = 0;
         _resetBedSelection();
       });
     } else {
@@ -884,11 +854,12 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   // Step 3: Shift Summary & Cryptographic Lock (FR-14 to FR-16)
   // ==========================================
   Widget _buildSummaryLockView(HandoffSessionProjection? session) {
-    final patients = ref.watch(wardPatientsProvider);
+    final patients = ref.watch(currentNurseShiftPatientsProvider);
     final isLocked = session?.isLocked ?? false;
 
     final totalTransferred = session?.totalLoopsTransferred ?? 0;
-    final totalBeds = session?.totalBedsHandedOver ?? patients.length;
+    final totalBedsHandedOver = session?.totalBedsHandedOver ?? 0;
+    final totalBeds = totalBedsHandedOver + patients.length;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -953,7 +924,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   child: Column(
                     children: [
                       Text(
-                        '$totalBeds / ${patients.length}',
+                        '$totalBedsHandedOver / $totalBeds',
                         style: const TextStyle(
                           color: ClinicalTheme.textPrimary,
                           fontSize: 20,
@@ -1081,13 +1052,13 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
               label: Text(
                 isLocked
                     ? 'Handoff Locked & Completed'
-                    : 'Sign & Lock Shift Handover',
+                    : 'End Shift & Lock Handover',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
               ),
-              onPressed: isLocked || session == null
+              onPressed: isLocked || session == null || patients.isNotEmpty
                   ? null
                   : () async {
                       try {
@@ -1095,8 +1066,8 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                             .read(wardControllerProvider.notifier)
                             .completeHandoffSession(
                               handoffSessionId: session.handoffSessionId,
-                              authorId: _incomingNurse,
-                              totalBedsHandedOver: totalBeds,
+                              authorId: _outgoingNurse,
+                              totalBedsHandedOver: totalBedsHandedOver,
                               totalLoopsTransferred: totalTransferred,
                             );
                       } catch (error) {

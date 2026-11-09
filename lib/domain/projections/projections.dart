@@ -14,6 +14,7 @@ class ThreadMessage extends Equatable {
   final String? previousContent;
   final String? quotedMessageId;
   final List<String> roleMentions;
+  final List<String> mentionedStaffIds;
   final bool isCallLog;
   final String? callRecipientId;
   final String? callRecipientRole;
@@ -29,6 +30,7 @@ class ThreadMessage extends Equatable {
     this.previousContent,
     this.quotedMessageId,
     this.roleMentions = const [],
+    this.mentionedStaffIds = const [],
     this.isCallLog = false,
     this.callRecipientId,
     this.callRecipientRole,
@@ -42,6 +44,7 @@ class ThreadMessage extends Equatable {
     return ThreadMessage(
       messageId: messageId,
       authorId: authorId,
+      authorRole: authorRole,
       deviceId: deviceId,
       content: content ?? this.content,
       createdAt: createdAt,
@@ -49,6 +52,10 @@ class ThreadMessage extends Equatable {
       previousContent: previousContent ?? this.previousContent,
       quotedMessageId: quotedMessageId,
       roleMentions: roleMentions,
+      mentionedStaffIds: mentionedStaffIds,
+      isCallLog: isCallLog,
+      callRecipientId: callRecipientId,
+      callRecipientRole: callRecipientRole,
     );
   }
 
@@ -64,6 +71,7 @@ class ThreadMessage extends Equatable {
     previousContent,
     quotedMessageId,
     roleMentions,
+    mentionedStaffIds,
     isCallLog,
     callRecipientId,
     callRecipientRole,
@@ -150,10 +158,13 @@ class LoopStateProjection extends Equatable {
   final String? closedByUserId;
   final DateTime? closedAt;
   final String? confirmedByRole;
+  final String? closureReasonText;
   final int reopenCount;
   final List<String> reopenReasons;
   final List<String> linkedLoopIds;
   final LoopEscalationState? activeEscalation;
+  final Map<String, DateTime> readByUserIds;
+  final Map<String, DateTime> acknowledgedByUserIds;
 
   const LoopStateProjection({
     required this.loopId,
@@ -175,10 +186,13 @@ class LoopStateProjection extends Equatable {
     this.closedByUserId,
     this.closedAt,
     this.confirmedByRole,
+    this.closureReasonText,
     this.reopenCount = 0,
     this.reopenReasons = const [],
     this.linkedLoopIds = const [],
     this.activeEscalation,
+    this.readByUserIds = const {},
+    this.acknowledgedByUserIds = const {},
   });
 
   bool get isOpen => state.isOpen;
@@ -201,10 +215,13 @@ class LoopStateProjection extends Equatable {
     String? closedByUserId,
     DateTime? closedAt,
     String? confirmedByRole,
+    String? closureReasonText,
     int? reopenCount,
     List<String>? reopenReasons,
     List<String>? linkedLoopIds,
     LoopEscalationState? activeEscalation,
+    Map<String, DateTime>? readByUserIds,
+    Map<String, DateTime>? acknowledgedByUserIds,
   }) {
     return LoopStateProjection(
       loopId: loopId,
@@ -226,10 +243,14 @@ class LoopStateProjection extends Equatable {
       closedByUserId: closedByUserId ?? this.closedByUserId,
       closedAt: closedAt ?? this.closedAt,
       confirmedByRole: confirmedByRole ?? this.confirmedByRole,
+      closureReasonText: closureReasonText ?? this.closureReasonText,
       reopenCount: reopenCount ?? this.reopenCount,
       reopenReasons: reopenReasons ?? this.reopenReasons,
       linkedLoopIds: linkedLoopIds ?? this.linkedLoopIds,
       activeEscalation: activeEscalation ?? this.activeEscalation,
+      readByUserIds: readByUserIds ?? this.readByUserIds,
+      acknowledgedByUserIds:
+          acknowledgedByUserIds ?? this.acknowledgedByUserIds,
     );
   }
 
@@ -254,10 +275,13 @@ class LoopStateProjection extends Equatable {
     closedByUserId,
     closedAt,
     confirmedByRole,
+    closureReasonText,
     reopenCount,
     reopenReasons,
     linkedLoopIds,
     activeEscalation,
+    readByUserIds,
+    acknowledgedByUserIds,
   ];
 }
 

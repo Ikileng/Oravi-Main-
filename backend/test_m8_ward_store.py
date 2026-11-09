@@ -182,7 +182,7 @@ class TestWardStore(unittest.TestCase):
         self.assertEqual(active["beds"][0]["status"], "accepted")
         self.assertEqual(active["beds"][1]["status"], "accepted")
 
-    def test_handoff_acceptance_transfers_board_ownership_to_authenticated_nurse(self):
+    def test_handoff_assigns_patient_to_incoming_nurse_on_next_shift(self):
         allocation = ShiftAllocationModel(
             allocation_id="alloc-handoff-day",
             ward_id="ward-jacaranda",
@@ -192,7 +192,7 @@ class TestWardStore(unittest.TestCase):
             published_at="2026-10-30T07:00:00Z",
             bed_assignments=[
                 {"bed_number": "25", "patient_id": "test-patient-6", "patient_initials": "A.B", "assigned_nurse_id": "NUR-403", "status": "pending"},
-                {"bed_number": "26", "patient_id": "test-patient-7", "patient_initials": "C.D", "assigned_nurse_id": "NUR-404", "status": "pending"},
+                {"bed_number": "26", "patient_id": "test-patient-7", "patient_initials": "C.D", "assigned_nurse_id": "NUR-403", "status": "pending"},
             ],
             support_roster={},
         )
@@ -203,21 +203,54 @@ class TestWardStore(unittest.TestCase):
             outgoing_nurse_id="NUR-403",
             incoming_nurse_id="NUR-404",
             beds=["25"],
+            handoff_session_id="handoff-day-001",
+            transferred_loop_ids_by_patient={"test-patient-6": []},
+            expected_ward_id="ward-jacaranda",
         )
 
         self.assertEqual(updated_count, 1)
-        active = self.store.get_nurse_active_shift(
-            nurse_id="NUR-404", date="2026-10-30", shift_type="day"
+        outgoing = self.store.get_nurse_active_shift(
+            nurse_id="NUR-403", date="2026-10-30", shift_type="day"
         )
         self.assertEqual(
-            {bed["bed_number"] for bed in active["beds"]}, {"25", "26"}
+            {bed["bed_number"] for bed in outgoing["beds"]}, {"26"}
         )
-        transferred_bed = next(
-            bed for bed in active["beds"] if bed["bed_number"] == "25"
+        self.assertFalse(
+            self.store.handoff_has_no_unaccepted_patients(
+                "handoff-day-001", "NUR-403", "ward-jacaranda", "2026-10-30", 1, 0
+            )
         )
-        self.assertEqual(transferred_bed["status"], "accepted")
 
-    def test_handoff_rejects_beds_not_owned_by_outgoing_or_incoming_nurse(self):
+        self.store.transfer_handoff_beds(
+            allocation_id="alloc-handoff-day",
+            outgoing_nurse_id="NUR-403",
+            incoming_nurse_id="NUR-404",
+            beds=["26"],
+            handoff_session_id="handoff-day-001",
+            transferred_loop_ids_by_patient={"test-patient-7": []},
+            expected_ward_id="ward-jacaranda",
+        )
+        self.assertIsNone(
+            self.store.get_nurse_active_shift(
+                nurse_id="NUR-403", date="2026-10-30", shift_type="day"
+            )
+        )
+        self.assertTrue(
+            self.store.handoff_has_no_unaccepted_patients(
+                "handoff-day-001", "NUR-403", "ward-jacaranda", "2026-10-30", 2, 0
+            )
+        )
+        incoming = self.store.get_nurse_active_shift(
+            nurse_id="NUR-404", date="2026-10-30", shift_type="night"
+        )
+        self.assertEqual(
+            {bed["bed_number"] for bed in incoming["beds"]}, {"25", "26"}
+        )
+        self.assertTrue(
+            all(bed["status"] == "accepted" for bed in incoming["beds"])
+        )
+
+    def test_handoff_rejects_beds_not_assigned_to_outgoing_nurse(self):
         allocation = ShiftAllocationModel(
             allocation_id="alloc-handoff-owner-check",
             ward_id="ward-jacaranda",
@@ -234,12 +267,15 @@ class TestWardStore(unittest.TestCase):
         )
         self.store.publish_shift_allocation(allocation)
 
-        with self.assertRaisesRegex(ValueError, "not owned"):
+        with self.assertRaisesRegex(ValueError, "assigned to the outgoing"):
             self.store.transfer_handoff_beds(
                 allocation_id="alloc-handoff-owner-check",
                 outgoing_nurse_id="NUR-403",
                 incoming_nurse_id="NUR-404",
                 beds=["26"],
+                handoff_session_id="handoff-owner-check",
+                transferred_loop_ids_by_patient={"test-patient-9": []},
+                expected_ward_id="ward-jacaranda",
             )
 
 if __name__ == "__main__":

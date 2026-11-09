@@ -48,6 +48,12 @@ final wardBoardServiceProvider = Provider<WardBoardService>((ref) {
   );
 });
 
+final carriedForwardIssuesProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, _) {
+      ref.watch(authAccessTokenProvider);
+      return ref.read(wardBoardServiceProvider).getCarriedForwardIssues();
+    });
+
 class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
   @override
   Future<WardBoardData> build() async {
@@ -79,6 +85,7 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     String? patientInitials,
     String? patientId,
     String? status,
+    List<Map<String, String>> carryForwardIssues = const [],
   }) async {
     final current = state.asData?.value ?? const WardBoardData();
     final assignments = current.assignments.map((bed) {
@@ -106,7 +113,11 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
         status: status ?? bed.status,
       );
     }).toList();
-    await _save(assignments, current.supportRoster);
+    await _save(
+      assignments,
+      current.supportRoster,
+      carryForwardIssues: carryForwardIssues,
+    );
   }
 
   Future<void> batchAssignBeds(List<String> bedNumbers, String staffId) async {
@@ -137,11 +148,13 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     await _save(assignments, current.supportRoster);
   }
 
-  Future<void> acceptHandoffBeds(
-    {
+  Future<void> acceptHandoffBeds({
     required List<String> bedNumbers,
     required String outgoingStaffId,
     required String incomingAccessToken,
+    required String handoffSessionId,
+    required String patientId,
+    required List<String> transferredLoopIds,
   }) async {
     final current = state.asData?.value ?? const WardBoardData();
     final ward = ref.read(selectedWardProvider);
@@ -159,6 +172,9 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
             outgoingStaffId: outgoingStaffId,
             incomingAccessToken: incomingAccessToken,
             bedNumbers: bedNumbers,
+            handoffSessionId: handoffSessionId,
+            patientId: patientId,
+            transferredLoopIds: transferredLoopIds,
           );
       final response = await ref
           .read(wardBoardServiceProvider)
@@ -181,8 +197,9 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
 
   Future<void> _save(
     List<WhiteboardBedAssignment> assignments,
-    WardSupportRoster roster,
-  ) async {
+    WardSupportRoster roster, {
+    List<Map<String, String>> carryForwardIssues = const [],
+  }) async {
     final ward = ref.read(selectedWardProvider);
     final staff = ref.read(authenticatedStaffProvider);
     if (ward.wardId.isEmpty || staff == null) {
@@ -199,6 +216,7 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
             staffId: staff.staffId,
             assignments: assignments,
             supportRoster: roster.toMap(),
+            carryForwardIssues: carryForwardIssues,
           );
       final response = await ref
           .read(wardBoardServiceProvider)

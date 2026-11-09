@@ -178,7 +178,7 @@ class HandoverPrintSheetScreen extends ConsumerWidget {
                     Padding(
                       padding: EdgeInsets.all(6),
                       child: Text(
-                        'Pending Loops Transferred',
+                        'Pending Medical Issues Transferred',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 11,

@@ -334,7 +334,8 @@ class LoopOpenedEvent extends OraviEvent {
           : 'Recovered medical issue',
       description: payload['description'] as String? ?? '',
       loopType: LoopType.fromString(
-        payload['loop_type'] as String? ?? LoopType.taskOrPendingResult.wireName,
+        payload['loop_type'] as String? ??
+            LoopType.taskOrPendingResult.wireName,
       ),
       urgency: LoopUrgency.fromString(
         payload['urgency'] as String? ?? LoopUrgency.routine.wireName,
@@ -380,6 +381,104 @@ class LoopAcknowledgedEvent extends OraviEvent {
 
   factory LoopAcknowledgedEvent.fromMap(Map<String, dynamic> map) {
     return LoopAcknowledgedEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      loopId: _restoredLoopId(map),
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
+      schemaVersion: map['schema_version'] ?? 1,
+    );
+  }
+}
+
+class LoopReadEvent extends OraviEvent {
+  static const String eventType = 'LoopRead';
+
+  LoopReadEvent({
+    super.eventId,
+    required super.patientId,
+    required String super.loopId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': const <String, dynamic>{},
+  };
+
+  factory LoopReadEvent.fromMap(Map<String, dynamic> map) {
+    return LoopReadEvent(
+      eventId: map['event_id'],
+      patientId: map['patient_id'],
+      loopId: _restoredLoopId(map),
+      authorId: map['author_id'],
+      deviceId: map['device_id'],
+      clientCreatedAt: DateTime.parse(map['client_created_at']),
+      serverSeq: map['server_seq'],
+      serverReceivedAt: map['server_received_at'] != null
+          ? DateTime.parse(map['server_received_at'])
+          : null,
+      schemaVersion: map['schema_version'] ?? 1,
+    );
+  }
+}
+
+class LoopUserAcknowledgedEvent extends OraviEvent {
+  static const String eventType = 'LoopUserAcknowledged';
+
+  LoopUserAcknowledgedEvent({
+    super.eventId,
+    required super.patientId,
+    required String super.loopId,
+    required super.authorId,
+    required super.deviceId,
+    super.clientCreatedAt,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'loop_id': loopId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'payload': const <String, dynamic>{},
+  };
+
+  factory LoopUserAcknowledgedEvent.fromMap(Map<String, dynamic> map) {
+    return LoopUserAcknowledgedEvent(
       eventId: map['event_id'],
       patientId: map['patient_id'],
       loopId: _restoredLoopId(map),
@@ -450,6 +549,8 @@ class LoopOwnerChangedEvent extends OraviEvent {
   final String newOwnerId;
   final String newOwnerRole;
   final String transferReason;
+  final String? handoffSessionId;
+  final bool carryForward;
 
   LoopOwnerChangedEvent({
     super.eventId,
@@ -466,6 +567,8 @@ class LoopOwnerChangedEvent extends OraviEvent {
     required this.newOwnerId,
     required this.newOwnerRole,
     required this.transferReason,
+    this.handoffSessionId,
+    this.carryForward = false,
   }) : super(type: eventType);
 
   @override
@@ -484,6 +587,9 @@ class LoopOwnerChangedEvent extends OraviEvent {
       'new_owner_id': newOwnerId,
       'new_owner_role': newOwnerRole,
       'transfer_reason': transferReason,
+      if (handoffSessionId != null)
+        'handoff_session_id': handoffSessionId,
+      if (carryForward) 'carry_forward': true,
     },
   };
 
@@ -504,6 +610,8 @@ class LoopOwnerChangedEvent extends OraviEvent {
       newOwnerId: payload['new_owner_id'],
       newOwnerRole: payload['new_owner_role'],
       transferReason: payload['transfer_reason'] ?? '',
+      handoffSessionId: payload['handoff_session_id'],
+      carryForward: payload['carry_forward'] == true,
     );
   }
 }
@@ -519,6 +627,7 @@ class MessagePostedEvent extends OraviEvent {
   final String content;
   final String? quotedMessageId; // For contextual replies
   final List<String> roleMentions; // e.g. ['doctor_on_call']
+  final List<String> mentionedStaffIds;
 
   MessagePostedEvent({
     super.eventId,
@@ -536,6 +645,7 @@ class MessagePostedEvent extends OraviEvent {
     required this.content,
     this.quotedMessageId,
     this.roleMentions = const [],
+    this.mentionedStaffIds = const [],
   }) : super(type: eventType);
 
   @override
@@ -555,6 +665,7 @@ class MessagePostedEvent extends OraviEvent {
       'content': content,
       'quoted_message_id': quotedMessageId,
       'role_mentions': roleMentions,
+      'mentioned_staff_ids': mentionedStaffIds,
     },
   };
 
@@ -576,6 +687,9 @@ class MessagePostedEvent extends OraviEvent {
       content: payload['content'],
       quotedMessageId: payload['quoted_message_id'],
       roleMentions: List<String>.from(payload['role_mentions'] ?? []),
+      mentionedStaffIds: List<String>.from(
+        payload['mentioned_staff_ids'] ?? [],
+      ),
     );
   }
 }
@@ -731,9 +845,9 @@ class CallLoggedEvent extends OraviEvent {
 class LoopClosedEvent extends OraviEvent {
   static const String eventType = 'LoopClosed';
 
-  final ClosureReasonCode reasonCode;
-  final String?
-  freeTextNote; // Required if reasonCode.requiresFreeTextNote is true
+  final ClosureReasonCode? reasonCode;
+  final String? closureReason;
+  final String? freeTextNote;
   final ClosureResolutionType resolutionType;
 
   LoopClosedEvent({
@@ -748,7 +862,8 @@ class LoopClosedEvent extends OraviEvent {
     super.schemaVersion,
     super.prevHash,
     super.hash,
-    required this.reasonCode,
+    this.reasonCode,
+    this.closureReason,
     this.freeTextNote,
     required this.resolutionType,
   }) : super(type: eventType);
@@ -766,7 +881,8 @@ class LoopClosedEvent extends OraviEvent {
     'server_received_at': serverReceivedAt?.toIso8601String(),
     'schema_version': schemaVersion,
     'payload': {
-      'reason_code': reasonCode.wireName,
+      if (reasonCode != null) 'reason_code': reasonCode!.wireName,
+      if (closureReason != null) 'closure_reason': closureReason,
       'free_text_note': freeTextNote,
       'resolution_type': resolutionType.wireName,
     },
@@ -786,10 +902,13 @@ class LoopClosedEvent extends OraviEvent {
           ? DateTime.parse(map['server_received_at'])
           : null,
       schemaVersion: map['schema_version'] ?? 1,
-      reasonCode: ClosureReasonCode.fromString(payload['reason_code']),
+      reasonCode: payload['reason_code'] is String
+          ? ClosureReasonCode.fromString(payload['reason_code'] as String)
+          : null,
+      closureReason: payload['closure_reason'] as String?,
       freeTextNote: payload['free_text_note'],
       resolutionType: ClosureResolutionType.fromString(
-        payload['resolution_type'],
+        payload['resolution_type'] as String? ?? 'resolved',
       ),
     );
   }
@@ -1717,6 +1836,10 @@ OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
       return LoopOpenedEvent.fromMap(map);
     case LoopAcknowledgedEvent.eventType:
       return LoopAcknowledgedEvent.fromMap(map);
+    case LoopReadEvent.eventType:
+      return LoopReadEvent.fromMap(map);
+    case LoopUserAcknowledgedEvent.eventType:
+      return LoopUserAcknowledgedEvent.fromMap(map);
     case LoopWorkStartedEvent.eventType:
       return LoopWorkStartedEvent.fromMap(map);
     case LoopOwnerChangedEvent.eventType:

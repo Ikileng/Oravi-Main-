@@ -31,8 +31,9 @@ class LoopStateMachine {
   static LoopState transitionOnClose({
     required LoopState currentState,
     required LoopUrgency urgency,
-    required ClosureReasonCode reasonCode,
-    required String? freeTextNote,
+    ClosureReasonCode? reasonCode,
+    String? closureReason,
+    String? freeTextNote,
   }) {
     if (currentState.isTerminalClosed ||
         currentState == LoopState.closedAwaitingConfirmation) {
@@ -45,14 +46,23 @@ class LoopStateMachine {
       );
     }
 
-    // PRD FR-46: Verify mandatory note rule
-    if (reasonCode.requiresFreeTextNote &&
+    if ((closureReason == null || closureReason.trim().isEmpty) &&
+        reasonCode == null) {
+      throw InvalidLoopTransitionException(
+        fromState: currentState,
+        attemptedAction: 'close',
+        reason: 'A closure reason is required.',
+      );
+    }
+
+    // Older stored events used a reason code and required a note for selected codes.
+    if (closureReason == null &&
+        reasonCode?.requiresFreeTextNote == true &&
         (freeTextNote == null || freeTextNote.trim().isEmpty)) {
       throw InvalidLoopTransitionException(
         fromState: currentState,
         attemptedAction: 'close',
-        reason:
-            'Closure reason "${reasonCode.wireName}" strictly requires a brief free-text note.',
+        reason: 'A brief closure note is required for this legacy reason code.',
       );
     }
 

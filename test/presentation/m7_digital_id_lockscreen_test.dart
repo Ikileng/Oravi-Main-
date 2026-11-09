@@ -58,6 +58,7 @@ void main() {
       return ProviderScope(
         overrides: [
           staffAuthServiceProvider.overrideWithValue(mockAuthService),
+          localDeviceIdProvider.overrideWithValue('DEVICE-lockscreen-test'),
         ],
         child: const MaterialApp(
           home: DigitalIdLockscreen(),

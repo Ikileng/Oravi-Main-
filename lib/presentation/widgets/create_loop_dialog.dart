@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/loop_enums.dart';
 import '../providers/ward_providers.dart';
 import '../theme/clinical_theme.dart';
+import 'close_loop_dialog.dart';
+
+enum _RecurrenceChoice { reopen, createLinked }
 
 /// Modal dialog strictly implementing PRD FR-4:
 /// - Create a loop in two taps or fewer from a short menu of common templates.
@@ -82,6 +85,62 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
 
     setState(() => _isSaving = true);
     try {
+      final now = DateTime.now();
+      final previousIssue =
+          ref
+              .read(patientLoopsProvider(widget.patientId))
+              .where(
+                (issue) =>
+                    issue.title.trim().toLowerCase() == title.toLowerCase() &&
+                    !issue.isOpen &&
+                    issue.closedAt != null &&
+                    !issue.closedAt!.isAfter(now) &&
+                    now.difference(issue.closedAt!) <=
+                        const Duration(hours: 24),
+              )
+              .toList()
+            ..sort((a, b) => b.closedAt!.compareTo(a.closedAt!));
+      String? linkedLoopId;
+      if (previousIssue.isNotEmpty) {
+        final existing = previousIssue.first;
+        final choice = await showDialog<_RecurrenceChoice>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Similar issue closed recently'),
+            content: const Text(
+              'An issue with this exact title was closed within the last 24 hours. Reopen it or create a new linked issue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(_RecurrenceChoice.reopen),
+                child: const Text('Reopen previous issue'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(
+                  dialogContext,
+                ).pop(_RecurrenceChoice.createLinked),
+                child: const Text('Create linked issue'),
+              ),
+            ],
+          ),
+        );
+        if (choice == null || !mounted) return;
+        if (choice == _RecurrenceChoice.reopen) {
+          final reopened = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => ReopenLoopDialog(loop: existing),
+          );
+          if (reopened == true && mounted) Navigator.of(context).pop();
+          return;
+        }
+        linkedLoopId = existing.loopId;
+      }
+
       await ref
           .read(wardControllerProvider.notifier)
           .openLoop(
@@ -90,6 +149,7 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
             description: _descController.text.trim(),
             loopType: _type,
             urgency: _urgency,
+            linkedLoopId: linkedLoopId,
           );
       if (mounted) {
         Navigator.of(context).pop();

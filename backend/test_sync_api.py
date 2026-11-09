@@ -124,5 +124,75 @@ class TestSyncEngineBackend(unittest.TestCase):
         self.assertTrue(self.store.patient_belongs_to_ward("PAT-4B-91", "WARD-4B"))
         self.assertEqual(self.store.get_patient_ward("PAT-4B-91"), "WARD-4B")
 
+    def test_notification_outbox_is_atomic_and_idempotent(self):
+        event = CanonicalEvent(
+            event_id="issue-notification-event",
+            patient_id="PAT-401",
+            type="LoopOpened",
+            author_id="NURSE-01",
+            device_id="DEV-A",
+            client_created_at="2026-10-21T08:00:00Z",
+            loop_id="ISSUE-401",
+            payload={"title": "Check oxygen saturation"},
+        )
+        self.store.append_events(
+            [event],
+            notification_staff_ids_by_event={
+                event.event_id: ["NURSE-01", "DOC-01", "CHARGE-01"]
+            },
+        )
+
+        queued = self.store.get_due_medical_issue_notifications()
+        self.assertEqual(
+            {item["staff_id"] for item in queued},
+            {"NURSE-01", "DOC-01", "CHARGE-01"},
+        )
+
+        self.store.append_events(
+            [event],
+            notification_staff_ids_by_event={event.event_id: ["NURSE-02"]},
+        )
+        self.assertEqual(len(self.store.get_due_medical_issue_notifications()), 3)
+
+        self.store.mark_medical_issue_notification_delivered(
+            int(queued[0]["notification_id"])
+        )
+        remaining = self.store.get_due_medical_issue_notifications()
+        self.assertEqual(len(remaining), 2)
+
+    def test_notification_retries_track_delivered_installations(self):
+        event = CanonicalEvent(
+            event_id="installation-retry-event",
+            patient_id="PAT-402",
+            type="LoopOpened",
+            author_id="NURSE-01",
+            device_id="DEV-A",
+            client_created_at="2026-10-21T08:00:00Z",
+            loop_id="ISSUE-402",
+            payload={"title": "Review observation"},
+        )
+        self.store.append_events(
+            [event],
+            notification_staff_ids_by_event={event.event_id: ["NURSE-01"]},
+        )
+        notification_id = int(
+            self.store.get_due_medical_issue_notifications()[0]["notification_id"]
+        )
+
+        self.store.mark_medical_issue_notification_fid_delivered(
+            notification_id, "fid-first-device"
+        )
+        self.assertEqual(
+            self.store.get_delivered_medical_issue_fids(notification_id),
+            {"fid-first-device"},
+        )
+        self.store.mark_medical_issue_notification_fid_delivered(
+            notification_id, "fid-second-device"
+        )
+        self.assertEqual(
+            self.store.get_delivered_medical_issue_fids(notification_id),
+            {"fid-first-device", "fid-second-device"},
+        )
+
 if __name__ == "__main__":
     unittest.main()

@@ -239,7 +239,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             ? (openLoops.length == 1
                   ? 'There is 1 active medical issue currently open for ${widget.patient.patientInitials}:'
                   : 'There are ${openLoops.length} active medical issues currently open for ${widget.patient.patientInitials}:')
-            : 'ALL CLEAR — There are currently no active medical issues or open loops for ${widget.patient.patientInitials}.',
+            : 'ALL CLEAR — There are currently no active medical issues for ${widget.patient.patientInitials}.',
         timestamp: DateTime.now(),
         activeMedicalIssues: openLoops,
         isAllClear: openLoops.isEmpty,
@@ -1273,7 +1273,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'There are currently 0 open loops or pending escalations for this patient.',
+                  'There are currently no open medical issues or pending escalations for this patient.',
                   style: TextStyle(
                     color: ClinicalTheme.textSecondary,
                     fontSize: 11,

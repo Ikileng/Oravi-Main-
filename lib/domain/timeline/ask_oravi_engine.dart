@@ -281,7 +281,10 @@ class AskOraviEngine {
           ),
         );
       } else if (event is LoopClosedEvent) {
-        final reasonStr = event.reasonCode.name;
+        final reasonStr =
+            event.closureReason ??
+            event.reasonCode?.wireName ??
+            'reason not recorded';
         final noteStr = event.freeTextNote?.isNotEmpty == true
             ? ' ("${event.freeTextNote}")'
             : '';
@@ -296,11 +299,14 @@ class AskOraviEngine {
             entryType: TimelineEntryType.loopClosed,
             authorId: event.authorId,
             authorRole: _inferCadreRole(event.authorId),
-            verbatimText: 'Closed loop with reason: $reasonStr$noteStr',
+            verbatimText:
+                'Closed medical issue with reason: $reasonStr$noteStr',
             timestamp: event.clientCreatedAt,
             metadata: {
-              'reasonCode': event.reasonCode.name,
-              'resolutionType': event.resolutionType.name,
+              if (event.reasonCode != null)
+                'reasonCode': event.reasonCode!.wireName,
+              'closureReason': reasonStr,
+              'resolutionType': event.resolutionType.wireName,
             },
           ),
         );
@@ -539,7 +545,7 @@ class AskOraviEngine {
         absenceMessage =
             '${patient.patientInitials} (${patient.bedNumber}) was admitted: "${patient.shortAdmittingNote}". '
             '$keyAlertsText '
-            'There are currently no active medical issues or open loops for this patient.';
+            'There are currently no active medical issues for this patient.';
       } else {
         absenceMessage =
             'No record in Oravi mentions \'$queryString\' for this patient. '

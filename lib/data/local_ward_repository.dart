@@ -155,6 +155,46 @@ class LocalWardRepository {
     return loops;
   }
 
+  Future<void> recordLoopRead({
+    required String patientId,
+    required String loopId,
+    required String staffId,
+    required String deviceId,
+  }) async {
+    final loop = getLoopsForPatient(
+      patientId,
+    ).where((candidate) => candidate.loopId == loopId).firstOrNull;
+    if (loop == null) return;
+    await appendEvent(
+      LoopReadEvent(
+        patientId: patientId,
+        loopId: loopId,
+        authorId: staffId,
+        deviceId: deviceId,
+      ),
+    );
+  }
+
+  Future<void> acknowledgeLoopForUser({
+    required String patientId,
+    required String loopId,
+    required String staffId,
+    required String deviceId,
+  }) async {
+    final loop = getLoopsForPatient(
+      patientId,
+    ).where((candidate) => candidate.loopId == loopId).firstOrNull;
+    if (loop == null || loop.acknowledgedByUserIds.containsKey(staffId)) return;
+    await appendEvent(
+      LoopUserAcknowledgedEvent(
+        patientId: patientId,
+        loopId: loopId,
+        authorId: staffId,
+        deviceId: deviceId,
+      ),
+    );
+  }
+
   /// Appends a new message to a loop thread.
   Future<void> postMessage({
     required String patientId,
@@ -162,6 +202,7 @@ class LocalWardRepository {
     required String authorId,
     required String deviceId,
     required String content,
+    List<String> mentionedStaffIds = const [],
   }) {
     final event = MessagePostedEvent(
       patientId: patientId,
@@ -170,6 +211,7 @@ class LocalWardRepository {
       deviceId: deviceId,
       messageId: _newId('MSG'),
       content: content,
+      mentionedStaffIds: mentionedStaffIds,
     );
     return appendEvent(event);
   }
@@ -250,6 +292,7 @@ class LocalWardRepository {
     required LoopUrgency urgency,
     required String initialOwnerId,
     required String initialOwnerRole,
+    String? linkedLoopId,
   }) {
     final event = LoopOpenedEvent(
       patientId: patientId,
@@ -262,6 +305,7 @@ class LocalWardRepository {
       urgency: urgency,
       initialOwnerId: initialOwnerId,
       initialOwnerRole: initialOwnerRole,
+      linkedLoopId: linkedLoopId,
     );
     return appendEvent(event);
   }
@@ -272,9 +316,10 @@ class LocalWardRepository {
     required String loopId,
     required String authorId,
     required String deviceId,
-    required ClosureReasonCode reasonCode,
+    required String closureReason,
+    required ClosureResolutionType resolutionType,
+    ClosureReasonCode? reasonCode,
     String? freeTextNote,
-    ClosureResolutionType resolutionType = ClosureResolutionType.resolved,
   }) {
     final event = LoopClosedEvent(
       patientId: patientId,
@@ -282,6 +327,7 @@ class LocalWardRepository {
       authorId: authorId,
       deviceId: deviceId,
       reasonCode: reasonCode,
+      closureReason: closureReason.trim(),
       freeTextNote: freeTextNote,
       resolutionType: resolutionType,
     );
@@ -295,6 +341,7 @@ class LocalWardRepository {
     required String authorId,
     required String deviceId,
     required String confirmedByRole,
+    required String boardAssignedDoctorId,
   }) {
     LoopStateProjection? loop;
     for (final candidate in getLoopsForPatient(patientId)) {
@@ -304,10 +351,10 @@ class LocalWardRepository {
       }
     }
     if (loop == null ||
-        (confirmedByRole != 'charge_nurse' &&
-            authorId != loop.openedByUserId)) {
+        boardAssignedDoctorId.trim().isEmpty ||
+        authorId != boardAssignedDoctorId) {
       throw StateError(
-        'Only the issue opener or a charge nurse can confirm this closure.',
+        'Only the board-assigned doctor can confirm this closure. Assign a doctor before confirming.',
       );
     }
 
@@ -403,8 +450,20 @@ class LocalWardRepository {
     required String incomingNurseId,
     required String deviceId,
     required bool nothingPendingConfirmed,
-    required List<String> transferredLoopIds,
   }) {
+    final transferredLoopIds = getLoopsForPatient(
+      patientId,
+    ).where((loop) => loop.isOpen).map((loop) => loop.loopId).toList();
+    if (nothingPendingConfirmed && transferredLoopIds.isNotEmpty) {
+      throw StateError(
+        'Open Medical Issues must be transferred to the incoming nurse.',
+      );
+    }
+    if (!nothingPendingConfirmed && transferredLoopIds.isEmpty) {
+      throw StateError(
+        'Confirm that nothing is pending when there are no open Medical Issues.',
+      );
+    }
     final event = HandoffBedAcceptedEvent(
       patientId: patientId,
       authorId: authorId,
@@ -416,7 +475,7 @@ class LocalWardRepository {
     );
     final events = <OraviEvent>[event];
 
-    // PRD FR-12 & FR-17: Incoming nurse accepts ownership of all transferred loops
+    // Every unfinished issue moves with the patient to the incoming nurse.
     for (final loopId in transferredLoopIds) {
       events.add(
         LoopOwnerChangedEvent(
@@ -427,6 +486,7 @@ class LocalWardRepository {
           newOwnerId: incomingNurseId,
           newOwnerRole: 'ward_nurse',
           transferReason: 'Shift handoff transfer to $incomingNurseId',
+          handoffSessionId: handoffSessionId,
         ),
       );
     }
@@ -526,8 +586,15 @@ class LocalWardRepository {
   List<WardSearchResult> searchWard({
     required String wardId,
     required String query,
+    Set<String>? allowedPatientIds,
   }) {
-    final patients = getPatientsForWard(wardId);
+    final patients = getPatientsForWard(wardId)
+        .where(
+          (patient) =>
+              allowedPatientIds == null ||
+              allowedPatientIds.contains(patient.patientId),
+        )
+        .toList();
     final patientLoopsMap = <String, List<LoopStateProjection>>{};
     final patientTimelineMap = <String, List<PatientTimelineEntry>>{};
 
