@@ -6,7 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-import '../../firebase_options.dart';
+import '../../Services/firebase_options.dart';
 import '../ward_board_service.dart';
 
 @pragma('vm:entry-point')
@@ -25,19 +25,86 @@ class MedicalIssueAlert {
   const MedicalIssueAlert({required this.patientId, required this.loopId});
 }
 
+class CallAlert {
+  final String callId;
+
+  const CallAlert({required this.callId});
+}
+
 class MedicalIssuePushService {
   static const _channelId = 'medical_issue_alerts';
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   final StreamController<MedicalIssueAlert> _openedAlerts =
       StreamController<MedicalIssueAlert>.broadcast();
+  final StreamController<CallAlert> _openedCalls =
+      StreamController<CallAlert>.broadcast();
   StreamSubscription<RemoteMessage>? _foregroundMessages;
   StreamSubscription<RemoteMessage>? _openedMessages;
-  StreamSubscription<String>? _registrationEvents;
+  StreamSubscription<String>? _tokenRefreshSubscription;
   bool _localNotificationsInitialized = false;
   bool _initialMessageChecked = false;
+  Future<void>? _initialization;
+  Future<void> _pendingTokenRegistration = Future<void>.value();
 
   Stream<MedicalIssueAlert> get openedAlerts => _openedAlerts.stream;
+  Stream<CallAlert> get openedCalls => _openedCalls.stream;
+
+  /// Set up delivery independently of staff authentication.
+  Future<void> initialize() async {
+    await (_initialization ??= _initialize().catchError((
+      Object error,
+      StackTrace stackTrace,
+    ) {
+      _initialization = null;
+      Error.throwWithStackTrace(error, stackTrace);
+    }));
+    _listenForMessages(FirebaseMessaging.instance);
+  }
+
+  Future<void> _initialize() async {
+    _supportedPlatform;
+    await _initializeFirebase();
+    await _initializeLocalNotifications();
+  }
+
+  /// Use registration tokens consistently for Console and backend delivery.
+  /// Android's installation ID mode must remain disabled in the manifest.
+  Future<String> getConsoleTestToken() async {
+    await initialize();
+    final messaging = FirebaseMessaging.instance;
+    await _requestNotificationPermission(messaging);
+    final token = await _getRegistrationToken(messaging);
+    if (kDebugMode) {
+      debugPrint('ORAVI_FCM_TOKEN: $token', wrapWidth: 1024);
+    }
+    return token;
+  }
+
+  Future<void> _requestNotificationPermission(
+    FirebaseMessaging messaging,
+  ) async {
+    final permission = await messaging.requestPermission();
+    if (permission.authorizationStatus != AuthorizationStatus.authorized &&
+        permission.authorizationStatus != AuthorizationStatus.provisional) {
+      throw StateError(
+        'Allow Oravi notifications in Android app settings, then retry.',
+      );
+    }
+  }
+
+  Future<String> _getRegistrationToken(FirebaseMessaging messaging) async {
+    // FlutterFire 17 deprecates this in favor of FID registration. We retain
+    // token mode for Firebase Console and the backend's Message(token: ...).
+    // ignore: deprecated_member_use
+    final token = await messaging.getToken().timeout(
+      const Duration(seconds: 30),
+    );
+    if (token == null || token.isEmpty) {
+      throw StateError('Firebase did not return an FCM registration token.');
+    }
+    return token;
+  }
 
   Future<void> register({
     required String accessToken,
@@ -45,62 +112,47 @@ class MedicalIssuePushService {
     required void Function(String message) onError,
   }) async {
     final platform = _supportedPlatform;
-    await _initializeFirebase();
+    await initialize();
     final messaging = FirebaseMessaging.instance;
-    await _initializeLocalNotifications();
-    _listenForMessages(messaging);
 
-    final permission = await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-    if (permission.authorizationStatus != AuthorizationStatus.authorized &&
-        permission.authorizationStatus != AuthorizationStatus.provisional) {
-      throw StateError('Notification permission was not granted.');
-    }
+    await _requestNotificationPermission(messaging);
 
     final api = WardBoardService(getAccessToken: () => accessToken);
-    final firstRegistration = Completer<void>();
-    var registeredAtLeastOnce = false;
-    await _registrationEvents?.cancel();
-    _registrationEvents = messaging.onRegistered.listen(
-      (fid) async {
+    Future<void> registerToken(String token) {
+      final operation = _pendingTokenRegistration.then(
+        (_) => api.registerFcmInstallation(
+          token: token,
+          deviceId: deviceId,
+          platform: platform,
+        ),
+      );
+      // Keep later refreshes usable even if one backend request fails.
+      _pendingTokenRegistration = operation.then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stackTrace) {},
+      );
+      return operation;
+    }
+
+    await _tokenRefreshSubscription?.cancel();
+    // ignore: deprecated_member_use
+    _tokenRefreshSubscription = messaging.onTokenRefresh.listen(
+      (token) async {
         try {
-          if (fid.isEmpty) {
-            throw StateError('Firebase returned an empty installation ID.');
-          }
-          await api.registerFcmInstallation(
-            fid: fid,
-            deviceId: deviceId,
-            platform: platform,
-          );
-          if (!registeredAtLeastOnce) {
-            registeredAtLeastOnce = true;
-            firstRegistration.complete();
-          }
+          await registerToken(token);
         } catch (error) {
-          if (!registeredAtLeastOnce) {
-            registeredAtLeastOnce = true;
-            firstRegistration.completeError(error);
-          } else {
-            onError(
-              'Device registration refresh failed (${error.runtimeType}).',
-            );
-          }
+          onError('Device token refresh failed (${error.runtimeType}).');
         }
       },
       onError: (Object error, StackTrace stackTrace) {
-        if (!registeredAtLeastOnce) {
-          registeredAtLeastOnce = true;
-          firstRegistration.completeError(error, stackTrace);
-        } else {
-          onError('Device registration refresh failed (${error.runtimeType}).');
-        }
+        onError('Device token refresh failed (${error.runtimeType}).');
       },
     );
-    await messaging.register();
-    await firstRegistration.future.timeout(const Duration(seconds: 20));
+
+    // getToken can return a cached token without emitting a refresh event.
+    // Always register it explicitly when a staff member signs in.
+    final token = await _getRegistrationToken(messaging);
+    await registerToken(token);
   }
 
   Future<void> unregister({
@@ -108,6 +160,11 @@ class MedicalIssuePushService {
     required String deviceId,
   }) async {
     if (Firebase.apps.isEmpty) return;
+    // Stop refresh registration before removing the signed-in installation.
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+    // A refresh callback already in progress must finish before deletion.
+    await _pendingTokenRegistration;
     final api = WardBoardService(getAccessToken: () => accessToken);
     Object? error;
     try {
@@ -115,14 +172,13 @@ class MedicalIssuePushService {
     } catch (caught) {
       error = caught;
     }
-    await _registrationEvents?.cancel();
-    _registrationEvents = null;
     await _foregroundMessages?.cancel();
     _foregroundMessages = null;
     await _openedMessages?.cancel();
     _openedMessages = null;
     try {
-      await FirebaseMessaging.instance.unregister();
+      // ignore: deprecated_member_use
+      await FirebaseMessaging.instance.deleteToken();
     } catch (caught) {
       error ??= caught;
     }
@@ -132,10 +188,11 @@ class MedicalIssuePushService {
   }
 
   Future<void> dispose() async {
-    await _registrationEvents?.cancel();
+    await _tokenRefreshSubscription?.cancel();
     await _foregroundMessages?.cancel();
     await _openedMessages?.cancel();
     await _openedAlerts.close();
+    await _openedCalls.close();
   }
 
   String get _supportedPlatform {
@@ -201,7 +258,7 @@ class MedicalIssuePushService {
     if (_localNotificationsInitialized) return;
     await _localNotifications.initialize(
       settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        android: AndroidInitializationSettings('ic_notification'),
         iOS: DarwinInitializationSettings(
           requestAlertPermission: false,
           requestBadgePermission: false,
@@ -230,13 +287,20 @@ class MedicalIssuePushService {
       ),
     );
     _localNotificationsInitialized = true;
+    final launch = await _localNotifications.getNotificationAppLaunchDetails();
+    if (launch?.didNotificationLaunchApp == true) {
+      _publishOpenedPayload(launch?.notificationResponse?.payload);
+    }
   }
 
   Future<void> _showForegroundNotification(RemoteMessage message) async {
     final notification = message.notification;
     if (notification == null && message.data.isEmpty) return;
     await _localNotifications.show(
-      id: message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
+      id:
+          (message.messageId?.hashCode ??
+              DateTime.now().millisecondsSinceEpoch) &
+          0x7fffffff,
       title: notification?.title ?? 'Medical issue update',
       body:
           notification?.body ??
@@ -264,8 +328,16 @@ class MedicalIssuePushService {
     if (payload == null || payload.isEmpty || _openedAlerts.isClosed) return;
     try {
       final data = jsonDecode(payload);
-      if (data is! Map<String, dynamic> ||
-          data['type'] != 'medical_issue' ||
+      if (data is! Map<String, dynamic>) {
+        return;
+      }
+      if (data['type'] == 'oravi_call' && data['call_id'] is String) {
+        if (!_openedCalls.isClosed) {
+          _openedCalls.add(CallAlert(callId: data['call_id'] as String));
+        }
+        return;
+      }
+      if (data['type'] != 'medical_issue' ||
           data['patient_id'] is! String ||
           data['loop_id'] is! String) {
         return;

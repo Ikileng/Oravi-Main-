@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
 import '../domain/projections/projections.dart';
+import '../data/ward_board_service.dart';
 import 'providers/auth_providers.dart';
 import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
 import 'theme/clinical_theme.dart';
+import 'call_screen.dart';
 import 'widgets/close_loop_dialog.dart';
 import 'widgets/create_loop_dialog.dart';
 import 'widgets/log_call_outcome_dialog.dart';
@@ -243,20 +245,46 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     }
   }
 
-  void _openCallDialog(
+  Future<void> _startCall(
     LoopStateProjection loop,
     String recipientId,
     String authorRole,
-  ) {
-    showDialog(
-      context: context,
-      builder: (ctx) => LogCallOutcomeDialog(
-        loop: loop,
+  ) async {
+    try {
+      final api = WardBoardService(
+        getAccessToken: () => ref.read(authAccessTokenProvider),
+      );
+      final session = await api.inviteCall(
+        patientId: loop.patientId,
+        loopId: loop.loopId,
         recipientId: recipientId,
-        recipientName: ClinicalTheme.formatAuthorDisplayName(recipientId),
-        recipientRole: authorRole,
-      ),
-    );
+      );
+      if (!mounted) return;
+      final durationSeconds = await Navigator.of(context).push<int>(
+        MaterialPageRoute(
+          builder: (_) => CallScreen(session: session, api: api),
+        ),
+      );
+      if (!mounted || durationSeconds == null) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => LogCallOutcomeDialog(
+          loop: loop,
+          recipientId: recipientId,
+          recipientName: session.recipientName,
+          recipientRole: authorRole,
+          durationSeconds: durationSeconds,
+          callId: session.callId,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not start the call (${error.runtimeType}).'),
+        ),
+      );
+    }
   }
 
   String _formatTimestamp(DateTime dt) {
@@ -275,6 +303,13 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(authenticatedStaffProvider)?.role == 'dev_admin') {
+      return const Scaffold(
+        body: Center(
+          child: Text('Clinical access is not available to Dev Admin.'),
+        ),
+      );
+    }
     final hasCurrentPatientAccess = ref
         .watch(currentUserPatientIdsProvider)
         .contains(widget.patient.patientId);
@@ -840,9 +875,9 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                               ),
                               const SizedBox(width: 6),
 
-                              // One-tap Call button (opens post-call outcome prompt - FR-54)
+                              // One-tap direct call to the message author; the outcome is logged after hang-up.
                               InkWell(
-                                onTap: () => _openCallDialog(
+                                onTap: () => _startCall(
                                   loop,
                                   msg.authorId,
                                   msg.authorRole,

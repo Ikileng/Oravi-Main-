@@ -24,10 +24,14 @@ class StaffStore:
 
     def _init_db(self) -> None:
         with self._lock, self.conn:
+            self.conn.execute('''CREATE TABLE IF NOT EXISTS deleted_staff_ids (
+                staff_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL
+            )''')
             self.conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS staff_users (
                     staff_id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL DEFAULT '',
                     name TEXT NOT NULL,
                     role TEXT NOT NULL,
                     ward_id TEXT NOT NULL,
@@ -40,6 +44,9 @@ class StaffStore:
                 )
                 """
             )
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(staff_users)").fetchall()}
+            if "email" not in columns:
+                self.conn.execute("ALTER TABLE staff_users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_staff_ward ON staff_users(ward_id)"
             )
@@ -327,7 +334,8 @@ class StaffStore:
             rows = self.conn.execute(
                 """SELECT staff_id, name, role, avatar_color, initials
                    FROM staff_users
-                   WHERE is_active = 1 AND (lower(name) LIKE ? OR lower(staff_id) LIKE ?)
+                   WHERE is_active = 1 AND role != 'dev_admin'
+                     AND (lower(name) LIKE ? OR lower(staff_id) LIKE ?)
                    ORDER BY name LIMIT 50""",
                 (search, search),
             ).fetchall()
@@ -336,13 +344,14 @@ class StaffStore:
             avatar_color=r["avatar_color"], initials=r["initials"], is_active=True,
         ) for r in rows]
 
-    def verify_pin(self, staff_id: str, pin: str) -> Tuple[bool, Optional[StaffProfile], Optional[str]]:
+    def verify_pin(self, staff_id: str, pin: str, email: Optional[str] = None) -> Tuple[bool, Optional[StaffProfile], Optional[str]]:
+        identifier = (email or staff_id).strip()
         now = time.time()
-        if not staff_id or not pin.isdigit() or len(pin) > 8:
+        if not identifier or not pin.isdigit() or len(pin) > 8:
             return False, None, "Invalid staff ID or PIN."
         failure = self.conn.execute(
             "SELECT failure_count, window_started, locked_until FROM auth_failures WHERE staff_id = ?",
-            (staff_id,),
+            (identifier,),
         ).fetchone()
         if failure and failure["locked_until"] > now:
             remaining = max(1, int(failure["locked_until"] - now))
@@ -359,14 +368,14 @@ class StaffStore:
                 SELECT staff_id, name, role, ward_id, pin_hash, pin_salt,
                        avatar_color, initials, is_active
                 FROM staff_users
-                WHERE staff_id = ? AND is_active = 1
+                WHERE is_active = 1 AND (staff_id = ? OR lower(email) = lower(?))
                 """,
-                (staff_id,),
+                (identifier, identifier),
             )
             row = cursor.fetchone()
 
         if not row:
-            self._record_failure(staff_id, now, failure)
+            self._record_failure(identifier, now, failure)
             return False, None, "Staff account not found or inactive."
 
         expected_hash = self.hash_pin(pin, row["pin_salt"])
@@ -385,7 +394,7 @@ class StaffStore:
             )
             return True, profile, None
         else:
-            failure_count = self._record_failure(staff_id, now, failure)
+            failure_count = self._record_failure(identifier, now, failure)
             remaining = 5 - failure_count
             if remaining > 0:
                 err_msg = f"Invalid PIN. {remaining} attempt(s) remaining."
@@ -416,7 +425,13 @@ class StaffStore:
         ward_id: str,
         pin: str,
         avatar_color: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> StaffProfile:
+        staff_id, name = staff_id.strip(), name.strip()
+        if not staff_id or not name or len(staff_id) > 80 or len(name) > 120:
+            raise ValueError('Staff ID and name are required (maximum 80 and 120 characters).')
+        if self.conn.execute('SELECT 1 FROM deleted_staff_ids WHERE staff_id = ?', (staff_id,)).fetchone():
+            raise ValueError('This staff ID belonged to a deleted account and cannot be reused.')
         if role not in {"ward_nurse", "charge_nurse", "doctor_on_call"}:
             raise ValueError("Only clinical roles can be provisioned here.")
         if not pin.isdigit() or not 4 <= len(pin) <= 8:
@@ -439,11 +454,11 @@ class StaffStore:
             cursor.execute(
                 """
                 INSERT INTO staff_users (
-                    staff_id, name, role, ward_id, pin_hash, pin_salt,
+                    staff_id, email, name, role, ward_id, pin_hash, pin_salt,
                     avatar_color, initials, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
-                (staff_id, name, role, "", p_hash, salt, color, initials, now_iso),
+                (staff_id, (email or "").strip().lower(), name, role, "", p_hash, salt, color, initials, now_iso),
             )
 
         return StaffProfile(
@@ -455,6 +470,33 @@ class StaffStore:
             initials=initials,
             is_active=True,
         )
+
+    def set_staff_active(self, staff_id: str, active: bool) -> bool:
+        with self._lock, self.conn:
+            cursor = self.conn.execute(
+                "UPDATE staff_users SET is_active = ? WHERE staff_id = ? AND role != 'dev_admin'",
+                (int(active), staff_id),
+            )
+            if not cursor.rowcount:
+                return False
+            if not active:
+                self.conn.execute('DELETE FROM auth_sessions WHERE staff_id = ?', (staff_id,))
+                self.conn.execute('DELETE FROM fcm_device_tokens WHERE staff_id = ?', (staff_id,))
+            return True
+
+    def delete_clinical_staff(self, staff_id: str) -> bool:
+        with self._lock, self.conn:
+            row = self.conn.execute(
+                "SELECT email FROM staff_users WHERE staff_id = ? AND role != 'dev_admin'", (staff_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            for table in ('auth_sessions', 'fcm_device_tokens', 'staff_ward_preferences'):
+                self.conn.execute(f'DELETE FROM {table} WHERE staff_id = ?', (staff_id,))
+            self.conn.execute('DELETE FROM auth_failures WHERE staff_id IN (?, ?)', (staff_id, row['email']))
+            self.conn.execute('INSERT INTO deleted_staff_ids VALUES (?, ?)', (staff_id, time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
+            self.conn.execute('DELETE FROM staff_users WHERE staff_id = ?', (staff_id,))
+            return True
 
     def close(self):
         self.conn.close()

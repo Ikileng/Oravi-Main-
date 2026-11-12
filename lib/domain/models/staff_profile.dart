@@ -54,7 +54,7 @@ class StaffProfile extends Equatable {
         return 'Doctor on Call';
       case 'ward_nurse':
       default:
-        return 'Ward Nurse';
+        return 'Registered Nurse';
     }
   }
 

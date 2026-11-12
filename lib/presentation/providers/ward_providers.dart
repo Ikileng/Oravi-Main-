@@ -255,6 +255,8 @@ class WardController extends Notifier<int> {
     required String recipientRole,
     required String outcomeNote,
     int durationSeconds = 0,
+    String? callId,
+    String callStatus = 'completed',
   }) async {
     await ref
         .read(localWardRepositoryProvider)
@@ -268,6 +270,8 @@ class WardController extends Notifier<int> {
           outcomeNote: outcomeNote,
           deviceId: _currentDeviceId,
           durationSeconds: durationSeconds,
+           callId: callId,
+           callStatus: callStatus,
         );
     refresh();
   }

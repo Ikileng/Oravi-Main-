@@ -131,6 +131,51 @@ class StaffAuthService {
     });
   }
 
+  Future<void> setStaffActive({
+    required String token,
+    required String staffId,
+    required bool active,
+  }) => _manageStaff(token, staffId, 'PATCH', {'is_active': active});
+
+  Future<void> deleteStaff({required String token, required String staffId}) =>
+      _manageStaff(token, staffId, 'DELETE', null);
+
+  Future<void> _manageStaff(
+    String token,
+    String staffId,
+    String method,
+    Map<String, dynamic>? payload,
+  ) async {
+    await _executeWithFallback((base) async {
+      final client = HttpClient()..connectionTimeout = timeout;
+      try {
+        final request = await client
+            .openUrl(
+              method,
+              Uri.parse(
+                '${base.replaceFirst(RegExp(r'/$'), '')}/api/v1/admin/staff/${Uri.encodeComponent(staffId)}',
+              ),
+            )
+            .timeout(timeout);
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        if (payload != null) {
+          request.headers.contentType = ContentType.json;
+          request.write(jsonEncode(payload));
+        }
+        final response = await request.close().timeout(timeout);
+        final body = await response.transform(utf8.decoder).join();
+        if (response.statusCode != 200) {
+          throw Exception(
+            (jsonDecode(body) as Map<String, dynamic>)['detail'] ??
+                'Account update failed.',
+          );
+        }
+      } finally {
+        client.close();
+      }
+    });
+  }
+
   Future<StaffProfile> createClinicalStaff({
     required String token,
     required String staffId,
@@ -200,6 +245,69 @@ class StaffAuthService {
     });
   }
 
+  Future<List<HospitalWard>> getConfiguredWards(String token) async {
+    final result = await _wardConfigurationRequest(token, 'GET', '', null);
+    return (result as List)
+        .map(
+          (item) =>
+              HospitalWard.fromMap(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+  }
+
+  Future<void> saveConfiguredWard(
+    String token,
+    HospitalWard ward, {
+    List<String>? expectedBeds,
+  }) async {
+    await _wardConfigurationRequest(
+      token,
+      expectedBeds == null ? 'POST' : 'PUT',
+      expectedBeds == null ? '' : '/${Uri.encodeComponent(ward.wardId)}',
+      {...ward.toMap(), 'expected_bed_numbers': ?expectedBeds},
+    );
+  }
+
+  Future<dynamic> _wardConfigurationRequest(
+    String token,
+    String method,
+    String path,
+    Map<String, dynamic>? payload,
+  ) => _executeWithFallback((base) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    try {
+      final request = await client
+          .openUrl(
+            method,
+            Uri.parse(
+              '${base.replaceFirst(RegExp(r'/$'), '')}/api/v1/admin/wards$path',
+            ),
+          )
+          .timeout(timeout);
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      if (payload != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(payload));
+      }
+      final response = await request.close().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
+      final decoded = jsonDecode(body);
+      if (response.statusCode != 200) {
+        throw Exception(
+          decoded is Map
+              ? decoded['detail']
+              : 'Ward configuration unavailable.',
+        );
+      }
+      return decoded;
+    } finally {
+      client.close();
+    }
+  });
+
   Future<void> selectChargeNurseWard(String token, String wardId) async {
     await _executeWithFallback((base) async {
       final client = HttpClient()
@@ -230,9 +338,9 @@ class StaffAuthService {
   }
 
   /// Verifies a staff PIN with the configured authentication service.
-  Future<AuthResult> verifyPin(String staffId, String pin) async {
+  Future<AuthResult> verifyPin(String identifier, String pin) async {
     if (mockVerifyPinHandler != null) {
-      return mockVerifyPinHandler!(staffId, pin);
+      return mockVerifyPinHandler!(identifier, pin);
     }
 
     try {
@@ -247,7 +355,14 @@ class StaffAuthService {
 
           final request = await client.postUrl(uri).timeout(timeout);
           request.headers.contentType = ContentType.json;
-          request.write(jsonEncode({'staff_id': staffId, 'pin': pin}));
+          final isEmail = identifier.contains('@');
+          request.write(
+            jsonEncode({
+              'staff_id': isEmail ? '' : identifier,
+              'email': isEmail ? identifier : null,
+              'pin': pin,
+            }),
+          );
 
           final response = await request.close().timeout(timeout);
           final body = await response.transform(utf8.decoder).join();
@@ -276,5 +391,4 @@ class StaffAuthService {
       );
     }
   }
-
 }

@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 from backend.models import HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse
 
@@ -120,6 +120,31 @@ class WardStore:
                 (ward.ward_id, ward.name, len(ward.bed_numbers), json.dumps(ward.bed_numbers), ward.department, ward.description),
             )
             conn.commit()
+
+    def update_ward_configuration(self, ward: HospitalWardModel, expected_beds: List[str]) -> None:
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute("SELECT bed_numbers FROM hospital_wards WHERE ward_id = ?",
+                                        (ward.ward_id,)).fetchone()
+                if existing is None:
+                    raise KeyError(ward.ward_id)
+                current = json.loads(existing["bed_numbers"])
+                if current != expected_beds:
+                    raise ValueError("Beds changed since this ward was opened. Reload and try again.")
+                removed = set(current) - set(ward.bed_numbers)
+                # Include yesterday's night shift, which may still be in progress.
+                yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+                references = conn.execute(
+                    """SELECT bed_number FROM shift_bed_assignments
+                       WHERE ward_id = ? AND (date > ? OR (date = ? AND shift_type = 'night'))""",
+                    (ward.ward_id, yesterday, yesterday)).fetchall()
+                if any(row["bed_number"] in removed for row in references):
+                    raise ValueError("Cannot remove beds referenced by a current or upcoming allocation. Ask the charge nurse to update the board first.")
+                conn.execute("""UPDATE hospital_wards SET name=?, bed_count=?, bed_numbers=?,
+                             department=?, description=? WHERE ward_id=?""",
+                             (ward.name, len(ward.bed_numbers), json.dumps(ward.bed_numbers),
+                              ward.department, ward.description, ward.ward_id))
 
     def get_ward_board(self, ward_id: str, date: str, shift_type: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -401,6 +426,14 @@ class WardStore:
         self, conn: sqlite3.Connection, allocation: ShiftAllocationModel
     ) -> None:
         cursor = conn.cursor()
+        configured = cursor.execute(
+            "SELECT bed_numbers FROM hospital_wards WHERE ward_id = ?",
+            (allocation.ward_id,),
+        ).fetchone()
+        if configured is not None:
+            allowed = set(json.loads(configured["bed_numbers"]))
+            if any(item.get("bed_number") not in allowed for item in allocation.bed_assignments):
+                raise ValueError("Ward beds have changed. Reload the board before publishing.")
         patient_ids = [
             str(item["patient_id"])
             for item in allocation.bed_assignments

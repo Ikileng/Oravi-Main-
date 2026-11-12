@@ -57,7 +57,6 @@ class DefaultFirebaseOptions {
     projectId: 'oravi-main',
     storageBucket: 'oravi-main.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDAQ_6NhrAwXSCbfT11yQ5huxBcgFCmSb4',
     appId: '1:959723974007:ios:473a20c2477880b8bd4572',
@@ -66,7 +65,6 @@ class DefaultFirebaseOptions {
     storageBucket: 'oravi-main.firebasestorage.app',
     iosBundleId: 'org.oravi.oraviApp',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyDAQ_6NhrAwXSCbfT11yQ5huxBcgFCmSb4',
     appId: '1:959723974007:ios:473a20c2477880b8bd4572',

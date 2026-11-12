@@ -1,601 +1,474 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../domain/models/staff_profile.dart';
+import 'dart:ui' as ui;
+import '../admin/dev_admin_dashboard_screen.dart';
 import '../providers/auth_providers.dart';
 import '../ward_board_screen.dart';
-import '../admin/dev_admin_dashboard_screen.dart';
 
-/// Digital ID Lockscreen with 4-Digit Quick PIN Unlock (Milestone 7).
-/// Implements clinical bedside authentication with zero role selection.
+/// Credential-first hospital sign-in. The backend determines role and access.
 class DigitalIdLockscreen extends ConsumerStatefulWidget {
   const DigitalIdLockscreen({super.key});
-
   @override
-  ConsumerState<DigitalIdLockscreen> createState() => _DigitalIdLockscreenState();
+  ConsumerState<DigitalIdLockscreen> createState() =>
+      _DigitalIdLockscreenState();
 }
 
 class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
+  static const hospitalName = String.fromEnvironment(
+    'ORAVI_FACILITY_NAME',
+    defaultValue: 'Oravi Hospital',
+  );
+  static const ssoEnabled = bool.fromEnvironment('ORAVI_SSO_ENABLED');
+  final _identifier = TextEditingController();
+  final _password = TextEditingController();
+  bool _obscurePassword = true;
+  bool _showDeveloperPanel = false;
+  String _connectionState = 'Online';
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _identifier.dispose();
+    _password.dispose();
     super.dispose();
   }
 
-  void _openPinModal(BuildContext context, StaffProfile staff) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _PinKeypadModal(staff: staff),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final staffAsync = ref.watch(wardStaffListProvider);
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Deep Slate Clinical Navy
-      body: SafeArea(
-        child: Column(
-          children: [
-            // --- Ward Brand Header ---
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFF0284C7), width: 1.5),
-                        ),
-                        child: const Icon(Icons.badge_outlined, color: Color(0xFF38BDF8), size: 24),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'ORAVI CLINICAL STATION',
-                            style: TextStyle(
-                              color: Color(0xFF94A3B8),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'Hospital staff sign-in',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      // One-tap button on login screen to access Dev Admin Dashboard
-                      InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const DevAdminDashboardScreen()),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(10),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.8), width: 1.2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.admin_panel_settings_outlined, size: 14, color: Color(0xFF38BDF8)),
-                              SizedBox(width: 5),
-                              Text(
-                                'Dev Admin',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF38BDF8),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Select your Digital ID badge to resume charting:',
-                    style: TextStyle(
-                      color: Color(0xFFCBD5E1),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // --- Fast Search Filter ---
-                  Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF334155)),
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      onChanged: (val) => setState(() => _searchQuery = val.trim().toLowerCase()),
-                      decoration: InputDecoration(
-                        hintText: 'Search by name, initials, or staff ID...',
-                        hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                        prefixIcon: const Icon(Icons.search, color: Color(0xFF94A3B8), size: 20),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, color: Color(0xFF94A3B8), size: 18),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() => _searchQuery = '');
-                                },
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // --- Digital ID Cards Grid ---
-            Expanded(
-              child: staffAsync.when(
-                data: (staffList) {
-                  final filtered = staffList.where((s) {
-                    if (_searchQuery.isEmpty) return true;
-                    final nameMatch = s.name.toLowerCase().contains(_searchQuery);
-                    final idMatch = s.staffId.toLowerCase().contains(_searchQuery);
-                    final initialsMatch = s.initials.toLowerCase().contains(_searchQuery);
-                    return nameMatch || idMatch || initialsMatch;
-                  }).toList();
-
-                  if (filtered.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.person_search_outlined, size: 48, color: Color(0xFF64748B)),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No staff member matching "$_searchQuery"',
-                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.92,
-                    ),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      final staff = filtered[index];
-                      return _DigitalIdCard(
-                        staff: staff,
-                        onTap: () => _openPinModal(context, staff),
-                      );
-                    },
-                  );
-                },
-                loading: () => const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF38BDF8)),
-                ),
-                error: (err, _) => Center(
-                  child: Text('Error loading staff: $err', style: const TextStyle(color: Colors.red)),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Clinical Badge Card styling.
-class _DigitalIdCard extends StatelessWidget {
-  final StaffProfile staff;
-  final VoidCallback onTap;
-
-  const _DigitalIdCard({
-    required this.staff,
-    required this.onTap,
-  });
-
-  Color _parseAvatarColor(String hex) {
-    try {
-      final clean = hex.replaceAll('#', '');
-      return Color(int.parse('FF$clean', radix: 16));
-    } catch (_) {
-      return const Color(0xFF059669);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final avatarColor = _parseAvatarColor(staff.avatarColor);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF334155), width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Top Badge Clip Hole (Lanyard effect)
-            Container(
-              width: 32,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFF334155),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            // Nurse Avatar with Initials
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: avatarColor.withValues(alpha: 0.2),
-              child: Text(
-                staff.initials,
-                style: TextStyle(
-                  color: avatarColor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            // Nurse Name
-            Text(
-              staff.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 4),
-
-            // Role Badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: staff.isDoctorOnCall
-                    ? const Color(0xFF7C3AED).withValues(alpha: 0.2)
-                    : staff.isChargeNurse
-                        ? const Color(0xFF2563EB).withValues(alpha: 0.2)
-                        : const Color(0xFF059669).withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                staff.formattedRole,
-                style: TextStyle(
-                  color: staff.isDoctorOnCall
-                      ? const Color(0xFFA78BFA)
-                      : staff.isChargeNurse
-                          ? const Color(0xFF60A5FA)
-                          : const Color(0xFF34D399),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-
-            // Staff ID
-            Text(
-              staff.staffId,
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 4-Digit Quick PIN Keypad Modal.
-class _PinKeypadModal extends ConsumerStatefulWidget {
-  final StaffProfile staff;
-
-  const _PinKeypadModal({required this.staff});
-
-  @override
-  ConsumerState<_PinKeypadModal> createState() => _PinKeypadModalState();
-}
-
-class _PinKeypadModalState extends ConsumerState<_PinKeypadModal> {
-  String _enteredPin = '';
-  String? _localError;
-
-  void _handleKeyTap(String key) {
-    final isDevAdmin = widget.staff.role == 'dev_admin';
-    final pinLimit = isDevAdmin ? 8 : 4;
-    if (_enteredPin.length < pinLimit) {
-      setState(() {
-        _enteredPin += key;
-        _localError = null;
-      });
-
-      if (!isDevAdmin && _enteredPin.length == 4) {
-        _submitPin();
-      }
-    }
-  }
-
-  void _handleBackspace() {
-    if (_enteredPin.isNotEmpty) {
-      setState(() {
-        _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1);
-        _localError = null;
-      });
-    }
-  }
-
-  Future<void> _submitPin() async {
-    final authCtrl = ref.read(authControllerProvider.notifier);
-    final success = await authCtrl.verifyAndLogin(widget.staff.staffId, _enteredPin);
-
+  Future<void> _signIn() async {
+    final identifier = _identifier.text.trim();
+    final password = _password.text;
+    if (identifier.isEmpty || password.isEmpty) return;
+    final success = await ref
+        .read(authControllerProvider.notifier)
+        .verifyAndLogin(identifier, password);
     if (!mounted) return;
-
-    if (success) {
-      Navigator.of(context).pop(); // Close modal
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => widget.staff.role == 'dev_admin'
-              ? const DevAdminDashboardScreen()
-              : const WardBoardScreen(),
-        ),
-      );
-    } else {
-      final state = ref.read(authControllerProvider);
-      setState(() {
-        _localError = state.errorMessage ?? 'Invalid PIN';
-        _enteredPin = '';
-      });
+    final profile = ref.read(authenticatedStaffProvider);
+    if (!success || profile == null) {
+      final error = ref.read(authControllerProvider).errorMessage ?? '';
+      if (error.contains('unavailable') || error.contains('configured')) {
+        setState(() => _connectionState = 'Offline mode');
+      }
+      return;
     }
+    final proceed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Confirm your identity'),
+        content: Text('${profile.name} · ${profile.formattedRole}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not me'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || proceed != true) {
+      ref.read(authControllerProvider.notifier).logout();
+      return;
+    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => profile.role == 'dev_admin'
+            ? const DevAdminDashboardScreen()
+            : const WardBoardScreen(),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authControllerProvider);
+    final width = MediaQuery.sizeOf(context).width;
+    return Scaffold(
+      backgroundColor: const Color(0xFF031B33),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            const _HospitalBackdrop(),
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 32,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onLongPress: kDebugMode
+                            ? () => setState(
+                                () =>
+                                    _showDeveloperPanel = !_showDeveloperPanel,
+                              )
+                            : null,
+                        child: const _OraviBrand(),
+                      ),
+                      const SizedBox(height: 28),
+                      Text(
+                        hospitalName,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFB6C9DF),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _LoginCard(
+                        identifier: _identifier,
+                        password: _password,
+                        obscurePassword: _obscurePassword,
+                        onTogglePassword: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
+                        onSubmit: _signIn,
+                        isLoading: authState.isLoading,
+                        error: authState.errorMessage,
+                        width: width,
+                      ),
+                      if (ssoEnabled) ...[
+                        const SizedBox(height: 24),
+                        OutlinedButton.icon(
+                          onPressed: () {},
+                          icon: const Icon(Icons.local_hospital_outlined),
+                          label: const Text('Sign in with Hospital SSO'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(58),
+                            foregroundColor: const Color(0xFF5BF4E7),
+                            side: const BorderSide(
+                              color: Color(0xFF36E6DC),
+                              width: 1.5,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Available when enabled by your hospital',
+                          style: TextStyle(color: Color(0xFF9FB6CF)),
+                        ),
+                      ],
+                      if (_showDeveloperPanel) const _DeveloperPanel(),
+                      const SizedBox(height: 32),
+                      _ConnectionStatus(state: _connectionState),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F172A),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: Color(0xFF334155), width: 1.5)),
+class _HospitalBackdrop extends StatelessWidget {
+  const _HospitalBackdrop();
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: CustomPaint(size: Size.infinite, painter: _BackdropPainter()),
+  );
+}
+
+class _BackdropPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..shader = const LinearGradient(
+        colors: [Color(0xFF052744), Color(0xFF03152A)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, paint);
+    final wave = Paint()
+      ..color = const Color(0xFF0BD4D0).withValues(alpha: .12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 40;
+    final path = Path()
+      ..moveTo(-40, size.height * .92)
+      ..quadraticBezierTo(
+        size.width * .48,
+        size.height * .82,
+        size.width + 60,
+        size.height * .9,
+      );
+    canvas.drawPath(path, wave);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _OraviBrand extends StatelessWidget {
+  const _OraviBrand();
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'ORAVI',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 40,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2,
+            ),
+          ),
+          Text(
+            'HOSPITAL WARD MANAGEMENT',
+            style: TextStyle(
+              color: Color(0xFFA7C0D9),
+              fontSize: 11,
+              letterSpacing: 2,
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+class _LoginCard extends StatelessWidget {
+  final TextEditingController identifier, password;
+  final bool obscurePassword, isLoading;
+  final VoidCallback onTogglePassword, onSubmit;
+  final String? error;
+  final double width;
+  const _LoginCard({
+    required this.identifier,
+    required this.password,
+    required this.obscurePassword,
+    required this.onTogglePassword,
+    required this.onSubmit,
+    required this.isLoading,
+    required this.error,
+    required this.width,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final useGlass =
+        width >= 360 && !MediaQuery.accessibleNavigationOf(context);
+    final panel = Container(
+      padding: EdgeInsets.all(width < 420 ? 22 : 38),
+      decoration: BoxDecoration(
+        color: const Color(0xFF133651).withValues(alpha: useGlass ? .68 : .96),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF7096B8), width: 1.2),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Close drag indicator
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFF475569),
-              borderRadius: BorderRadius.circular(2),
+          const Text(
+            'Welcome back',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
             ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Sign in to coordinate your ward',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFFAFC2D7), fontSize: 18),
+          ),
+          const SizedBox(height: 28),
+          _Field(
+            controller: identifier,
+            hint: 'Work email or staff ID',
+            icon: Icons.mail_outline,
+            keyboardType: TextInputType.emailAddress,
           ),
           const SizedBox(height: 16),
-
-          // Selected Staff Info
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                child: Text(
-                  widget.staff.initials,
-                  style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+          _Field(
+            controller: password,
+            hint: 'Password or PIN',
+            icon: Icons.lock_outline,
+            obscure: obscurePassword,
+            suffix: IconButton(
+              onPressed: onTogglePassword,
+              icon: Icon(
+                obscurePassword
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+                color: const Color(0xFFC2D1E2),
               ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.staff.name,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  Text(
-                    '${widget.staff.formattedRole} • ${widget.staff.staffId}',
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          Text(
-            widget.staff.role == 'dev_admin'
-                ? 'Enter Dev Admin PIN'
-                : 'Enter 4-Digit Quick PIN',
-            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 14),
-
-          // 4 Dots
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(widget.staff.role == 'dev_admin' ? 8 : 4, (index) {
-              final isFilled = index < _enteredPin.length;
-              return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 10),
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isFilled ? const Color(0xFF38BDF8) : Colors.transparent,
-                  border: Border.all(
-                    color: isFilled ? const Color(0xFF38BDF8) : const Color(0xFF475569),
-                    width: 2,
-                  ),
-                ),
-              );
-            }),
-          ),
-
-          if (_localError != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _localError!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0xFFF87171), fontSize: 12, fontWeight: FontWeight.w600),
             ),
-          ],
-
-          if (authState.isLoading) ...[
-            const SizedBox(height: 16),
-            const CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2),
-          ] else ...[
-            const SizedBox(height: 20),
-            // Numpad Keypad (1 - 9, 0, Backspace)
-            _buildNumpad(),
-            if (widget.staff.role == 'dev_admin') ...[
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _enteredPin.length >= 6 ? _submitPin : null,
-                child: const Text('Sign in', style: TextStyle(color: Color(0xFF38BDF8))),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () {},
+              child: const Text(
+                'Forgot password?',
+                style: TextStyle(color: Color(0xFF32E3D8), fontSize: 15),
               ),
-            ],
-          ],
+            ),
+          ),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFFFB4AB)),
+              ),
+            ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF43E0D2), Color(0xFF1FC6C3)],
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: FilledButton(
+              onPressed: isLoading ? null : onSubmit,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.black,
+                shadowColor: Colors.transparent,
+                minimumSize: const Size.fromHeight(58),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: isLoading
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                  : const Text(
+                      'Sign in',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+            ),
+          ),
         ],
       ),
     );
-  }
-
-  Widget _buildNumpad() {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: ['1', '2', '3'].map((k) => _buildKey(k)).toList(),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: ['4', '5', '6'].map((k) => _buildKey(k)).toList(),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: ['7', '8', '9'].map((k) => _buildKey(k)).toList(),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            const SizedBox(width: 72, height: 56), // Placeholder
-            _buildKey('0'),
-            InkWell(
-              onTap: _handleBackspace,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: 72,
-                height: 56,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.backspace_outlined, color: Color(0xFF94A3B8), size: 22),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildKey(String text) {
-    return InkWell(
-      onTap: () => _handleKeyTap(text),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: 72,
-        height: 56,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF334155)),
-        ),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+    if (!useGlass) return panel;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: panel,
       ),
     );
   }
+}
+
+class _Field extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final IconData icon;
+  final bool obscure;
+  final Widget? suffix;
+  final TextInputType? keyboardType;
+  const _Field({
+    required this.controller,
+    required this.hint,
+    required this.icon,
+    this.obscure = false,
+    this.suffix,
+    this.keyboardType,
+  });
+  @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: controller,
+    obscureText: obscure,
+    keyboardType: keyboardType,
+    style: const TextStyle(color: Colors.white, fontSize: 17),
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: Color(0xFFAFC2D7)),
+      prefixIcon: Icon(icon, color: const Color(0xFFC2D1E2)),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: const Color(0xFF102E49).withValues(alpha: .72),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFF7096B8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFF7096B8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFF39E6DA), width: 2),
+      ),
+    ),
+  );
+}
+
+class _ConnectionStatus extends StatelessWidget {
+  final String state;
+  const _ConnectionStatus({required this.state});
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Icon(
+        state == 'Online'
+            ? Icons.verified_user_outlined
+            : Icons.cloud_off_outlined,
+        size: 18,
+        color: state == 'Online'
+            ? const Color(0xFF5BF4E7)
+            : const Color(0xFFFFC857),
+      ),
+      const SizedBox(width: 8),
+      Flexible(
+        child: Text(
+          state == 'Online'
+              ? 'Secure clinical workspace  •  Offline access available after first sign-in'
+              : state,
+          style: const TextStyle(color: Color(0xFFB6C9DF), fontSize: 12),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    ],
+  );
+}
+
+class _DeveloperPanel extends StatelessWidget {
+  const _DeveloperPanel();
+  static const nurse = String.fromEnvironment('ORAVI_DEBUG_NURSE');
+  static const charge = String.fromEnvironment('ORAVI_DEBUG_CHARGE_NURSE');
+  static const manager = String.fromEnvironment('ORAVI_DEBUG_WARD_MANAGER');
+  static const admin = String.fromEnvironment('ORAVI_DEBUG_ADMIN');
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(top: 18),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.black26,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      'Developer quick sign-in: Nurse ${nurse.isEmpty ? 'not configured' : 'ready'} · Charge Nurse ${charge.isEmpty ? 'not configured' : 'ready'} · Ward Manager ${manager.isEmpty ? 'not configured' : 'ready'} · Admin ${admin.isEmpty ? 'not configured' : 'ready'}',
+      style: const TextStyle(color: Color(0xFFB6C9DF), fontSize: 12),
+      textAlign: TextAlign.center,
+    ),
+  );
 }

@@ -397,19 +397,22 @@ class LocalWardRepository {
     required String outcomeNote,
     required String deviceId,
     int durationSeconds = 0,
+    String? callId,
+    String callStatus = 'completed',
   }) {
     final event = CallLoggedEvent(
       patientId: patientId,
       loopId: loopId,
       authorId: callerId,
       deviceId: deviceId,
-      callId: _newId('CALL'),
+      callId: callId ?? _newId('CALL'),
       callerId: callerId,
       callerRole: callerRole,
       recipientId: recipientId,
       recipientRole: recipientRole,
       outcomeNote: outcomeNote,
       durationSeconds: durationSeconds,
+      callStatus: callStatus,
     );
     return appendEvent(event);
   }

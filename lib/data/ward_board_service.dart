@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../domain/models/hospital_ward.dart';
 import '../domain/models/staff_profile.dart';
 import '../domain/models/whiteboard_models.dart';
+import '../domain/models/call_session.dart';
 import 'api_configuration.dart';
 
 class WardBoardService {
@@ -225,14 +226,14 @@ class WardBoardService {
   }
 
   Future<void> registerFcmInstallation({
-    required String fid,
+    required String token,
     required String deviceId,
     required String platform,
   }) async {
     await _request(
       'POST',
       '/api/v1/staff/me/fcm-installation',
-      payload: {'fid': fid, 'device_id': deviceId, 'platform': platform},
+      payload: {'token': token, 'device_id': deviceId, 'platform': platform},
     );
   }
 
@@ -261,6 +262,70 @@ class WardBoardService {
       );
     }
     return response;
+  }
+
+  Future<CallSession> inviteCall({
+    required String patientId,
+    required String loopId,
+    required String recipientId,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/api/v1/calls/invite',
+      payload: {
+        'patient_id': patientId,
+        'loop_id': loopId,
+        'recipient_id': recipientId,
+      },
+    );
+    if (response is! Map<String, dynamic>) {
+      throw const FormatException(
+        'The call service returned an invalid invitation.',
+      );
+    }
+    return CallSession.fromMap(response);
+  }
+
+  Future<CallSession> acceptCall(String callId) async {
+    final response = await _request(
+      'POST',
+      '/api/v1/calls/${Uri.encodeComponent(callId)}/accept',
+    );
+    if (response is! Map<String, dynamic>) {
+      throw const FormatException(
+        'The call service returned an invalid answer.',
+      );
+    }
+    return CallSession.fromMap(response);
+  }
+
+  Future<Map<String, dynamic>> getCall(String callId) async {
+    final response = await _request(
+      'GET',
+      '/api/v1/calls/${Uri.encodeComponent(callId)}',
+    );
+    if (response is! Map<String, dynamic>) {
+      throw const FormatException('The call service returned an invalid call.');
+    }
+    return response;
+  }
+
+  Future<void> endCall(String callId) async {
+    await _request('POST', '/api/v1/calls/${Uri.encodeComponent(callId)}/end');
+  }
+
+  Future<void> declineCall(String callId) async {
+    await _request(
+      'POST',
+      '/api/v1/calls/${Uri.encodeComponent(callId)}/decline',
+    );
+  }
+
+  Future<void> cancelCall(String callId) async {
+    await _request(
+      'POST',
+      '/api/v1/calls/${Uri.encodeComponent(callId)}/cancel',
+    );
   }
 
   Future<void> acceptHandoffBeds({
