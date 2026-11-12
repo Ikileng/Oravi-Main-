@@ -768,6 +768,7 @@ class CallLoggedEvent extends OraviEvent {
   final String recipientRole;
   final String outcomeNote; // PRD FR-54: Mandatory summary of verbal agreement
   final int durationSeconds;
+  final String callStatus;
 
   CallLoggedEvent({
     super.eventId,
@@ -788,6 +789,7 @@ class CallLoggedEvent extends OraviEvent {
     required this.recipientRole,
     required this.outcomeNote,
     this.durationSeconds = 0,
+    this.callStatus = 'completed',
   }) : super(type: eventType);
 
   @override
@@ -810,6 +812,7 @@ class CallLoggedEvent extends OraviEvent {
       'recipient_role': recipientRole,
       'outcome_note': outcomeNote,
       'duration_seconds': durationSeconds,
+      'call_status': callStatus,
     },
   };
 
@@ -834,6 +837,7 @@ class CallLoggedEvent extends OraviEvent {
       recipientRole: payload['recipient_role'] ?? 'clinician',
       outcomeNote: payload['outcome_note'] ?? '',
       durationSeconds: payload['duration_seconds'] ?? 0,
+      callStatus: payload['call_status'] ?? 'completed',
     );
   }
 }

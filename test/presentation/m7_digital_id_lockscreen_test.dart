@@ -60,13 +60,46 @@ void main() {
           staffAuthServiceProvider.overrideWithValue(mockAuthService),
           localDeviceIdProvider.overrideWithValue('DEVICE-lockscreen-test'),
         ],
-        child: const MaterialApp(
-          home: DigitalIdLockscreen(),
-        ),
+        child: const MaterialApp(home: DigitalIdLockscreen()),
       );
     }
 
-    testWidgets('1. Lockscreen displays provisioned staff Digital ID badges', (tester) async {
+    for (final width in [320.0, 384.0]) {
+      testWidgets('Header fits $width pixel phones with enlarged text', (
+        tester,
+      ) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+
+        tester.view.physicalSize = Size(width, 900);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [wardStaffListProvider.overrideWith((ref) async => [])],
+            child: MaterialApp(
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(1.3)),
+                child: child!,
+              ),
+              home: const DigitalIdLockscreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Hospital staff sign-in'), findsOneWidget);
+        expect(find.byTooltip('Dev Admin'), findsOneWidget);
+        expect(
+          tester.getRect(find.byTooltip('Dev Admin')).right,
+          lessThanOrEqualTo(width),
+        );
+      });
+    }
+
+    testWidgets('1. Lockscreen displays provisioned staff Digital ID badges', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -85,31 +118,36 @@ void main() {
       expect(find.text('NUR-402'), findsOneWidget);
     });
 
-    testWidgets('2. Search filter narrows down staff cards by name or initials', (tester) async {
-      tester.view.physicalSize = const Size(1080, 2400);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
+    testWidgets(
+      '2. Search filter narrows down staff cards by name or initials',
+      (tester) async {
+        tester.view.physicalSize = const Size(1080, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
 
-      await tester.pumpWidget(createWidgetUnderTest());
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(createWidgetUnderTest());
+        await tester.pumpAndSettle();
 
-      // Search for "Grace"
-      final searchField = find.byType(TextField);
-      await tester.enterText(searchField, 'Grace');
-      await tester.pumpAndSettle();
+        // Search for "Grace"
+        final searchField = find.byType(TextField);
+        await tester.enterText(searchField, 'Grace');
+        await tester.pumpAndSettle();
 
-      // Grace should be visible, Mary filtered out
-      expect(find.text('Grace Achieng, RN'), findsOneWidget);
-      expect(find.text('Mary Wanjiku, RN'), findsNothing);
+        // Grace should be visible, Mary filtered out
+        expect(find.text('Grace Achieng, RN'), findsOneWidget);
+        expect(find.text('Mary Wanjiku, RN'), findsNothing);
 
-      // Clear search
-      await tester.tap(find.byIcon(Icons.clear));
-      await tester.pumpAndSettle();
-      expect(find.text('Mary Wanjiku, RN'), findsOneWidget);
-      expect(find.text('Grace Achieng, RN'), findsOneWidget);
-    });
+        // Clear search
+        await tester.tap(find.byIcon(Icons.clear));
+        await tester.pumpAndSettle();
+        expect(find.text('Mary Wanjiku, RN'), findsOneWidget);
+        expect(find.text('Grace Achieng, RN'), findsOneWidget);
+      },
+    );
 
-    testWidgets('3. Tapping staff badge opens 4-Digit Quick PIN Keypad', (tester) async {
+    testWidgets('3. Tapping staff badge opens 4-Digit Quick PIN Keypad', (
+      tester,
+    ) async {
       await tester.pumpWidget(createWidgetUnderTest());
       await tester.pumpAndSettle();
 
@@ -128,7 +166,9 @@ void main() {
       expect(find.text('0'), findsOneWidget);
     });
 
-    testWidgets('4. Invalid PIN displays clinical error and remains locked', (tester) async {
+    testWidgets('4. Invalid PIN displays clinical error and remains locked', (
+      tester,
+    ) async {
       await tester.pumpWidget(createWidgetUnderTest());
       await tester.pumpAndSettle();
 
@@ -150,27 +190,33 @@ void main() {
       expect(find.byType(WardBoardScreen), findsNothing);
     });
 
-    testWidgets('5. Correct PIN unlocks and routes seamlessly to WardBoardScreen', (tester) async {
-      await tester.pumpWidget(createWidgetUnderTest());
-      await tester.pumpAndSettle();
+    testWidgets(
+      '5. Correct PIN unlocks and routes seamlessly to WardBoardScreen',
+      (tester) async {
+        await tester.pumpWidget(createWidgetUnderTest());
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Mary Wanjiku, RN'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Mary Wanjiku, RN'));
+        await tester.pumpAndSettle();
 
-      // Punch correct PIN: 1234
-      await tester.tap(find.text('1'));
-      await tester.pump();
-      await tester.tap(find.text('2'));
-      await tester.pump();
-      await tester.tap(find.text('3'));
-      await tester.pump();
-      await tester.tap(find.text('4'));
-      await tester.pumpAndSettle();
+        // Punch correct PIN: 1234
+        await tester.tap(find.text('1'));
+        await tester.pump();
+        await tester.tap(find.text('2'));
+        await tester.pump();
+        await tester.tap(find.text('3'));
+        await tester.pump();
+        await tester.tap(find.text('4'));
+        await tester.pumpAndSettle();
 
-      // Should route to WardBoardScreen!
-      expect(find.byType(WardBoardScreen), findsOneWidget);
-      expect(find.textContaining('ORAVI'), findsOneWidget);
-      expect(find.text('MW'), findsOneWidget); // Lock icon initials on Ward Board
-    });
+        // Should route to WardBoardScreen!
+        expect(find.byType(WardBoardScreen), findsOneWidget);
+        expect(find.textContaining('ORAVI'), findsOneWidget);
+        expect(
+          find.text('MW'),
+          findsOneWidget,
+        ); // Lock icon initials on Ward Board
+      },
+    );
   });
 }

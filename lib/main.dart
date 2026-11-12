@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +12,9 @@ import 'data/database/database_key.dart';
 import 'data/database/database_provider.dart';
 import 'data/device_identity.dart';
 import 'data/local_ward_repository.dart';
+import 'data/ward_board_service.dart';
 import 'domain/models/staff_profile.dart';
+import 'domain/models/call_session.dart';
 import 'domain/projections/projections.dart';
 import 'presentation/lockscreen/digital_id_lockscreen.dart';
 import 'presentation/providers/auth_providers.dart';
@@ -21,10 +24,15 @@ import 'presentation/providers/whiteboard_providers.dart';
 import 'presentation/theme/clinical_theme.dart';
 import 'presentation/patient_detail_screen.dart';
 import 'presentation/ward_board_screen.dart';
+import 'presentation/admin/dev_admin_dashboard_screen.dart';
+import 'presentation/call_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
   ErrorWidget.builder = (_) => const Material(
     child: Center(
       child: Padding(
@@ -85,8 +93,11 @@ class OraviApp extends ConsumerStatefulWidget {
 class _OraviAppState extends ConsumerState<OraviApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<MedicalIssueAlert>? _openedAlerts;
+  StreamSubscription<CallAlert>? _openedCalls;
   MedicalIssueAlert? _pendingAlert;
+  CallAlert? _pendingCall;
   bool _openingAlert = false;
+  bool _openingCall = false;
 
   @override
   void initState() {
@@ -95,11 +106,26 @@ class _OraviAppState extends ConsumerState<OraviApp> {
         .read(medicalIssuePushServiceProvider)
         .openedAlerts
         .listen(_queueAlert);
+    _openedCalls = ref
+        .read(medicalIssuePushServiceProvider)
+        .openedCalls
+        .listen(_queueCall);
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(
+        ref
+            .read(medicalIssuePushServiceProvider)
+            .initialize()
+            .catchError(
+              (Object error) => debugPrint('FCM initialization failed: $error'),
+            ),
+      );
+    }
   }
 
   @override
   void dispose() {
     _openedAlerts?.cancel();
+    _openedCalls?.cancel();
     super.dispose();
   }
 
@@ -108,12 +134,154 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     if (mounted) setState(() {});
   }
 
+  void _queueCall(CallAlert alert) {
+    _pendingCall = alert;
+    if (mounted) setState(() {});
+  }
+
   void _schedulePendingAlert(StaffProfile? staff) {
+    if (staff?.role == 'dev_admin') {
+      _pendingAlert = null;
+      return;
+    }
     if (staff == null || _pendingAlert == null || _openingAlert) return;
     _openingAlert = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openPendingAlert();
     });
+  }
+
+  void _schedulePendingCall(StaffProfile? staff) {
+    if (staff?.role == 'dev_admin') {
+      _pendingCall = null;
+      return;
+    }
+    if (staff == null || _pendingCall == null || _openingCall) return;
+    _openingCall = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openPendingCall();
+    });
+  }
+
+  Future<void> _openPendingCall() async {
+    final alert = _pendingCall;
+    _pendingCall = null;
+    if (alert == null) {
+      _openingCall = false;
+      return;
+    }
+    try {
+      final api = WardBoardService(
+        getAccessToken: () => ref.read(authAccessTokenProvider),
+      );
+      final details = await api.getCall(alert.callId);
+      if (!mounted) return;
+      final answer = await showDialog<bool>(
+        context: _navigatorKey.currentContext ?? context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Incoming Oravi call'),
+          content: Text(
+            'Call from ${details['caller_name'] ?? details['caller_id'] ?? 'another clinician'}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Decline'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Answer'),
+            ),
+          ],
+        ),
+      );
+      if (answer != true) {
+        await api.declineCall(alert.callId);
+        return;
+      }
+      final session = await api.acceptCall(alert.callId);
+      if (!mounted) return;
+      final durationSeconds = await _navigatorKey.currentState?.push<int>(
+        MaterialPageRoute(
+          builder: (_) => CallScreen(session: session, api: api),
+        ),
+      );
+      if (durationSeconds != null && mounted) {
+        await _recordIncomingCallOutcome(session, durationSeconds);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not answer the Oravi call (${error.runtimeType}).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _openingCall = false;
+    }
+  }
+
+  Future<void> _recordIncomingCallOutcome(
+    CallSession session,
+    int durationSeconds,
+  ) async {
+    final noteController = TextEditingController();
+    try {
+      final note = await showDialog<String>(
+        context: _navigatorKey.currentContext ?? context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Call with ${session.callerName}'),
+          content: TextField(
+            controller: noteController,
+            autofocus: true,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Outcome note',
+              hintText: 'Record the agreed action or follow-up',
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                final value = noteController.text.trim();
+                if (value.isNotEmpty) Navigator.of(dialogContext).pop(value);
+              },
+              child: const Text('Save outcome'),
+            ),
+          ],
+        ),
+      );
+      if (note == null || !mounted) return;
+      await ref
+          .read(wardControllerProvider.notifier)
+          .logCallOutcome(
+            patientId: session.patientId,
+            loopId: session.loopId,
+            recipientId: session.callerId,
+            recipientRole: session.callerRole,
+            outcomeNote: note,
+            durationSeconds: durationSeconds,
+            callId: session.callId,
+            callStatus: 'completed',
+          );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not save the call outcome (${error.runtimeType}).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      noteController.dispose();
+    }
   }
 
   Future<void> _openPendingAlert() async {
@@ -208,6 +376,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     final authStaff = ref.watch(authenticatedStaffProvider);
     final pushStatus = ref.watch(medicalIssuePushControllerProvider);
     _schedulePendingAlert(authStaff);
+    _schedulePendingCall(authStaff);
 
     return MaterialApp(
       navigatorKey: _navigatorKey,
@@ -216,7 +385,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       theme: ClinicalTheme.darkTheme,
       builder: (context, child) => Column(
         children: [
-          if (pushStatus != null)
+          if (pushStatus != null && authStaff?.role != 'dev_admin')
             Material(
               color: ClinicalTheme.urgentAmber.withValues(alpha: 0.18),
               child: SafeArea(
@@ -244,6 +413,8 @@ class _OraviAppState extends ConsumerState<OraviApp> {
           widget.home ??
           (authStaff == null
               ? const DigitalIdLockscreen()
+              : authStaff.role == 'dev_admin'
+              ? const DevAdminDashboardScreen()
               : const WardBoardScreen()),
     );
   }

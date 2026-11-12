@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'admin/dev_admin_dashboard_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
@@ -37,9 +38,12 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authStaff = ref.watch(authenticatedStaffProvider);
+    if (authStaff?.role == 'dev_admin') {
+      return const DevAdminDashboardScreen();
+    }
     final patients = ref.watch(wardPatientsProvider);
     final currentWard = ref.watch(selectedWardProvider);
-    final authStaff = ref.watch(authenticatedStaffProvider);
     final accessiblePatientIds = ref.watch(currentUserPatientIdsProvider);
     final roster = ref.watch(wardSupportRosterProvider);
     final whiteboardBeds = ref.watch(whiteboardAssignmentsProvider);
@@ -402,7 +406,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   ),
                 ),
                 Text(
-                  'Jaramanda Hospital · $wardName',
+                  'Oravi Hospital · $wardName',
                   style: const TextStyle(
                     fontSize: 11,
                     color: Color(0xFF94A3B8),

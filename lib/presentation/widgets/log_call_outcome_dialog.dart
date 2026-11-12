@@ -12,6 +12,9 @@ class LogCallOutcomeDialog extends StatefulWidget {
   final String recipientId;
   final String recipientName;
   final String recipientRole;
+  final int durationSeconds;
+  final String? callId;
+  final String callStatus;
 
   const LogCallOutcomeDialog({
     super.key,
@@ -19,6 +22,9 @@ class LogCallOutcomeDialog extends StatefulWidget {
     required this.recipientId,
     required this.recipientName,
     required this.recipientRole,
+    this.durationSeconds = 0,
+    this.callId,
+    this.callStatus = 'completed',
   });
 
   @override
@@ -65,6 +71,9 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
             recipientId: widget.recipientId,
             recipientRole: widget.recipientRole,
             outcomeNote: note,
+            durationSeconds: widget.durationSeconds,
+             callId: widget.callId,
+             callStatus: widget.callStatus,
           );
       if (mounted) {
         Navigator.of(context).pop();

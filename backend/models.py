@@ -78,8 +78,9 @@ class StaffProfile:
 
 @dataclass
 class StaffLoginRequest:
-    staff_id: str
-    pin: str
+    staff_id: str = ""
+    pin: str = ""
+    email: Optional[str] = None
 
 @dataclass
 class StaffLoginResponse:
@@ -94,6 +95,7 @@ class CreateStaffRequest:
     name: str
     role: str
     pin: str
+    email: Optional[str] = None
     ward_id: str = ""
     avatar_color: Optional[str] = None
 
@@ -111,6 +113,14 @@ class HospitalWardModel:
     bed_numbers: List[str]
     department: str
     description: str
+
+@dataclass
+class WardConfigurationRequest:
+    name: str
+    bed_numbers: List[str]
+    department: str = ""
+    description: str = ""
+    expected_bed_numbers: Optional[List[str]] = None
 
 @dataclass
 class ShiftAllocationModel:

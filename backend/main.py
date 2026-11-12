@@ -10,9 +10,10 @@ from fastapi import FastAPI, Query, HTTPException, Header, Depends, status
 from .models import (
     CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
     StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile,
-    HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse
+    HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse, WardConfigurationRequest
 )
 from .event_store import EventStore
+from .call_store import CallStore
 from .staff_store import StaffStore
 from .ward_store import WardStore
 from .services.llm_service import LLMService
@@ -38,10 +39,11 @@ staff_store = StaffStore(db_path=database_path)
 ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
 fcm_service = FcmService()
+call_store = CallStore(db_path=database_path)
 logger = logging.getLogger(__name__)
 
 
-def require_staff(authorization: str = Header(default="")) -> StaffProfile:
+def require_authenticated_staff(authorization: str = Header(default="")) -> StaffProfile:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Sign-in required.")
@@ -51,7 +53,13 @@ def require_staff(authorization: str = Header(default="")) -> StaffProfile:
     return profile
 
 
-def require_dev_admin(profile: StaffProfile = Depends(require_staff)) -> StaffProfile:
+def require_staff(profile: StaffProfile = Depends(require_authenticated_staff)) -> StaffProfile:
+    if profile.role == 'dev_admin':
+        raise HTTPException(status_code=403, detail='Dev Admin has no clinical access.')
+    return profile
+
+
+def require_dev_admin(profile: StaffProfile = Depends(require_authenticated_staff)) -> StaffProfile:
     if profile.role != "dev_admin":
         raise HTTPException(status_code=403, detail="Dev Admin access required.")
     return profile
@@ -362,6 +370,7 @@ async def _medical_issue_notification_worker() -> None:
     while True:
         try:
             await asyncio.to_thread(_dispatch_due_medical_issue_notifications)
+            await asyncio.to_thread(call_store.cleanup)
         except Exception as error:
             logger.error(
                 "Medical issue notification worker failed (%s).",
@@ -402,6 +411,44 @@ async def stop_medical_issue_notification_worker():
             pass
 
 # --- Hospital Wards & Shift Allocation Endpoints ---
+
+@app.get("/api/v1/admin/wards")
+def admin_wards(profile: StaffProfile = Depends(require_dev_admin)):
+    return ward_store.get_all_wards()
+
+
+def _configured_ward(request: WardConfigurationRequest, ward_id: str):
+    beds = [bed.strip() for bed in request.bed_numbers]
+    if not request.name.strip() or any(not bed for bed in beds):
+        raise HTTPException(400, "Ward name and bed labels must not be blank.")
+    if len({bed.casefold() for bed in beds}) != len(beds):
+        raise HTTPException(400, "Bed labels must be unique within the ward.")
+    return HospitalWardModel(ward_id, request.name.strip(), len(beds), beds,
+                             request.department.strip(), request.description.strip())
+
+
+@app.post("/api/v1/admin/wards")
+def create_configured_ward(request: WardConfigurationRequest,
+                           profile: StaffProfile = Depends(require_dev_admin)):
+    ward = _configured_ward(request, "ward-" + uuid.uuid4().hex)
+    ward_store.create_ward(ward)
+    return ward
+
+
+@app.put("/api/v1/admin/wards/{ward_id}")
+def update_configured_ward(ward_id: str, request: WardConfigurationRequest,
+                           profile: StaffProfile = Depends(require_dev_admin)):
+    ward = _configured_ward(request, ward_id)
+    if request.expected_bed_numbers is None:
+        raise HTTPException(400, "Reload the ward before editing its beds.")
+    try:
+        ward_store.update_ward_configuration(ward, request.expected_bed_numbers)
+    except KeyError:
+        raise HTTPException(404, "Ward not found.")
+    except ValueError as error:
+        raise HTTPException(409, str(error))
+    return ward
+
 
 @app.get("/api/v1/wards")
 def get_hospital_wards(profile: StaffProfile = Depends(require_staff)):
@@ -828,13 +875,17 @@ def search_staff_directory(q: str = Query(default="", max_length=80)):
 
 @app.get("/api/v1/admin/staff", response_model=List[StaffProfile])
 def list_provisioned_staff(admin: StaffProfile = Depends(require_dev_admin)):
-    return staff_store.list_staff()
+    profiles = staff_store.list_staff()
+    for profile in profiles:
+        profile.ward_id = ''
+    return profiles
 
 @app.post("/api/v1/auth/verify-pin", response_model=StaffLoginResponse)
 def verify_staff_pin(request: StaffLoginRequest):
     success, profile, error_msg = staff_store.verify_pin(
         staff_id=request.staff_id,
         pin=request.pin,
+        email=request.email,
     )
     if not success:
         return StaffLoginResponse(success=False, error=error_msg)
@@ -862,19 +913,19 @@ def logout_staff(authorization: str = Header(default="")):
 def register_fcm_device_token(
     payload: dict, profile: StaffProfile = Depends(require_staff)
 ):
-    fid = payload.get("fid")
+    token = payload.get("token")
     device_id = payload.get("device_id")
     platform = payload.get("platform")
     if (
-        not isinstance(fid, str)
-        or not 20 <= len(fid) <= 256
+        not isinstance(token, str)
+        or not 20 <= len(token) <= 4096
         or not isinstance(device_id, str)
         or not 1 <= len(device_id) <= 200
         or platform not in {"android", "ios", "macos"}
     ):
-        raise HTTPException(status_code=400, detail="A valid Firebase installation is required.")
+        raise HTTPException(status_code=400, detail="A valid FCM registration token is required.")
     if not staff_store.register_fcm_installation(
-        profile.staff_id, device_id, fid, platform
+        profile.staff_id, device_id, token, platform
     ):
         raise HTTPException(status_code=409, detail="The staff account is unavailable.")
     return {"success": True}
@@ -890,6 +941,103 @@ def remove_fcm_device_token(
     staff_store.remove_fcm_installation(profile.staff_id, device_id)
     return {"success": True}
 
+
+def _livekit_token(identity: str, name: str, room_name: str) -> str:
+    livekit_url = os.getenv("LIVEKIT_URL")
+    api_key = os.getenv("LIVEKIT_API_KEY")
+    api_secret = os.getenv("LIVEKIT_API_SECRET")
+    if not livekit_url or not api_key or not api_secret:
+        raise HTTPException(status_code=503, detail="LiveKit calling is not configured on the Oravi service.")
+    try:
+        from livekit import api
+    except ImportError as error:
+        raise HTTPException(status_code=503, detail="The LiveKit server SDK is not installed on the Oravi service.") from error
+    return (
+        api.AccessToken(api_key, api_secret)
+        .with_identity(identity)
+        .with_name(name)
+        .with_grants(api.VideoGrants(room_join=True, room=room_name, can_publish=True, can_subscribe=True, can_publish_data=True))
+        .to_jwt()
+    )
+
+
+@app.post("/api/v1/calls/invite")
+def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
+    patient_id = payload.get("patient_id")
+    loop_id = payload.get("loop_id")
+    recipient_id = payload.get("recipient_id")
+    if not all(isinstance(value, str) and value.strip() for value in (patient_id, loop_id, recipient_id)):
+        raise HTTPException(status_code=400, detail="A patient, issue, and recipient are required.")
+    assignment_date = date.today().isoformat()
+    if not _staff_can_access_patient(profile, patient_id, assignment_date):
+        raise HTTPException(status_code=403, detail="You do not have access to this patient.")
+    if not store.get_loop_events(patient_id, loop_id):
+        raise HTTPException(status_code=404, detail="The Medical Issue was not found for this patient.")
+    authorized_ids = _authorized_patient_staff_ids(patient_id, assignment_date)
+    if recipient_id not in authorized_ids or not staff_store.is_active_clinical_staff(recipient_id):
+        raise HTTPException(status_code=403, detail="The selected clinician is not authorized for this patient.")
+    recipient_fids = staff_store.get_fcm_fids_for_staff(recipient_id)
+    if not recipient_fids:
+        raise HTTPException(status_code=409, detail="The selected clinician has no registered Oravi device.")
+    call_id = f"CALL-{uuid.uuid4()}"
+    room_name = f"oravi-call-{uuid.uuid4().hex}"
+    livekit_url = os.getenv("LIVEKIT_URL")
+    call_store.create(call_id=call_id, room_name=room_name, patient_id=patient_id, loop_id=loop_id, caller_id=profile.staff_id, recipient_id=recipient_id)
+    caller_token = _livekit_token(profile.staff_id, profile.name, room_name)
+    delivered = 0
+    for fid in recipient_fids:
+        try:
+            if fcm_service.send_call_invitation(fid, call_id=call_id):
+                delivered += 1
+        except Exception as error:
+            logger.error("Call invitation delivery failed (%s).", type(error).__name__)
+    if delivered == 0:
+        raise HTTPException(status_code=503, detail="The clinician could not be notified.")
+    recipient = staff_store.get_active_staff_by_ids([recipient_id])[0]
+    return {"call_id": call_id, "patient_id": patient_id, "loop_id": loop_id, "caller_id": profile.staff_id, "caller_name": profile.name, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "room_name": room_name, "livekit_url": livekit_url, "token": caller_token, "status": "ringing"}
+
+
+@app.get("/api/v1/calls/{call_id}")
+def get_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+    call = call_store.get(call_id)
+    if call is None or profile.staff_id not in {call["caller_id"], call["recipient_id"]}:
+        raise HTTPException(status_code=404, detail="Call not found.")
+    caller = staff_store.get_active_staff_by_ids([call["caller_id"]])[0]
+    recipient = staff_store.get_active_staff_by_ids([call["recipient_id"]])[0]
+    return {"call_id": call["call_id"], "patient_id": call["patient_id"], "loop_id": call["loop_id"], "caller_id": caller.staff_id, "caller_name": caller.name, "caller_role": caller.role, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "status": call["status"]}
+
+
+@app.post("/api/v1/calls/{call_id}/accept")
+def accept_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+    call = call_store.get(call_id)
+    if call is None or profile.staff_id != call["recipient_id"] or not call_store.mark_answered(call_id):
+        raise HTTPException(status_code=409, detail="This call is no longer available.")
+    token = _livekit_token(profile.staff_id, profile.name, call["room_name"])
+    livekit_url = os.getenv("LIVEKIT_URL")
+    caller = staff_store.get_active_staff_by_ids([call["caller_id"]])[0]
+    return {"call_id": call_id, "patient_id": call["patient_id"], "loop_id": call["loop_id"], "caller_id": caller.staff_id, "caller_name": caller.name, "caller_role": caller.role, "recipient_id": profile.staff_id, "recipient_name": profile.name, "recipient_role": profile.role, "room_name": call["room_name"], "livekit_url": livekit_url, "token": token, "status": "answered", "is_incoming": True}
+
+
+@app.post("/api/v1/calls/{call_id}/end")
+def end_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+    if not call_store.mark_ended(call_id, profile.staff_id):
+        raise HTTPException(status_code=404, detail="Call not found or already ended.")
+    return {"success": True}
+
+
+@app.post("/api/v1/calls/{call_id}/decline")
+def decline_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+    if not call_store.mark_declined(call_id, profile.staff_id):
+        raise HTTPException(status_code=409, detail="This call is no longer available.")
+    return {"success": True, "status": "declined"}
+
+
+@app.post("/api/v1/calls/{call_id}/cancel")
+def cancel_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+    if not call_store.mark_cancelled(call_id, profile.staff_id):
+        raise HTTPException(status_code=409, detail="This call is no longer ringing.")
+    return {"success": True, "status": "cancelled"}
+
 @app.post("/api/v1/admin/staff", response_model=StaffProfile)
 def create_staff_member(request: CreateStaffRequest, admin: StaffProfile = Depends(require_dev_admin)):
     try:
@@ -900,6 +1048,7 @@ def create_staff_member(request: CreateStaffRequest, admin: StaffProfile = Depen
             ward_id="",
             pin=request.pin,
             avatar_color=request.avatar_color,
+            email=request.email,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -907,6 +1056,22 @@ def create_staff_member(request: CreateStaffRequest, admin: StaffProfile = Depen
         raise HTTPException(status_code=409, detail="That staff ID already exists.") from error
 
 # --- Event Sync Endpoints ---
+
+@app.patch('/api/v1/admin/staff/{staff_id}', response_model=StaffProfile)
+def update_staff_status(staff_id: str, payload: dict, admin: StaffProfile = Depends(require_dev_admin)):
+    active = payload.get('is_active')
+    if not isinstance(active, bool):
+        raise HTTPException(status_code=400, detail='is_active must be true or false.')
+    if not staff_store.set_staff_active(staff_id, active):
+        raise HTTPException(status_code=404, detail='Clinical staff account not found.')
+    return next(profile for profile in list_provisioned_staff(admin) if profile.staff_id == staff_id)
+
+
+@app.delete('/api/v1/admin/staff/{staff_id}')
+def delete_staff_account(staff_id: str, admin: StaffProfile = Depends(require_dev_admin)):
+    if not staff_store.delete_clinical_staff(staff_id):
+        raise HTTPException(status_code=404, detail='Clinical staff account not found.')
+    return {'success': True}
 
 @app.post("/api/v1/sync/push", response_model=SyncPushResponse)
 def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_staff)):

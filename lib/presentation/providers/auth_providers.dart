@@ -153,18 +153,17 @@ class AuthController extends Notifier<AuthState> {
   @override
   AuthState build() => const AuthState();
 
-  Future<bool> verifyAndLogin(String staffId, String pin) async {
+  Future<bool> verifyAndLogin(String identifier, String pin) async {
     state = state.copyWith(isLoading: true, errorMessage: null);
 
     final service = ref.read(staffAuthServiceProvider);
-    final result = await service.verifyPin(staffId, pin);
+    final result = await service.verifyPin(identifier, pin);
 
     final authenticatedStaff = result.staff;
     final token = result.token;
 
     if (result.success &&
         authenticatedStaff != null &&
-        authenticatedStaff.staffId == staffId &&
         authenticatedStaff.isActive &&
         token != null &&
         token.isNotEmpty) {
@@ -174,7 +173,8 @@ class AuthController extends Notifier<AuthState> {
       ref
           .read(authAccessTokenProvider.notifier)
           .setToken(!token.startsWith('offline_token_') ? token : null);
-      if (!token.startsWith('offline_token_')) {
+      if (authenticatedStaff.role != 'dev_admin' &&
+          !token.startsWith('offline_token_')) {
         unawaited(
           ref
               .read(medicalIssuePushControllerProvider.notifier)
@@ -188,6 +188,11 @@ class AuthController extends Notifier<AuthState> {
         getAccessToken: () => ref.read(authAccessTokenProvider),
       );
       ref.read(wardContextErrorProvider.notifier).setError(null);
+      if (authenticatedStaff.role == 'dev_admin') {
+        ref.read(selectedWardProvider.notifier).selectWard(_noWard());
+        state = const AuthState();
+        return true;
+      }
       try {
         if (authenticatedStaff.role == 'charge_nurse') {
           final preferredWard = await boardService.getPreferredWard();
@@ -252,7 +257,8 @@ class AuthController extends Notifier<AuthState> {
 
   void logout() {
     final token = ref.read(authAccessTokenProvider);
-    if (token != null) {
+    if (token != null &&
+        ref.read(authenticatedStaffProvider)?.role != 'dev_admin') {
       unawaited(
         ref
             .read(medicalIssuePushControllerProvider.notifier)

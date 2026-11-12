@@ -237,6 +237,7 @@ class AskOraviEngine {
               'recipientId': event.recipientId,
               'recipientRole': event.recipientRole,
               'durationSeconds': event.durationSeconds,
+              'callStatus': event.callStatus,
             },
           ),
         );
