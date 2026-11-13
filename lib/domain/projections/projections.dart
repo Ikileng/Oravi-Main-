@@ -22,7 +22,7 @@ class ThreadMessage extends Equatable {
   const ThreadMessage({
     required this.messageId,
     required this.authorId,
-    this.authorRole = 'ward_nurse',
+    this.authorRole = '',
     required this.deviceId,
     required this.content,
     required this.createdAt,

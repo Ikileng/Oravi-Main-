@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 from backend.models import HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse
+from backend.ward_transfers import init_transfer_tables, check_assignment, protect_pending_board
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "oravi_server.db")
 
@@ -93,6 +94,7 @@ class WardStore:
                 )
             """)
             conn.commit()
+            init_transfer_tables(conn)
 
     def get_all_wards(self) -> List[HospitalWardModel]:
         with self._get_connection() as conn:
@@ -175,6 +177,10 @@ class WardStore:
                    ORDER BY bed_number""",
                 (ward_id, date),
             ).fetchall()
+            available_nurses = [r['staff_id'] for r in conn.execute('''SELECT staff_id FROM nurse_shift_placements p
+                WHERE p.ward_id=? AND p.date=? AND p.shift_type=? AND NOT EXISTS (
+                SELECT 1 FROM shift_bed_assignments b WHERE b.assigned_nurse_id=p.staff_id
+                AND b.ward_id=p.ward_id AND b.date=p.date AND b.shift_type=p.shift_type)''', (ward_id,date,shift_type))]
 
         by_bed: Dict[str, Dict[str, Any]] = {
             bed_number: {
@@ -216,6 +222,7 @@ class WardStore:
             "date": date,
             "shift_type": shift_type,
             "bed_assignments": list(by_bed.values()),
+            "available_nurse_ids": available_nurses,
             "responsibilities": json.loads(
                 (allocations or other_allocation)["support_roster_json"]
             ) if allocations or other_allocation else {},
@@ -271,6 +278,8 @@ class WardStore:
                      AND b.patient_id IS NOT NULL AND b.patient_initials != ''""",
                 (staff_id, staff_id, date, shift_type),
             ).fetchall()
+            placements = conn.execute('SELECT p.ward_id,w.name AS ward_name FROM nurse_shift_placements p JOIN hospital_wards w ON w.ward_id=p.ward_id WHERE p.staff_id=? AND p.date=? AND p.shift_type=?', (staff_id,date,shift_type)).fetchall()
+            rows = list({r['ward_id']:r for r in [*rows,*placements]}.values())
         if not rows:
             return None
         if len(rows) > 1:
@@ -289,6 +298,8 @@ class WardStore:
         self, staff_id: str, ward_id: str, date: str, shift_type: str
     ) -> bool:
         with self._get_connection() as conn:
+            if conn.execute('SELECT 1 FROM nurse_shift_placements WHERE staff_id=? AND ward_id=? AND date=? AND shift_type=?', (staff_id,ward_id,date,shift_type)).fetchone():
+                return True
             row = conn.execute(
                 """SELECT 1 FROM shift_bed_assignments
                    WHERE assigned_nurse_id = ? AND ward_id = ? AND date = ?
@@ -306,6 +317,8 @@ class WardStore:
         self, staff_id: str, ward_id: str, date: str
     ) -> bool:
         with self._get_connection() as conn:
+            if conn.execute('SELECT 1 FROM nurse_shift_placements WHERE staff_id=? AND ward_id=? AND date=?', (staff_id,ward_id,date)).fetchone():
+                return True
             row = conn.execute(
                 """SELECT 1 FROM shift_bed_assignments
                    WHERE ward_id = ? AND date = ? AND patient_id IS NOT NULL
@@ -430,6 +443,10 @@ class WardStore:
             "SELECT bed_numbers FROM hospital_wards WHERE ward_id = ?",
             (allocation.ward_id,),
         ).fetchone()
+        protect_pending_board(conn, allocation)
+        for nurse_id in {item.get('assigned_nurse_id') for item in allocation.bed_assignments} - {None,''}:
+            check_assignment(conn,nurse_id,allocation.date,allocation.shift_type,allocation.ward_id,
+                             nurse_id in allocation.confirmed_double_shift_nurse_ids,allocation.published_by)
         if configured is not None:
             allowed = set(json.loads(configured["bed_numbers"]))
             if any(item.get("bed_number") not in allowed for item in allocation.bed_assignments):
@@ -595,6 +612,8 @@ class WardStore:
                 )
             date = allocation["date"]
             outgoing_shift = allocation["shift_type"]
+            if conn.execute("SELECT 1 FROM ward_transfers WHERE nurse_id=? AND date=? AND shift_type=? AND status IN ('pending','handoff')",(outgoing_nurse_id,date,outgoing_shift)).fetchone():
+                raise ValueError('Complete the pending ward-transfer handoff from Transfers instead of the shift handoff wizard.')
             incoming_shift = "night" if outgoing_shift == "day" else "day"
 
             conflict = conn.execute(

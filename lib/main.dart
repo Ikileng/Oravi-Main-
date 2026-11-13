@@ -25,6 +25,7 @@ import 'presentation/theme/clinical_theme.dart';
 import 'presentation/patient_detail_screen.dart';
 import 'presentation/ward_board_screen.dart';
 import 'presentation/admin/dev_admin_dashboard_screen.dart';
+import 'presentation/communications/staff_communications_screen.dart';
 import 'presentation/call_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
 
@@ -94,6 +95,8 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<MedicalIssueAlert>? _openedAlerts;
   StreamSubscription<CallAlert>? _openedCalls;
+  StreamSubscription<void>? _openedInbox;
+  bool _pendingInbox = false;
   MedicalIssueAlert? _pendingAlert;
   CallAlert? _pendingCall;
   bool _openingAlert = false;
@@ -106,6 +109,11 @@ class _OraviAppState extends ConsumerState<OraviApp> {
         .read(medicalIssuePushServiceProvider)
         .openedAlerts
         .listen(_queueAlert);
+    _openedInbox = ref.read(medicalIssuePushServiceProvider).openedInbox.listen(
+      (_) {
+        if (mounted) setState(() => _pendingInbox = true);
+      },
+    );
     _openedCalls = ref
         .read(medicalIssuePushServiceProvider)
         .openedCalls
@@ -126,6 +134,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   void dispose() {
     _openedAlerts?.cancel();
     _openedCalls?.cancel();
+    _openedInbox?.cancel();
     super.dispose();
   }
 
@@ -140,7 +149,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   }
 
   void _schedulePendingAlert(StaffProfile? staff) {
-    if (staff?.role == 'dev_admin') {
+    if (staff != null && !staff.isClinical) {
       _pendingAlert = null;
       return;
     }
@@ -207,7 +216,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
           builder: (_) => CallScreen(session: session, api: api),
         ),
       );
-      if (durationSeconds != null && mounted) {
+      if (durationSeconds != null && mounted && session.patientId.isNotEmpty) {
         await _recordIncomingCallOutcome(session, durationSeconds);
       }
     } catch (error) {
@@ -377,6 +386,18 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     final pushStatus = ref.watch(medicalIssuePushControllerProvider);
     _schedulePendingAlert(authStaff);
     _schedulePendingCall(authStaff);
+    if (_pendingInbox && authStaff != null) {
+      _pendingInbox = false;
+      if (authStaff.isClinical || authStaff.isSupport) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _navigatorKey.currentState?.push(
+            MaterialPageRoute<void>(
+              builder: (_) => const StaffCommunicationsScreen(),
+            ),
+          );
+        });
+      }
+    }
 
     return MaterialApp(
       navigatorKey: _navigatorKey,
@@ -415,7 +436,9 @@ class _OraviAppState extends ConsumerState<OraviApp> {
               ? const DigitalIdLockscreen()
               : authStaff.role == 'dev_admin'
               ? const DevAdminDashboardScreen()
-              : const WardBoardScreen()),
+              : authStaff.isClinical
+              ? const WardBoardScreen()
+              : const StaffCommunicationsScreen()),
     );
   }
 }

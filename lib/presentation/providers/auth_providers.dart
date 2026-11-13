@@ -38,7 +38,7 @@ class MedicalIssuePushController extends Notifier<String?> {
     } catch (error) {
       if (!ref.mounted) return;
       state =
-          'Medical Issue alerts could not be enabled (${error.runtimeType}). Check Firebase setup and notification permission.';
+          'Oravi notifications could not be enabled (${error.runtimeType}). Check Firebase setup and notification permission.';
     }
   });
 
@@ -188,7 +188,7 @@ class AuthController extends Notifier<AuthState> {
         getAccessToken: () => ref.read(authAccessTokenProvider),
       );
       ref.read(wardContextErrorProvider.notifier).setError(null);
-      if (authenticatedStaff.role == 'dev_admin') {
+      if (!authenticatedStaff.isClinical) {
         ref.read(selectedWardProvider.notifier).selectWard(_noWard());
         state = const AuthState();
         return true;

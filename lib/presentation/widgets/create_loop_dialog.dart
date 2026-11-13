@@ -12,8 +12,13 @@ enum _RecurrenceChoice { reopen, createLinked }
 /// - Sensible defaults for type, urgency, and owner.
 class CreateLoopDialog extends StatefulWidget {
   final String patientId;
+  final String? patientLabel;
 
-  const CreateLoopDialog({super.key, required this.patientId});
+  const CreateLoopDialog({
+    super.key,
+    required this.patientId,
+    this.patientLabel,
+  });
 
   @override
   State<CreateLoopDialog> createState() => _CreateLoopDialogState();
@@ -181,11 +186,23 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
               ),
             ],
           ),
+          contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (widget.patientLabel != null) ...[
+                  Text(
+                    'Patient: ${widget.patientLabel}',
+                    style: const TextStyle(
+                      color: ClinicalTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 const Text(
                   'Quick Templates (2-Tap Entry):',
                   style: TextStyle(

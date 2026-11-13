@@ -43,9 +43,21 @@ class StaffProfile extends Equatable {
   bool get isWardNurse => role == 'ward_nurse';
   bool get isChargeNurse => role == 'charge_nurse';
   bool get isDoctorOnCall => role == 'doctor_on_call';
+  bool get isClinical =>
+      const {'ward_nurse', 'charge_nurse', 'doctor_on_call'}.contains(role);
+  bool get isSupport =>
+      const {'pca', 'housekeeper', 'catering', 'fire_marshall'}.contains(role);
 
   String get formattedRole {
     switch (role) {
+      case 'pca':
+        return 'Patient Care Attendant (PCA)';
+      case 'housekeeper':
+        return 'Housekeeper';
+      case 'catering':
+        return 'Catering (Kitchen & Meals)';
+      case 'fire_marshall':
+        return 'Fire Marshal';
       case 'dev_admin':
         return 'Development Admin';
       case 'charge_nurse':
@@ -53,8 +65,9 @@ class StaffProfile extends Equatable {
       case 'doctor_on_call':
         return 'Doctor on Call';
       case 'ward_nurse':
-      default:
         return 'Registered Nurse';
+      default:
+        return 'Unknown role';
     }
   }
 
@@ -84,12 +97,12 @@ class StaffProfile extends Equatable {
 
   @override
   List<Object?> get props => [
-        staffId,
-        name,
-        role,
-        wardId,
-        avatarColor,
-        initials,
-        isActive,
-      ];
+    staffId,
+    name,
+    role,
+    wardId,
+    avatarColor,
+    initials,
+    isActive,
+  ];
 }

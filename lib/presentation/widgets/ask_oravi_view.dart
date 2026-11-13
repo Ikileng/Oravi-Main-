@@ -5,6 +5,7 @@ import '../../domain/projections/projections.dart';
 import '../../domain/timeline/ask_oravi_engine.dart';
 import '../../domain/timeline/patient_timeline_entry.dart';
 import '../providers/ward_providers.dart';
+import '../providers/auth_providers.dart';
 import '../theme/clinical_theme.dart';
 import 'log_call_outcome_dialog.dart';
 
@@ -1288,7 +1289,17 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   }
 
   Widget _buildQuoteCard(PatientTimelineEntry entry) {
-    final cadreColor = ClinicalTheme.cadreColor(entry.authorId);
+    final roster = ref
+        .watch(patientStaffListProvider(entry.patientId))
+        .asData
+        ?.value;
+    final role = roster
+        ?.where((p) => p.staffId == entry.authorId)
+        .firstOrNull
+        ?.role;
+    final cadreColor = ClinicalTheme.cadreColor(
+      entry.authorRole.isNotEmpty ? entry.authorRole : role ?? '',
+    );
     final urgencyColor = ClinicalTheme.urgencyColor(entry.loopUrgency);
 
     return Container(

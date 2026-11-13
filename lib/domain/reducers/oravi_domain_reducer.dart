@@ -94,6 +94,7 @@ class OraviDomainReducer {
           final message = ThreadMessage(
             messageId: event.messageId,
             authorId: event.authorId,
+            authorRole: event.authorRole,
             deviceId: event.deviceId,
             content: event.content,
             createdAt: event.clientCreatedAt,

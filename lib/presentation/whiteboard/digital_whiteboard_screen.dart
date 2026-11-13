@@ -7,8 +7,9 @@ import '../providers/whiteboard_providers.dart';
 import '../providers/auth_providers.dart';
 import '../providers/ward_context_providers.dart';
 import '../providers/ward_providers.dart';
-import '../widgets/ward_support_roster_sheet.dart';
+import '../widgets/ward_responsibilities.dart';
 import '../widgets/ward_selection_dialog.dart';
+import 'ward_transfer_screen.dart';
 
 /// Pixel-perfect implementation of the user's Ward Management & Nurse Allocation Board design
 class DigitalWhiteboardScreen extends ConsumerStatefulWidget {
@@ -40,6 +41,11 @@ class _DigitalWhiteboardScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(authenticatedStaffProvider)?.isClinical != true) {
+      return const Scaffold(
+        body: Center(child: Text('Clinical access required.')),
+      );
+    }
     final currentWard = ref.watch(selectedWardProvider);
     final beds = ref.watch(whiteboardAssignmentsProvider);
     final roster = ref.watch(wardSupportRosterProvider);
@@ -52,7 +58,7 @@ class _DigitalWhiteboardScreenState
       for (final member in staff) member.staffId: member.name,
     };
 
-    // ONLY the Charge Nurse (or Ward Manager) has write permissions.
+    // ONLY the Charge Nurse has write permissions.
     // Everyone else has strictly one-tap read-only access.
     final hasWriteAccess = currentStaff?.isChargeNurse ?? false;
 
@@ -104,6 +110,20 @@ class _DigitalWhiteboardScreenState
                       else if (boardState.hasError)
                         _buildBoardError(boardState.error)
                       else ...[
+                        const WardTransferNotice(),
+                        if (boardState
+                                .asData
+                                ?.value
+                                .availableNurseIds
+                                .isNotEmpty ==
+                            true)
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(
+                              'Transferred in · available for allocation: ${boardState.asData!.value.availableNurseIds.map((id) => staffNames[id] ?? id).join(', ')}',
+                              style: const TextStyle(color: Color(0xFF38BDF8)),
+                            ),
+                          ),
                         _buildMainTable(
                           beds,
                           roster,
@@ -118,11 +138,7 @@ class _DigitalWhiteboardScreenState
                           nightNursesCount,
                         ),
                         const SizedBox(height: 16),
-                        _buildBottomResponsibilitiesCard(
-                          roster,
-                          hasWriteAccess,
-                          staffNames,
-                        ),
+                        const WardResponsibilities(),
                         const SizedBox(height: 16),
                         _buildUpdateAssignmentsButton(hasWriteAccess),
                         const SizedBox(height: 16),
@@ -901,194 +917,6 @@ class _DigitalWhiteboardScreenState
   // ==========================================
   // BOTTOM WARD RESPONSIBILITIES BANNER
   // ==========================================
-  Widget _buildBottomResponsibilitiesCard(
-    WardSupportRoster roster,
-    bool hasWriteAccess,
-    Map<String, String> staffNames,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E293B)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(
-                    Icons.assignment_outlined,
-                    size: 15,
-                    color: Color(0xFF38BDF8),
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Ward Responsibilities',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-              // Preserve Ward Support Team contacts dialer
-              InkWell(
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    backgroundColor: Colors.transparent,
-                    isScrollControlled: true,
-                    builder: (_) => WardSupportRosterSheet(
-                      roster: roster,
-                      hasWriteAccess: hasWriteAccess,
-                    ),
-                  );
-                },
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.phone_in_talk,
-                      size: 13,
-                      color: Color(0xFF34D399),
-                    ),
-                    SizedBox(width: 4),
-                    Text(
-                      'Support Team',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF34D399),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildResponsibilityChip(
-                  title: 'Ward Manager',
-                  nurse: staffNames[roster.wardManager] ?? roster.wardManager,
-                  icon: Icons.manage_accounts,
-                  color: const Color(0xFF38BDF8),
-                  roleKey: 'ward_manager',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-                _buildResponsibilityChip(
-                  title: 'Team Leader',
-                  nurse: staffNames[roster.teamLeader] ?? roster.teamLeader,
-                  icon: Icons.person,
-                  color: const Color(0xFF38BDF8),
-                  roleKey: 'team_leader',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-                _buildResponsibilityChip(
-                  title: 'Duty Leader',
-                  nurse: staffNames[roster.dutyLeader] ?? roster.dutyLeader,
-                  icon: Icons.assignment,
-                  color: const Color(0xFFA855F7),
-                  roleKey: 'duty_leader',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-                _buildResponsibilityChip(
-                  title: 'Discharge Nurse',
-                  nurse:
-                      staffNames[roster.dischargeNurse] ??
-                      roster.dischargeNurse,
-                  icon: Icons.assignment_turned_in,
-                  color: const Color(0xFF34D399),
-                  roleKey: 'discharge_nurse',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-                _buildResponsibilityChip(
-                  title: 'Patient Care Attendant',
-                  nurse: staffNames[roster.pcaDay] ?? roster.pcaDay,
-                  icon: Icons.person_pin,
-                  color: const Color(0xFF2DD4BF),
-                  roleKey: 'pca',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-                _buildResponsibilityChip(
-                  title: 'Nurse In-Charge',
-                  nurse:
-                      staffNames[roster.inchargeNurseDay] ??
-                      roster.inchargeNurseDay,
-                  icon: Icons.person,
-                  color: const Color(0xFF93C5FD),
-                  roleKey: 'incharge',
-                  hasWriteAccess: hasWriteAccess,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildResponsibilityChip({
-    required String title,
-    required String nurse,
-    required IconData icon,
-    required Color color,
-    required String roleKey,
-    required bool hasWriteAccess,
-  }) {
-    return InkWell(
-      onTap: hasWriteAccess
-          ? () => _showRoleAssignmentSheet(title, roleKey)
-          : () => _notifyReadOnly(),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B).withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFF334155), width: 0.8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 6),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
-                ),
-                Text(
-                  nurse.isNotEmpty ? nurse : '-',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
-  // UPDATE WARD ASSIGNMENTS BUTTON
-  // ==========================================
   Widget _buildUpdateAssignmentsButton(bool hasWriteAccess) {
     if (!hasWriteAccess) {
       return Container(
@@ -1462,8 +1290,44 @@ class _DigitalWhiteboardScreenState
   }
 
   /// Doctor selection sheet with real-time autofilter
-  void _showDoctorSelectionSheet(WhiteboardBedAssignment bed) {
+  Future<void> _showDoctorSelectionSheet(WhiteboardBedAssignment bed) async {
+    if (ref.read(authenticatedStaffProvider)?.isChargeNurse != true) return;
     final doctors = _availableStaff(doctorOnly: true);
+    if (bed.admittingDoctor.isNotEmpty && bed.admittingDoctor != '-') {
+      final name = _staffLabelForId(doctors, bed.admittingDoctor);
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Change assigned doctor?'),
+          content: Text(
+            'Remove $name from the patient in bed ${bed.bedNumber}? '
+            'You can choose a replacement, or leave the patient without an assigned doctor. '
+            'The nurse assignment will stay the same.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'replace'),
+              child: const Text('Replace doctor'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'remove'),
+              child: const Text('Remove only'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || action == null) return;
+      if (action == 'remove') {
+        await _saveBoardChange(
+          () => ref.read(wardBoardProvider.notifier).changeDoctor(bed, ''),
+        );
+        return;
+      }
+    }
     if (doctors.isEmpty) {
       _showSaveError(
         StateError('No active doctors are available for this ward.'),
@@ -1481,7 +1345,7 @@ class _DigitalWhiteboardScreenState
         _saveBoardChange(
           () => ref
               .read(wardBoardProvider.notifier)
-              .updateAssignment(bed.bedNumber, doctor: doctor.staffId),
+              .changeDoctor(bed, doctor.staffId),
         );
       },
     );
@@ -1492,114 +1356,13 @@ class _DigitalWhiteboardScreenState
     WhiteboardBedAssignment bed, {
     required bool isDay,
   }) {
-    final nurses = _availableStaff();
-    if (nurses.isEmpty) {
-      _showSaveError(
-        StateError('No active nurses are available for this ward.'),
-      );
-      return;
-    }
-    _showAutofilterSelectionSheet(
-      title: 'Select ${isDay ? "Day" : "Night"} Nurse (Bed ${bed.bedNumber})',
-      options: nurses.map(_staffOptionLabel).toList(),
-      currentValue: _staffLabelForId(
-        nurses,
-        isDay ? bed.dayShiftNurseId : bed.nightShiftNurseId,
-      ),
-      onSelect: (selected) {
-        final nurse = nurses.firstWhere(
-          (member) => _staffOptionLabel(member) == selected,
-        );
-        _saveBoardChange(
-          () => ref
-              .read(wardBoardProvider.notifier)
-              .updateAssignment(bed.bedNumber, nurseId: nurse.staffId),
-        );
-      },
-    );
+    if (ref.read(authenticatedStaffProvider)?.isChargeNurse != true) return;
+    showNurseAssignmentEditor(context, ref, bed, _availableStaff(), isDay);
   }
 
   /// Ward responsibility role selection
-  void _showRoleAssignmentSheet(String title, String roleKey) {
-    final nurses = _availableStaff();
-    if (nurses.isEmpty) {
-      _showSaveError(
-        StateError('No active nurses are available for this ward.'),
-      );
-      return;
-    }
-    _showAutofilterSelectionSheet(
-      title: 'Assign $title',
-      options: nurses.map(_staffOptionLabel).toList(),
-      currentValue: '',
-      onSelect: (selected) {
-        final nurse = nurses.firstWhere(
-          (member) => _staffOptionLabel(member) == selected,
-        );
-        final currentRoster = ref.read(wardSupportRosterProvider);
-        late final WardSupportRoster updatedRoster;
-        switch (roleKey) {
-          case 'team_leader':
-            updatedRoster = WardSupportRoster(
-              wardManager: currentRoster.wardManager,
-              teamLeader: nurse.staffId,
-              dutyLeader: currentRoster.dutyLeader,
-              dischargeNurse: currentRoster.dischargeNurse,
-              inchargeNurseDay: currentRoster.inchargeNurseDay,
-              pcaDay: currentRoster.pcaDay,
-            );
-            break;
-          case 'duty_leader':
-            updatedRoster = WardSupportRoster(
-              wardManager: currentRoster.wardManager,
-              teamLeader: currentRoster.teamLeader,
-              dutyLeader: nurse.staffId,
-              dischargeNurse: currentRoster.dischargeNurse,
-              inchargeNurseDay: currentRoster.inchargeNurseDay,
-              pcaDay: currentRoster.pcaDay,
-            );
-            break;
-          case 'discharge_nurse':
-            updatedRoster = WardSupportRoster(
-              wardManager: currentRoster.wardManager,
-              teamLeader: currentRoster.teamLeader,
-              dutyLeader: currentRoster.dutyLeader,
-              dischargeNurse: nurse.staffId,
-              inchargeNurseDay: currentRoster.inchargeNurseDay,
-              pcaDay: currentRoster.pcaDay,
-            );
-            break;
-          case 'pca':
-            updatedRoster = WardSupportRoster(
-              wardManager: currentRoster.wardManager,
-              teamLeader: currentRoster.teamLeader,
-              dutyLeader: currentRoster.dutyLeader,
-              dischargeNurse: currentRoster.dischargeNurse,
-              inchargeNurseDay: currentRoster.inchargeNurseDay,
-              pcaDay: nurse.staffId,
-            );
-            break;
-          case 'incharge':
-            updatedRoster = WardSupportRoster(
-              wardManager: currentRoster.wardManager,
-              teamLeader: currentRoster.teamLeader,
-              dutyLeader: currentRoster.dutyLeader,
-              dischargeNurse: currentRoster.dischargeNurse,
-              inchargeNurseDay: nurse.staffId,
-              pcaDay: currentRoster.pcaDay,
-            );
-            break;
-          default:
-            return;
-        }
-        _saveBoardChange(
-          () => ref
-              .read(wardSupportRosterProvider.notifier)
-              .updateRoster(updatedRoster),
-        );
-      },
-    );
-  }
+  String _staffOptionLabel(StaffProfile staff) =>
+      '${staff.name} (${staff.staffId})';
 
   List<StaffProfile> _availableStaff({bool doctorOnly = false}) {
     final staff = ref.read(boardStaffListProvider).asData?.value ?? const [];
@@ -1608,9 +1371,6 @@ class _DigitalWhiteboardScreenState
       return member.isWardNurse || member.isChargeNurse;
     }).toList();
   }
-
-  String _staffOptionLabel(StaffProfile staff) =>
-      '${staff.name} (${staff.staffId})';
 
   String? _staffLabelForId(List<StaffProfile> staff, String? staffId) {
     if (staffId == null) return null;

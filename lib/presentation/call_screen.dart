@@ -20,6 +20,9 @@ class CallScreen extends StatefulWidget {
 class _CallScreenState extends State<CallScreen> {
   late final Room _room;
   Timer? _durationTimer;
+  Timer? _statusTimer;
+  bool _checkingStatus = false;
+  bool _ending = false;
   DateTime? _connectedAt;
   String? _error;
   bool _connecting = true;
@@ -33,6 +36,31 @@ class _CallScreenState extends State<CallScreen> {
       roomOptions: const RoomOptions(adaptiveStream: false, dynacast: false),
     );
     unawaited(_connect());
+    _statusTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _checkStatus(),
+    );
+  }
+
+  Future<void> _checkStatus() async {
+    if (_checkingStatus || _ending) return;
+    _checkingStatus = true;
+    try {
+      final call = await widget.api.getCall(widget.session.callId);
+      if (mounted &&
+          const {
+            'ended',
+            'declined',
+            'cancelled',
+            'missed',
+          }.contains(call['status'])) {
+        await _end();
+      }
+    } catch (_) {
+      // Keep connected audio usable through transient API outages.
+    } finally {
+      _checkingStatus = false;
+    }
   }
 
   Future<void> _connect() async {
@@ -60,6 +88,9 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _end() async {
+    if (_ending) return;
+    _ending = true;
+    _statusTimer?.cancel();
     _durationTimer?.cancel();
     await _room.disconnect();
     try {
@@ -72,6 +103,7 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    _statusTimer?.cancel();
     _durationTimer?.cancel();
     unawaited(_room.disconnect());
     super.dispose();

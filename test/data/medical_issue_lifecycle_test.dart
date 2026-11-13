@@ -5,6 +5,7 @@ import 'package:oravi_app/data/local_ward_repository.dart';
 import 'package:oravi_app/domain/events/domain_events.dart';
 import 'package:oravi_app/domain/models/loop_enums.dart';
 import 'package:oravi_app/domain/state_machine/loop_state_machine.dart';
+import 'package:oravi_app/presentation/theme/clinical_theme.dart';
 
 void main() {
   late OraviLocalDatabase database;
@@ -31,6 +32,52 @@ void main() {
   });
 
   tearDown(() async => database.close());
+
+  test(
+    'message roles survive storage and select distinct clinician colours',
+    () async {
+      await repository.openLoop(
+        patientId: 'PAT-TEST-01',
+        authorId: 'N',
+        deviceId: 'device',
+        title: 'Review',
+        description: '',
+        loopType: LoopType.taskOrPendingResult,
+        urgency: LoopUrgency.routine,
+        initialOwnerId: 'N',
+        initialOwnerRole: 'ward_nurse',
+      );
+      final loopId = repository.getLoopsForPatient('PAT-TEST-01').single.loopId;
+      for (final role in ['doctor_on_call', 'ward_nurse', 'charge_nurse']) {
+        await repository.postMessage(
+          patientId: 'PAT-TEST-01',
+          loopId: loopId,
+          authorId: role,
+          deviceId: 'device',
+          content: 'Update',
+          authorRole: role,
+        );
+      }
+      final restored = LocalWardRepository(database: database);
+      await restored.initialize();
+      final messages = restored
+          .getLoopsForPatient('PAT-TEST-01')
+          .single
+          .messages;
+      expect(messages.map((m) => m.authorRole), [
+        'doctor_on_call',
+        'ward_nurse',
+        'charge_nurse',
+      ]);
+      expect(
+        messages
+            .map((m) => ClinicalTheme.cadreColor(m.authorRole))
+            .toSet()
+            .length,
+        3,
+      );
+    },
+  );
 
   test(
     'Medical Issue lifecycle is validated, attributed, and survives restart',

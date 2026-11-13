@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'admin/dev_admin_dashboard_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
-import '../domain/models/whiteboard_models.dart';
+import 'communications/staff_communications_screen.dart';
+import 'communications/personal_inbox.dart';
+import 'notebook/personal_notebook_screen.dart';
+import 'whiteboard/ward_transfer_screen.dart';
 import '../domain/projections/projections.dart';
 import '../data/database/database_provider.dart';
 import 'handoff_wizard_screen.dart';
@@ -13,6 +17,8 @@ import 'providers/auth_providers.dart';
 import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
 import 'providers/ward_context_providers.dart';
+import 'providers/clinical_assignment_provider.dart';
+import 'providers/dashboard_issue_summary.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_search_sheet.dart';
 import 'widgets/ward_selection_dialog.dart';
@@ -22,7 +28,6 @@ import 'widgets/ward_selection_dialog.dart';
 /// - At-a-glance shift overview KPI cards (My Patients, Pending Tasks, Completed Today).
 /// - Quick filter pills (All, Pending, Completed) with search and filter.
 /// - Prioritized patient list with status indicator stripes, bed numbers, diagnoses, doctors, and urgency badges.
-/// - 6-card Ward Responsibilities grid with one-tap Call or Message action.
 /// - Prominent Shift Handoff action banner.
 /// - 5-tab Bottom Navigation bar.
 class WardBoardScreen extends ConsumerStatefulWidget {
@@ -32,7 +37,43 @@ class WardBoardScreen extends ConsumerStatefulWidget {
   ConsumerState<WardBoardScreen> createState() => _WardBoardScreenState();
 }
 
-class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
+class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
+    with WidgetsBindingObserver {
+  Timer? _assignmentTimer;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshAssignment());
+    _assignmentTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _refreshAssignment(),
+    );
+  }
+
+  void _refreshAssignment() {
+    if (!mounted ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
+      return;
+    }
+    setState(
+      () {},
+    ); // Refresh local date and greeting independently of the assigned shift.
+    unawaited(ref.read(clinicalAssignmentRefreshProvider.notifier).refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshAssignment();
+  }
+
+  @override
+  void dispose() {
+    _assignmentTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   int _activeNavIndex = 0;
   int _activeFilterIndex = 0; // 0: All, 1: Pending, 2: Completed
 
@@ -42,10 +83,14 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
     if (authStaff?.role == 'dev_admin') {
       return const DevAdminDashboardScreen();
     }
+    if (authStaff?.isClinical != true) {
+      return const StaffCommunicationsScreen();
+    }
     final patients = ref.watch(wardPatientsProvider);
     final currentWard = ref.watch(selectedWardProvider);
-    final accessiblePatientIds = ref.watch(currentUserPatientIdsProvider);
-    final roster = ref.watch(wardSupportRosterProvider);
+    final accessiblePatientIds = ref.watch(
+      personallyAssignedPatientIdsProvider,
+    );
     final whiteboardBeds = ref.watch(whiteboardAssignmentsProvider);
     final boardState = ref.watch(wardBoardProvider);
     final staffState = ref.watch(boardStaffListProvider);
@@ -72,21 +117,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         .where((patient) => accessiblePatientIds.contains(patient.patientId))
         .toList();
     final totalPatients = myPatients.length;
-    // Calculate pending tasks and completed tasks from patient loops
-    int pendingTasksCount = 0;
-    int completedTasksCount = 0;
-
-    for (final p in myPatients) {
-      final loops = ref.watch(patientLoopsProvider(p.patientId));
-      pendingTasksCount += loops.where((l) => l.isOpen).length;
-    }
+    final summary = DashboardIssueSummary({
+      for (final p in myPatients)
+        p.patientId: ref.watch(patientLoopsProvider(p.patientId)),
+    });
 
     // Filtered patient list
     final filteredPatients = myPatients.where((p) {
-      final loops = ref.watch(patientLoopsProvider(p.patientId));
-      final hasOpen = loops.any((l) => l.isOpen);
-      if (_activeFilterIndex == 1) return hasOpen;
-      if (_activeFilterIndex == 2) return !hasOpen;
+      if (_activeFilterIndex == 1) {
+        return summary.pendingPatients.contains(p.patientId);
+      }
+      if (_activeFilterIndex == 2) {
+        return summary.completedPatients.contains(p.patientId);
+      }
       return true;
     }).toList();
 
@@ -108,7 +151,22 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        icon: const InboxBadge(),
+                        label: const Text('Messages & calls'),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const StaffCommunicationsScreen(),
+                          ),
+                        ),
+                      ),
+                    ),
                     _buildGreetingSection(nurseName),
+                    const NotebookReminderBanner(),
+                    const WardTransferNotice(),
                     const SizedBox(height: 14),
                     if (authStaff != null)
                       _buildCarriedForwardIssues(carriedIssuesState),
@@ -123,19 +181,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                     else ...[
                       _buildAtAGlanceCards(
                         totalPatients,
-                        pendingTasksCount,
-                        completedTasksCount,
+                        summary.openIssues,
+                        summary.closedIssues,
                       ),
                       const SizedBox(height: 14),
-                      _buildFilterRow(totalPatients, pendingTasksCount, 3),
+                      _buildFilterRow(
+                        totalPatients,
+                        summary.pendingPatients.length,
+                        summary.completedPatients.length,
+                      ),
                       const SizedBox(height: 14),
                       _buildPatientListSection(
                         filteredPatients,
                         doctorMap,
                         hasAnyPatients: myPatients.isNotEmpty,
                       ),
-                      const SizedBox(height: 18),
-                      _buildWardResponsibilitiesGrid(roster),
                       const SizedBox(height: 18),
                       _buildShiftHandoffBanner(context),
                       const SizedBox(height: 20),
@@ -274,9 +334,13 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   Widget _buildNoWardPanel(StaffProfile? staff) {
     final isChargeNurse = staff?.isChargeNurse ?? false;
     return _contextPanel(
-      title: 'No ward assigned for this shift',
+      title: staff?.isDoctorOnCall == true
+          ? 'No patients assigned to you'
+          : 'No ward assigned for this shift',
       message: isChargeNurse
           ? 'Choose the ward you are coordinating to load its board.'
+          : staff?.isDoctorOnCall == true
+          ? 'Patients will appear here when the Charge Nurse assigns them to you.'
           : 'You do not have a ward assignment for this shift. Please contact the Charge Nurse.',
       action: isChargeNurse
           ? OutlinedButton(
@@ -454,11 +518,14 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // 2. GREETING & SHIFT SECTION
   // ==========================================
   Widget _buildGreetingSection(String nurseName) {
+    final now = DateTime.now();
+    final shift = ref.watch(selectedShiftTypeProvider);
+    final hasWard = ref.watch(selectedWardProvider).wardId.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Good morning, $nurseName',
+          '${clinicalGreeting(now)}, $nurseName',
           style: const TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.bold,
@@ -471,7 +538,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
           style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
         ),
         const SizedBox(height: 10),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             // Date Pill
             Container(
@@ -481,7 +550,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
@@ -491,7 +560,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                   ),
                   SizedBox(width: 6),
                   Text(
-                    'Fri, 30 Oct 2026',
+                    MaterialLocalizations.of(context).formatFullDate(now),
                     style: TextStyle(
                       fontSize: 11,
                       color: Color(0xFFCBD5E1),
@@ -511,17 +580,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.wb_sunny_outlined,
+                    shift == 'night'
+                        ? Icons.nights_stay_outlined
+                        : Icons.wb_sunny_outlined,
                     size: 13,
                     color: Color(0xFFFBBF24),
                   ),
                   SizedBox(width: 6),
                   Text(
-                    'Day Shift  07:00 – 19:00',
+                    clinicalShiftLabel(shift, hasWard: hasWard),
                     style: TextStyle(
                       fontSize: 11,
                       color: Color(0xFFCBD5E1),
@@ -640,7 +711,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 const Row(
                   children: [
                     Text(
-                      'Pending Tasks',
+                      'Open issues',
                       style: TextStyle(
                         fontSize: 10,
                         color: Color(0xFFF59E0B),
@@ -697,7 +768,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
                 const Row(
                   children: [
                     Text(
-                      'Completed',
+                      'Closed issues',
                       style: TextStyle(
                         fontSize: 10,
                         color: Color(0xFF34D399),
@@ -776,9 +847,9 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
         InkWell(
           onTap: () {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
+              SnackBar(
                 content: Text(
-                  'Filtering by assigned shift: Day Shift (Beds 1–10)',
+                  'Filtering by assigned shift: ${clinicalShiftLabel(ref.read(selectedShiftTypeProvider), hasWard: ref.read(selectedWardProvider).wardId.isNotEmpty)}',
                 ),
               ),
             );
@@ -887,7 +958,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
             child: Text(
               hasAnyPatients
                   ? 'No patients match the selected filter.'
-                  : 'You have no patients assigned to your ward for this shift.',
+                  : 'No patients assigned to you for this shift.',
               style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
             ),
           )
@@ -1151,462 +1222,6 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // ==========================================
   // 6. WARD RESPONSIBILITIES (2-COLUMN GRID WITH 1-TAP CALL/MESSAGE)
   // ==========================================
-  Widget _buildWardResponsibilitiesGrid(WardSupportRoster roster) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Section Header
-        const Row(
-          children: [
-            Icon(Icons.assignment_outlined, size: 16, color: Color(0xFF38BDF8)),
-            SizedBox(width: 6),
-            Text(
-              'Ward Responsibilities',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        // 2x3 Grid of Responsibilities
-        Row(
-          children: [
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Ward Manager',
-                nurseName: roster.wardManager.isNotEmpty
-                    ? roster.wardManager
-                    : '-',
-                icon: Icons.person,
-                iconColor: const Color(0xFF38BDF8),
-                phone: '',
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Team Leader',
-                nurseName: roster.teamLeader.isNotEmpty
-                    ? roster.teamLeader
-                    : '-',
-                icon: Icons.people_outline,
-                iconColor: const Color(0xFFA855F7),
-                phone: '',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Duty Leader',
-                nurseName: roster.dutyLeader.isNotEmpty
-                    ? roster.dutyLeader
-                    : '-',
-                icon: Icons.person_outline,
-                iconColor: const Color(0xFFF97316),
-                phone: '',
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Discharge Nurse',
-                nurseName: roster.dischargeNurse.isNotEmpty
-                    ? roster.dischargeNurse
-                    : '-',
-                icon: Icons.assignment_turned_in_outlined,
-                iconColor: const Color(0xFF34D399),
-                phone: '',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Patient Care Attendant',
-                nurseName: roster.pcaDay.isNotEmpty ? roster.pcaDay : '-',
-                icon: Icons.person_pin_outlined,
-                iconColor: const Color(0xFF2DD4BF),
-                phone: '',
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildResponsibilityCard(
-                title: 'Nurse In-Charge',
-                nurseName: roster.inchargeNurseDay.isNotEmpty
-                    ? roster.inchargeNurseDay
-                    : '-',
-                icon: Icons.shield_outlined,
-                iconColor: const Color(0xFF818CF8),
-                phone: '',
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildResponsibilityCard({
-    required String title,
-    required String nurseName,
-    required IconData icon,
-    required Color iconColor,
-    required String phone,
-  }) {
-    return InkWell(
-      onTap: phone.isEmpty
-          ? null
-          : () => _showContactActionSheet(
-              roleTitle: title,
-              nurseName: nurseName,
-              icon: icon,
-              iconColor: iconColor,
-              phoneNumber: phone,
-            ),
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0E1729),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF1B2B48), width: 0.8),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(icon, size: 14, color: iconColor),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF94A3B8),
-                      fontWeight: FontWeight.w500,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    nurseName,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
-  // ONE-TAP CALL OR MESSAGE MODAL SHEET
-  // ==========================================
-  void _showContactActionSheet({
-    required String roleTitle,
-    required String nurseName,
-    required IconData icon,
-    required Color iconColor,
-    required String phoneNumber,
-  }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-          decoration: const BoxDecoration(
-            color: Color(0xFF0F172A),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            border: Border(
-              top: BorderSide(color: Color(0xFF1E293B), width: 1.5),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag Handle
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF475569),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Staff Header
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: iconColor.withValues(alpha: 0.15),
-                    child: Icon(icon, color: iconColor, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          nurseName,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          roleTitle,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: iconColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF064E3B),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      'On Duty',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF34D399),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 20),
-
-              // Full-Width One-Tap Call Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  icon: const Icon(Icons.call, size: 18),
-                  label: Text(
-                    'Call $nurseName ($phoneNumber)',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Connecting call to $nurseName ($roleTitle)...',
-                        ),
-                        backgroundColor: const Color(0xFF10B981),
-                      ),
-                    );
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // Full-Width One-Tap Message Button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF38BDF8),
-                    side: const BorderSide(
-                      color: Color(0xFF38BDF8),
-                      width: 1.2,
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                  label: Text(
-                    'Message $nurseName',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _showQuickMessageDialog(nurseName, roleTitle);
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showQuickMessageDialog(String nurseName, String roleTitle) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: Color(0xFF1E293B)),
-        ),
-        title: Row(
-          children: [
-            const Icon(Icons.message, color: Color(0xFF38BDF8), size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Message $nurseName',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'To $roleTitle on duty:',
-              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: controller,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              maxLines: 2,
-              decoration: InputDecoration(
-                hintText: 'Type clinical query or handover note...',
-                hintStyle: const TextStyle(
-                  color: Color(0xFF64748B),
-                  fontSize: 12,
-                ),
-                filled: true,
-                fillColor: const Color(0xFF1E293B),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Quick preset pills
-            Wrap(
-              spacing: 6,
-              children: [
-                ActionChip(
-                  label: const Text(
-                    'Bed 2 review',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8)),
-                  ),
-                  backgroundColor: const Color(0xFF1E293B),
-                  onPressed: () => controller.text =
-                      'Please assist with Bed 2 urgent review.',
-                ),
-                ActionChip(
-                  label: const Text(
-                    'Meds sign-off',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF38BDF8)),
-                  ),
-                  backgroundColor: const Color(0xFF1E293B),
-                  onPressed: () => controller.text =
-                      'Need second sign-off on IV antibiotics.',
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Color(0xFF94A3B8)),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0284C7),
-            ),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Message sent to $nurseName!')),
-              );
-            },
-            child: const Text(
-              'Send Message',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==========================================
-  // 7. SHIFT HANDOFF ACTION BANNER
-  // ==========================================
   Widget _buildShiftHandoffBanner(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
@@ -1675,6 +1290,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
   // 8. 5-TAB BOTTOM NAVIGATION
   // ==========================================
   Widget _buildBottomNavigation(BuildContext context) {
+    final pendingTasks = ref.watch(pendingPersonalTasksProvider);
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF0B1224),
@@ -1690,10 +1306,15 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               const SnackBar(content: Text('Displaying active ward patients.')),
             );
           } else if (index == 2) {
-            // Tasks tab
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('2 open tasks across your beds.')),
-            );
+            Navigator.of(context)
+                .push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const PersonalNotebookScreen(),
+                  ),
+                )
+                .then((_) {
+                  if (mounted) setState(() => _activeNavIndex = 0);
+                });
           } else if (index == 3) {
             // Handoff tab
             Navigator.of(context).push(
@@ -1722,25 +1343,26 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen> {
               clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.assignment_outlined),
-                Positioned(
-                  top: -2,
-                  right: -4,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFEF4444),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Text(
-                      '2',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
+                if (pendingTasks > 0)
+                  Positioned(
+                    top: -2,
+                    right: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$pendingTasks',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
             label: 'Tasks',

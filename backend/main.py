@@ -1,6 +1,17 @@
 import asyncio
+import sys
+from .staff_roles import CLINICAL_ROLES, PROVISIONABLE_ROLES
+from .communications import CommunicationsStore, build_router
+from .inbox import build_inbox_router
+from .notebook import NotebookStore, build_notebook_router
+from .ward_transfers import build_transfer_router
 import logging
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Explicit environment values take precedence over local development settings.
+load_dotenv(Path(__file__).with_name('.env'), override=False)
 import secrets
 import sqlite3
 import uuid
@@ -40,6 +51,8 @@ ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
 fcm_service = FcmService()
 call_store = CallStore(db_path=database_path)
+communications_store = CommunicationsStore(database_path)
+notebook_store = NotebookStore(database_path)
 logger = logging.getLogger(__name__)
 
 
@@ -54,8 +67,14 @@ def require_authenticated_staff(authorization: str = Header(default="")) -> Staf
 
 
 def require_staff(profile: StaffProfile = Depends(require_authenticated_staff)) -> StaffProfile:
-    if profile.role == 'dev_admin':
-        raise HTTPException(status_code=403, detail='Dev Admin has no clinical access.')
+    if profile.role not in CLINICAL_ROLES:
+        raise HTTPException(status_code=403, detail='Clinical access is not available to this account.')
+    return profile
+
+
+def require_communicating_staff(profile: StaffProfile = Depends(require_authenticated_staff)) -> StaffProfile:
+    if profile.role not in PROVISIONABLE_ROLES:
+        raise HTTPException(403, 'Staff communications access required.')
     return profile
 
 
@@ -194,7 +213,7 @@ def _notification_recipients_for_events(events) -> dict[str, list[str]]:
         else:
             recipients = {owner_id, *participants, *mentioned, event.author_id}
 
-        recipients_by_event[event.event_id] = sorted(recipients & authorized)
+        recipients_by_event[event.event_id] = sorted((recipients & authorized) - {event.author_id})
         history = [*history, event]
         histories[issue_key] = history
     return recipients_by_event
@@ -386,8 +405,7 @@ def health_check():
         "service": "oravi-backend",
         "version": "0.3.0",
         "medical_issue_push_configured": bool(
-            os.getenv("FIREBASE_PROJECT_ID")
-            or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+            os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
             or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         ),
     }
@@ -911,7 +929,7 @@ def logout_staff(authorization: str = Header(default="")):
 
 @app.post("/api/v1/staff/me/fcm-installation")
 def register_fcm_device_token(
-    payload: dict, profile: StaffProfile = Depends(require_staff)
+    payload: dict, profile: StaffProfile = Depends(require_communicating_staff)
 ):
     token = payload.get("token")
     device_id = payload.get("device_id")
@@ -933,7 +951,7 @@ def register_fcm_device_token(
 
 @app.delete("/api/v1/staff/me/fcm-installation")
 def remove_fcm_device_token(
-    payload: dict, profile: StaffProfile = Depends(require_staff)
+    payload: dict, profile: StaffProfile = Depends(require_communicating_staff)
 ):
     device_id = payload.get("device_id")
     if not isinstance(device_id, str) or not 1 <= len(device_id) <= 200:
@@ -998,42 +1016,53 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
 
 
 @app.get("/api/v1/calls/{call_id}")
-def get_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+def get_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
     call = call_store.get(call_id)
+    if call is not None and profile.role not in CLINICAL_ROLES and (call['patient_id'] or call['loop_id']):
+        raise HTTPException(404, 'Call not found.')
     if call is None or profile.staff_id not in {call["caller_id"], call["recipient_id"]}:
         raise HTTPException(status_code=404, detail="Call not found.")
-    caller = staff_store.get_active_staff_by_ids([call["caller_id"]])[0]
-    recipient = staff_store.get_active_staff_by_ids([call["recipient_id"]])[0]
+    people = {p.staff_id: p for p in staff_store.get_active_staff_by_ids([call["caller_id"], call["recipient_id"]])}
+    if call['caller_id'] not in people or call['recipient_id'] not in people:
+        raise HTTPException(409, 'A call participant is no longer available.')
+    caller, recipient = people[call['caller_id']], people[call['recipient_id']]
     return {"call_id": call["call_id"], "patient_id": call["patient_id"], "loop_id": call["loop_id"], "caller_id": caller.staff_id, "caller_name": caller.name, "caller_role": caller.role, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "status": call["status"]}
 
 
 @app.post("/api/v1/calls/{call_id}/accept")
-def accept_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+def accept_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
     call = call_store.get(call_id)
-    if call is None or profile.staff_id != call["recipient_id"] or not call_store.mark_answered(call_id):
+    if call is not None and profile.role not in CLINICAL_ROLES and (call['patient_id'] or call['loop_id']):
+        raise HTTPException(404, 'Call not found.')
+    if call is None or profile.staff_id != call["recipient_id"] or call['status'] != 'ringing':
         raise HTTPException(status_code=409, detail="This call is no longer available.")
+    callers = staff_store.get_active_staff_by_ids([call['caller_id']])
+    if not callers:
+        raise HTTPException(409, 'The caller is no longer available.')
     token = _livekit_token(profile.staff_id, profile.name, call["room_name"])
+    if not call_store.mark_answered(call_id):
+        raise HTTPException(409, 'This call is no longer available.')
     livekit_url = os.getenv("LIVEKIT_URL")
-    caller = staff_store.get_active_staff_by_ids([call["caller_id"]])[0]
+    caller = callers[0]
     return {"call_id": call_id, "patient_id": call["patient_id"], "loop_id": call["loop_id"], "caller_id": caller.staff_id, "caller_name": caller.name, "caller_role": caller.role, "recipient_id": profile.staff_id, "recipient_name": profile.name, "recipient_role": profile.role, "room_name": call["room_name"], "livekit_url": livekit_url, "token": token, "status": "answered", "is_incoming": True}
 
 
 @app.post("/api/v1/calls/{call_id}/end")
-def end_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+def end_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
     if not call_store.mark_ended(call_id, profile.staff_id):
         raise HTTPException(status_code=404, detail="Call not found or already ended.")
     return {"success": True}
 
 
 @app.post("/api/v1/calls/{call_id}/decline")
-def decline_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+def decline_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
     if not call_store.mark_declined(call_id, profile.staff_id):
         raise HTTPException(status_code=409, detail="This call is no longer available.")
     return {"success": True, "status": "declined"}
 
 
 @app.post("/api/v1/calls/{call_id}/cancel")
-def cancel_call(call_id: str, profile: StaffProfile = Depends(require_staff)):
+def cancel_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
     if not call_store.mark_cancelled(call_id, profile.staff_id):
         raise HTTPException(status_code=409, detail="This call is no longer ringing.")
     return {"success": True, "status": "cancelled"}
@@ -1165,6 +1194,8 @@ def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_
                 status_code=403,
                 detail="Events must belong to your account and an assigned patient.",
             )
+        if event.type == 'MessagePosted':
+            event.payload['author_role'] = profile.role
     _validate_patient_issue_events(request.events)
     notifications = _notification_recipients_for_events(request.events)
     acks = store.append_events(
@@ -1251,3 +1282,9 @@ def ask_patient_record(patient_id: str, request: AskRequest, profile: StaffProfi
         time_window_hours=request.time_window_hours,
     )
     return AskResponse(**result)
+
+
+app.include_router(build_router(sys.modules[__name__]))
+app.include_router(build_inbox_router(sys.modules[__name__]))
+app.include_router(build_notebook_router(sys.modules[__name__]))
+app.include_router(build_transfer_router(sys.modules[__name__]))

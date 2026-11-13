@@ -11,6 +11,11 @@ import '../domain/models/call_session.dart';
 import 'api_configuration.dart';
 
 class WardBoardService {
+  Future<Object?> communicationRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? payload,
+  }) => _request(method, '/api/v1$path', payload: payload);
   final String? Function() getAccessToken;
   final List<String> candidateUrls;
   String? _activeBaseUrl;
