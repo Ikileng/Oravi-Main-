@@ -6,6 +6,7 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 from .models import StaffProfile
+from .staff_roles import PROVISIONABLE_ROLES
 
 class StaffStore:
     def __init__(self, db_path: Optional[str] = None):
@@ -166,7 +167,7 @@ class StaffStore:
                 """
                 SELECT staff_id, name, role, ward_id, avatar_color, initials, is_active
                 FROM staff_users
-                WHERE role != 'dev_admin' AND is_active = 1
+                WHERE role IN ('ward_nurse','charge_nurse','doctor_on_call') AND is_active = 1
                 ORDER BY role DESC, name ASC
                 """
             )
@@ -284,7 +285,7 @@ class StaffStore:
     def is_active_clinical_staff(self, staff_id: str) -> bool:
         row = self.conn.execute(
             """SELECT 1 FROM staff_users
-               WHERE staff_id = ? AND is_active = 1 AND role != 'dev_admin'""",
+               WHERE staff_id = ? AND is_active = 1 AND role IN ('ward_nurse','charge_nurse','doctor_on_call')""",
             (staff_id,),
         ).fetchone()
         return row is not None
@@ -432,8 +433,8 @@ class StaffStore:
             raise ValueError('Staff ID and name are required (maximum 80 and 120 characters).')
         if self.conn.execute('SELECT 1 FROM deleted_staff_ids WHERE staff_id = ?', (staff_id,)).fetchone():
             raise ValueError('This staff ID belonged to a deleted account and cannot be reused.')
-        if role not in {"ward_nurse", "charge_nurse", "doctor_on_call"}:
-            raise ValueError("Only clinical roles can be provisioned here.")
+        if role not in PROVISIONABLE_ROLES:
+            raise ValueError("Choose a predefined clinical or support role.")
         if not pin.isdigit() or not 4 <= len(pin) <= 8:
             raise ValueError("PIN must contain 4 to 8 digits.")
         parts = [p for p in name.replace(",", "").split() if p and not p.lower().startswith("rn") and not p.lower().startswith("dr")]

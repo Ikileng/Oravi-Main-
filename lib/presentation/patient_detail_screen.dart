@@ -10,6 +10,7 @@ import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
 import 'theme/clinical_theme.dart';
 import 'call_screen.dart';
+import 'communications/personal_inbox.dart';
 import 'widgets/close_loop_dialog.dart';
 import 'widgets/create_loop_dialog.dart';
 import 'widgets/log_call_outcome_dialog.dart';
@@ -44,7 +45,6 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
   final Map<String, TextEditingController> _replyControllers = {};
   final Map<String, Set<String>> _replyMentions = {};
   final Set<String> _expandedLoopIds = {};
-  Offset? _fabPosition;
   late final TabController _tabController = TabController(
     length: widget.issueOnlyLoopIds == null ? 2 : 1,
     vsync: this,
@@ -54,7 +54,12 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
   void initState() {
     super.initState();
     final initialLoopId = widget.initialExpandedLoopId;
-    if (initialLoopId != null) _expandedLoopIds.add(initialLoopId);
+    if (initialLoopId != null) {
+      _expandedLoopIds.add(initialLoopId);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _recordThreadRead(initialLoopId);
+      });
+    }
   }
 
   @override
@@ -184,10 +189,15 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     }
 
     setState(() => _expandedLoopIds.add(loop.loopId));
+    await _recordThreadRead(loop.loopId);
+  }
+
+  Future<void> _recordThreadRead(String loopId) async {
     try {
       await ref
           .read(wardControllerProvider.notifier)
-          .recordLoopRead(patientId: loop.patientId, loopId: loop.loopId);
+          .recordLoopRead(patientId: widget.patient.patientId, loopId: loopId);
+      await markLoadedIssueRead(ref, widget.patient.patientId, loopId);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -303,10 +313,10 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (ref.watch(authenticatedStaffProvider)?.role == 'dev_admin') {
+    if (ref.watch(authenticatedStaffProvider)?.isClinical != true) {
       return const Scaffold(
         body: Center(
-          child: Text('Clinical access is not available to Dev Admin.'),
+          child: Text('Clinical access is not available to this account.'),
         ),
       );
     }
@@ -330,6 +340,21 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
       );
     }
     final allLoops = ref.watch(patientLoopsProvider(widget.patient.patientId));
+    final staffRoster = ref.watch(
+      patientStaffListProvider(widget.patient.patientId),
+    );
+    final authorNames = staffRoster.maybeWhen(
+      data: (staff) => {
+        for (final member in staff) member.staffId: member.name,
+      },
+      orElse: () => const <String, String>{},
+    );
+    final authorRoles = staffRoster.maybeWhen(
+      data: (staff) => {
+        for (final member in staff) member.staffId: member.role,
+      },
+      orElse: () => const <String, String>{},
+    );
     final loops = widget.issueOnlyLoopIds == null
         ? allLoops
         : allLoops
@@ -353,7 +378,8 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
         : ListView.builder(
             padding: const EdgeInsets.all(12),
             itemCount: loops.length,
-            itemBuilder: (context, index) => _buildLoopCard(loops[index]),
+            itemBuilder: (context, index) =>
+                _buildLoopCard(loops[index], authorNames, authorRoles),
           );
 
     return Scaffold(
@@ -397,155 +423,79 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
           ],
         ),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final maxW = constraints.maxWidth;
-          final maxH = constraints.maxHeight;
-          // Default position: bottom-right, comfortably positioned
-          final defaultPosition = Offset(
-            (maxW - 200.0).clamp(8.0, maxW),
-            (maxH - 72.0).clamp(8.0, maxH),
-          );
-          final pos = _fabPosition ?? defaultPosition;
-
-          return Stack(
-            children: [
-              Column(
+      body: Column(
+        children: [
+          if (widget.issueOnlyLoopIds == null &&
+              widget.patient.keyAlerts.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
+              child: Row(
                 children: [
-                  // Alerts Banner if patient has key alerts
-                  if (widget.issueOnlyLoopIds == null &&
-                      widget.patient.keyAlerts.isNotEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.warning_amber_rounded,
-                            color: ClinicalTheme.criticalRed,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
-                            style: const TextStyle(
-                              color: ClinicalTheme.criticalRed,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // TabBarView
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: widget.issueOnlyLoopIds == null
-                          ? [
-                              issuesTab,
-                              AskOraviView(
-                                patient: widget.patient,
-                                onAnchorMessage: (loopId, author) {
-                                  _anchorMessageToAuthor(loopId, author);
-                                },
-                              ),
-                            ]
-                          : [issuesTab],
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: ClinicalTheme.criticalRed,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
+                    style: const TextStyle(
+                      color: ClinicalTheme.criticalRed,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
-
-              // Dynamically Draggable Floating Button: User can move it freely anywhere on the screen
-              if (widget.issueOnlyLoopIds == null)
-                Positioned(
-                  left: pos.dx.clamp(8.0, (maxW - 195.0).clamp(8.0, maxW)),
-                  top: pos.dy.clamp(8.0, (maxH - 52.0).clamp(8.0, maxH)),
-                  child: GestureDetector(
-                    onPanUpdate: (details) {
-                      setState(() {
-                        final current = _fabPosition ?? defaultPosition;
-                        final newX = (current.dx + details.delta.dx).clamp(
-                          8.0,
-                          maxW - 195.0,
-                        );
-                        final newY = (current.dy + details.delta.dy).clamp(
-                          8.0,
-                          maxH - 52.0,
-                        );
-                        _fabPosition = Offset(newX, newY);
-                      });
-                    },
-                    child: Material(
-                      elevation: 6,
-                      shadowColor: Colors.black.withValues(alpha: 0.4),
-                      color: ClinicalTheme.routineTeal,
-                      borderRadius: BorderRadius.circular(28),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(28),
-                        onTap: () => showDialog(
-                          context: context,
-                          builder: (ctx) => CreateLoopDialog(
-                            patientId: widget.patient.patientId,
-                          ),
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.25),
-                              width: 1,
-                            ),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.drag_indicator,
-                                size: 16,
-                                color: Colors.white70,
-                              ),
-                              SizedBox(width: 4),
-                              Icon(
-                                Icons.add_task,
-                                size: 18,
-                                color: Colors.white,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Raise Medical Issue',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+            ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: widget.issueOnlyLoopIds == null
+                  ? [
+                      issuesTab,
+                      AskOraviView(
+                        patient: widget.patient,
+                        onAnchorMessage: (loopId, author) {
+                          _anchorMessageToAuthor(loopId, author);
+                        },
                       ),
+                    ]
+                  : [issuesTab],
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: widget.issueOnlyLoopIds == null
+          ? SafeArea(
+              minimum: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: SizedBox(
+                height: 48,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.add_task),
+                  label: const Text('Raise medical issue'),
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (ctx) => CreateLoopDialog(
+                      patientId: widget.patient.patientId,
+                      patientLabel:
+                          '${widget.patient.bedNumber} — ${widget.patient.patientInitials}',
                     ),
                   ),
                 ),
-            ],
-          );
-        },
-      ),
+              ),
+            )
+          : null,
     );
   }
 
-  Widget _buildLoopCard(LoopStateProjection loop) {
+  Widget _buildLoopCard(
+    LoopStateProjection loop,
+    Map<String, String> authorNames,
+    Map<String, String> authorRoles,
+  ) {
     final urgencyColor = ClinicalTheme.urgencyColor(loop.urgency);
     final ownerCadreColor = ClinicalTheme.cadreColor(loop.currentOwnerId);
     final signedInStaff = ref.watch(authenticatedStaffProvider);
@@ -795,8 +745,15 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                 ),
                 const SizedBox(height: 6),
                 ...loop.messages.map((msg) {
-                  final authorColor = ClinicalTheme.cadreColor(msg.authorId);
+                  final authorColor = ClinicalTheme.cadreColor(
+                    msg.authorRole.isNotEmpty
+                        ? msg.authorRole
+                        : authorRoles[msg.authorId] ?? '',
+                  );
                   final timeFormatted = _formatTimestamp(msg.createdAt);
+                  final authorName =
+                      authorNames[msg.authorId] ??
+                      ClinicalTheme.formatAuthorDisplayName(msg.authorId);
 
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 6.0),
@@ -824,9 +781,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                           Row(
                             children: [
                               Text(
-                                ClinicalTheme.formatAuthorDisplayName(
-                                  msg.authorId,
-                                ),
+                                authorName,
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,

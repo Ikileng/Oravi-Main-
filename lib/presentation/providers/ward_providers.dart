@@ -73,6 +73,7 @@ class WardController extends Notifier<int> {
           authorId: _currentStaff.staffId,
           deviceId: _currentDeviceId,
           content: content,
+          authorRole: _currentStaff.role,
           mentionedStaffIds: mentionedStaffIds,
         );
     refresh();
@@ -270,8 +271,8 @@ class WardController extends Notifier<int> {
           outcomeNote: outcomeNote,
           deviceId: _currentDeviceId,
           durationSeconds: durationSeconds,
-           callId: callId,
-           callStatus: callStatus,
+          callId: callId,
+          callStatus: callStatus,
         );
     refresh();
   }
@@ -376,7 +377,7 @@ final wardPatientsProvider = Provider<List<PatientStateProjection>>((ref) {
 
 final currentUserPatientIdsProvider = Provider<Set<String>>((ref) {
   final staff = ref.watch(authenticatedStaffProvider);
-  if (staff == null) return const {};
+  if (staff == null || !staff.isClinical) return const {};
   if (staff.role == 'charge_nurse' &&
       ref.watch(wardContextNeedsConfirmationProvider)) {
     return const {};
@@ -392,6 +393,28 @@ final currentUserPatientIdsProvider = Provider<Set<String>>((ref) {
         return staff.role == 'ward_nurse' &&
             (isDayShift ? bed.dayShiftNurseId : bed.nightShiftNurseId) ==
                 staff.staffId;
+      })
+      .map((bed) => bed.patientId)
+      .whereType<String>()
+      .toSet();
+});
+
+/// Personal workload, distinct from permission to oversee the entire ward.
+final personallyAssignedPatientIdsProvider = Provider<Set<String>>((ref) {
+  final staff = ref.watch(authenticatedStaffProvider);
+  if (staff == null || !staff.isClinical) return const {};
+  if (staff.isChargeNurse && ref.watch(wardContextNeedsConfirmationProvider)) {
+    return const {};
+  }
+  final day = ref.watch(selectedShiftTypeProvider) == 'day';
+  return ref
+      .watch(whiteboardAssignmentsProvider)
+      .where((bed) {
+        if (staff.role == 'doctor_on_call') {
+          return bed.admittingDoctor == staff.staffId;
+        }
+        return (day ? bed.dayShiftNurseId : bed.nightShiftNurseId) ==
+            staff.staffId;
       })
       .map((bed) => bed.patientId)
       .whereType<String>()

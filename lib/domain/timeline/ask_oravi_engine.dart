@@ -212,7 +212,7 @@ class AskOraviEngine {
             loopState: loopState,
             entryType: TimelineEntryType.message,
             authorId: event.authorId,
-            authorRole: _inferCadreRole(event.authorId),
+            authorRole: event.authorRole,
             verbatimText: event.content,
             timestamp: event.clientCreatedAt,
             metadata: {'messageId': event.messageId},

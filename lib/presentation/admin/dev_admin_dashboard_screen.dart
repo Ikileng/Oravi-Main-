@@ -9,6 +9,10 @@ const _roles = {
   'ward_nurse': 'Nurse',
   'doctor_on_call': 'Doctor',
   'charge_nurse': 'Charge Nurse',
+  'pca': 'Patient Care Attendant (PCA)',
+  'housekeeper': 'Housekeeper',
+  'catering': 'Catering (Kitchen & Meals)',
+  'fire_marshall': 'Fire Marshal',
 };
 
 final adminStaffDirectoryProvider = FutureProvider<List<StaffProfile>>((ref) {
@@ -82,6 +86,7 @@ class _DevAdminDashboardScreenState
                             : null,
                       ),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: role,
                         decoration: const InputDecoration(labelText: 'Role'),
                         items: _roles.entries
@@ -348,6 +353,7 @@ class _DevAdminDashboardScreenState
                     runSpacing: 8,
                     children: [
                       DropdownButton<String>(
+                        isExpanded: true,
                         value: _role,
                         items: [
                           const DropdownMenuItem(

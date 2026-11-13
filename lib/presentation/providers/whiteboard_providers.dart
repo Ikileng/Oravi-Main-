@@ -14,11 +14,13 @@ class WardBoardData {
   final String? allocationId;
   final List<WhiteboardBedAssignment> assignments;
   final WardSupportRoster supportRoster;
+  final List<String> availableNurseIds;
 
   const WardBoardData({
     this.allocationId,
     this.assignments = const [],
     this.supportRoster = const WardSupportRoster(),
+    this.availableNurseIds = const [],
   });
 
   factory WardBoardData.fromMap(Map<String, dynamic> map) {
@@ -26,6 +28,9 @@ class WardBoardData {
     final responsibilities = map['responsibilities'];
     return WardBoardData(
       allocationId: map['allocation_id'] as String?,
+      availableNurseIds: List<String>.from(
+        map['available_nurse_ids'] ?? const [],
+      ),
       assignments: assignments is List
           ? assignments
                 .map(
@@ -62,7 +67,9 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     final token = ref.watch(authAccessTokenProvider);
     final staff = ref.watch(authenticatedStaffProvider);
     final needsConfirmation = ref.watch(wardContextNeedsConfirmationProvider);
-    if (ward.wardId.isEmpty || token == null) return const WardBoardData();
+    if (ward.wardId.isEmpty || token == null || staff?.isClinical != true) {
+      return const WardBoardData();
+    }
     if (staff?.role == 'charge_nurse' && needsConfirmation) {
       return const WardBoardData();
     }
@@ -77,6 +84,26 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
   }
 
   String get _shiftType => ref.read(selectedShiftTypeProvider);
+
+  Future<void> changeDoctor(
+    WhiteboardBedAssignment bed,
+    String doctorId,
+  ) async {
+    final ward = ref.read(selectedWardProvider);
+    await ref
+        .read(wardBoardServiceProvider)
+        .communicationRequest(
+          'PUT',
+          '/wards/${Uri.encodeComponent(ward.wardId)}/beds/${Uri.encodeComponent(bed.bedNumber)}/doctor',
+          payload: {
+            'date': activeWardShiftDate(),
+            'patient_id': bed.patientId,
+            'expected_doctor_id': bed.admittingDoctor,
+            'doctor_id': doctorId,
+          },
+        );
+    ref.invalidateSelf();
+  }
 
   Future<void> updateAssignment(
     String bedNumber, {
@@ -202,6 +229,9 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
   }) async {
     final ward = ref.read(selectedWardProvider);
     final staff = ref.read(authenticatedStaffProvider);
+    if (staff?.isChargeNurse != true) {
+      throw StateError('Only the Charge Nurse can edit the ward board.');
+    }
     if (ward.wardId.isEmpty || staff == null) {
       throw StateError('Select a ward and sign in before publishing changes.');
     }

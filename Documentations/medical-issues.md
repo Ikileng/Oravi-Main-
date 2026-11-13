@@ -23,6 +23,25 @@ event identifiers retain the legacy `Loop` name for stored-event compatibility.
 
 ## Push alert setup
 
+The Messages & calls inbox includes received direct messages, authorised Medical
+Issue updates, and incoming calls. Its badge counts unread messages/issue updates
+and unseen missed calls, including zero. Read receipts are stored per account on
+the backend and are independent of clinical acknowledgment and push delivery.
+Reading a thread clears alerts only for events loaded on the device. Clinical
+entries are filtered again against current access; support accounts never receive
+patient issue entries. The foreground inbox refreshes every five seconds.
+
+New messages preserve the author's role, verified by the backend, for role colours.
+Older messages without a recorded role use the available patient staff roster;
+unknown roles use a neutral colour instead of assuming the author is a nurse.
+
+For local development, the backend loads `backend/.env` without overriding existing
+environment variables. Set `GOOGLE_APPLICATION_CREDENTIALS` to the local path of
+your Firebase Admin service-account JSON file and restart the backend. A Firebase
+project ID alone is not sufficient to send alerts. Do not paste the private key
+into source files or commit the credential file. The health flag reports credential
+configuration presence, not a successful Firebase delivery test.
+
 The client uses the shared `MedicalIssuePushService` for Firebase Messaging and
 foreground local notifications. Firebase client configuration comes from the
 generated `lib/firebase_options.dart` and the platform Firebase configuration.

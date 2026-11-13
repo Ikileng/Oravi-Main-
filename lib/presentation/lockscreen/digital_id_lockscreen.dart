@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui' as ui;
 import '../admin/dev_admin_dashboard_screen.dart';
+import '../communications/staff_communications_screen.dart';
 import '../providers/auth_providers.dart';
 import '../ward_board_screen.dart';
 
@@ -75,7 +76,9 @@ class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
       MaterialPageRoute(
         builder: (_) => profile.role == 'dev_admin'
             ? const DevAdminDashboardScreen()
-            : const WardBoardScreen(),
+            : profile.isClinical
+            ? const WardBoardScreen()
+            : const StaffCommunicationsScreen(),
       ),
     );
   }

@@ -587,8 +587,7 @@ class LoopOwnerChangedEvent extends OraviEvent {
       'new_owner_id': newOwnerId,
       'new_owner_role': newOwnerRole,
       'transfer_reason': transferReason,
-      if (handoffSessionId != null)
-        'handoff_session_id': handoffSessionId,
+      if (handoffSessionId != null) 'handoff_session_id': handoffSessionId,
       if (carryForward) 'carry_forward': true,
     },
   };
@@ -625,6 +624,7 @@ class MessagePostedEvent extends OraviEvent {
 
   final String messageId;
   final String content;
+  final String authorRole;
   final String? quotedMessageId; // For contextual replies
   final List<String> roleMentions; // e.g. ['doctor_on_call']
   final List<String> mentionedStaffIds;
@@ -643,6 +643,7 @@ class MessagePostedEvent extends OraviEvent {
     super.hash,
     required this.messageId,
     required this.content,
+    this.authorRole = '',
     this.quotedMessageId,
     this.roleMentions = const [],
     this.mentionedStaffIds = const [],
@@ -663,6 +664,7 @@ class MessagePostedEvent extends OraviEvent {
     'payload': {
       'message_id': messageId,
       'content': content,
+      'author_role': authorRole,
       'quoted_message_id': quotedMessageId,
       'role_mentions': roleMentions,
       'mentioned_staff_ids': mentionedStaffIds,
@@ -685,6 +687,7 @@ class MessagePostedEvent extends OraviEvent {
       schemaVersion: map['schema_version'] ?? 1,
       messageId: payload['message_id'],
       content: payload['content'],
+      authorRole: payload['author_role'] as String? ?? '',
       quotedMessageId: payload['quoted_message_id'],
       roleMentions: List<String>.from(payload['role_mentions'] ?? []),
       mentionedStaffIds: List<String>.from(

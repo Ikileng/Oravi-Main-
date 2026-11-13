@@ -49,6 +49,9 @@ class MedicalIssuePushService {
 
   Stream<MedicalIssueAlert> get openedAlerts => _openedAlerts.stream;
   Stream<CallAlert> get openedCalls => _openedCalls.stream;
+  final StreamController<void> _openedInbox =
+      StreamController<void>.broadcast();
+  Stream<void> get openedInbox => _openedInbox.stream;
 
   /// Set up delivery independently of staff authentication.
   Future<void> initialize() async {
@@ -193,6 +196,7 @@ class MedicalIssuePushService {
     await _openedMessages?.cancel();
     await _openedAlerts.close();
     await _openedCalls.close();
+    await _openedInbox.close();
   }
 
   String get _supportedPlatform {
@@ -329,6 +333,10 @@ class MedicalIssuePushService {
     try {
       final data = jsonDecode(payload);
       if (data is! Map<String, dynamic>) {
+        return;
+      }
+      if (data['type'] == 'staff_message') {
+        _openedInbox.add(null);
         return;
       }
       if (data['type'] == 'oravi_call' && data['call_id'] is String) {

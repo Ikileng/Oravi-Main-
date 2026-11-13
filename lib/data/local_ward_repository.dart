@@ -202,6 +202,7 @@ class LocalWardRepository {
     required String authorId,
     required String deviceId,
     required String content,
+    String authorRole = '',
     List<String> mentionedStaffIds = const [],
   }) {
     final event = MessagePostedEvent(
@@ -211,6 +212,7 @@ class LocalWardRepository {
       deviceId: deviceId,
       messageId: _newId('MSG'),
       content: content,
+      authorRole: authorRole,
       mentionedStaffIds: mentionedStaffIds,
     );
     return appendEvent(event);
