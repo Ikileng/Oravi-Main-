@@ -20,12 +20,30 @@ class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
     'ORAVI_FACILITY_NAME',
     defaultValue: 'Oravi Hospital',
   );
-  static const ssoEnabled = bool.fromEnvironment('ORAVI_SSO_ENABLED');
   final _identifier = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
   bool _showDeveloperPanel = false;
   String _connectionState = 'Online';
+
+  void _showSsoStatus() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hospital SSO'),
+        content: const Text(
+          'Hospital SSO is still in progress and will be available when '
+          'approved by your hospital.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -135,30 +153,23 @@ class _DigitalIdLockscreenState extends ConsumerState<DigitalIdLockscreen> {
                         error: authState.errorMessage,
                         width: width,
                       ),
-                      if (ssoEnabled) ...[
-                        const SizedBox(height: 24),
-                        OutlinedButton.icon(
-                          onPressed: () {},
-                          icon: const Icon(Icons.local_hospital_outlined),
-                          label: const Text('Sign in with Hospital SSO'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(58),
-                            foregroundColor: const Color(0xFF5BF4E7),
-                            side: const BorderSide(
-                              color: Color(0xFF36E6DC),
-                              width: 1.5,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
+                      const SizedBox(height: 24),
+                      OutlinedButton.icon(
+                        onPressed: _showSsoStatus,
+                        icon: const Icon(Icons.local_hospital_outlined),
+                        label: const Text('Sign in with Hospital SSO'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(58),
+                          foregroundColor: const Color(0xFF5BF4E7),
+                          side: const BorderSide(
+                            color: Color(0xFF36E6DC),
+                            width: 1.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Available when enabled by your hospital',
-                          style: TextStyle(color: Color(0xFF9FB6CF)),
-                        ),
-                      ],
+                      ),
                       if (_showDeveloperPanel) const _DeveloperPanel(),
                       const SizedBox(height: 32),
                       _ConnectionStatus(state: _connectionState),
