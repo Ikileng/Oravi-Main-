@@ -14,7 +14,6 @@ import 'data/device_identity.dart';
 import 'data/local_ward_repository.dart';
 import 'data/ward_board_service.dart';
 import 'domain/models/staff_profile.dart';
-import 'domain/models/call_session.dart';
 import 'domain/projections/projections.dart';
 import 'presentation/lockscreen/digital_id_lockscreen.dart';
 import 'presentation/providers/auth_providers.dart';
@@ -161,11 +160,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   }
 
   void _schedulePendingCall(StaffProfile? staff) {
-    if (staff?.role == 'dev_admin') {
-      _pendingCall = null;
-      return;
-    }
-    if (staff == null || _pendingCall == null || _openingCall) return;
+    if (_pendingCall == null || _openingCall) return;
     _openingCall = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openPendingCall();
@@ -180,8 +175,12 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       return;
     }
     try {
+      final callCredential = await ref
+          .read(medicalIssuePushServiceProvider)
+          .readCallCredential();
       final api = WardBoardService(
         getAccessToken: () => ref.read(authAccessTokenProvider),
+        callCredential: callCredential,
       );
       final details = await api.getCall(alert.callId);
       if (!mounted) return;
@@ -211,14 +210,11 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       }
       final session = await api.acceptCall(alert.callId);
       if (!mounted) return;
-      final durationSeconds = await _navigatorKey.currentState?.push<int>(
+      await _navigatorKey.currentState?.push<int>(
         MaterialPageRoute(
           builder: (_) => CallScreen(session: session, api: api),
         ),
       );
-      if (durationSeconds != null && mounted && session.patientId.isNotEmpty) {
-        await _recordIncomingCallOutcome(session, durationSeconds);
-      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -231,65 +227,6 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       }
     } finally {
       _openingCall = false;
-    }
-  }
-
-  Future<void> _recordIncomingCallOutcome(
-    CallSession session,
-    int durationSeconds,
-  ) async {
-    final noteController = TextEditingController();
-    try {
-      final note = await showDialog<String>(
-        context: _navigatorKey.currentContext ?? context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Call with ${session.callerName}'),
-          content: TextField(
-            controller: noteController,
-            autofocus: true,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Outcome note',
-              hintText: 'Record the agreed action or follow-up',
-            ),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () {
-                final value = noteController.text.trim();
-                if (value.isNotEmpty) Navigator.of(dialogContext).pop(value);
-              },
-              child: const Text('Save outcome'),
-            ),
-          ],
-        ),
-      );
-      if (note == null || !mounted) return;
-      await ref
-          .read(wardControllerProvider.notifier)
-          .logCallOutcome(
-            patientId: session.patientId,
-            loopId: session.loopId,
-            recipientId: session.callerId,
-            recipientRole: session.callerRole,
-            outcomeNote: note,
-            durationSeconds: durationSeconds,
-            callId: session.callId,
-            callStatus: 'completed',
-          );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not save the call outcome (${error.runtimeType}).',
-            ),
-          ),
-        );
-      }
-    } finally {
-      noteController.dispose();
     }
   }
 

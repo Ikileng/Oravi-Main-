@@ -946,7 +946,10 @@ def register_fcm_device_token(
         profile.staff_id, device_id, token, platform
     ):
         raise HTTPException(status_code=409, detail="The staff account is unavailable.")
-    return {"success": True}
+    call_credential = staff_store.issue_call_device_credential(
+        profile.staff_id, device_id, platform
+    )
+    return {"success": True, "call_credential": call_credential}
 
 
 @app.delete("/api/v1/staff/me/fcm-installation")
@@ -977,6 +980,30 @@ def _livekit_token(identity: str, name: str, room_name: str) -> str:
         .with_grants(api.VideoGrants(room_join=True, room=room_name, can_publish=True, can_subscribe=True, can_publish_data=True))
         .to_jwt()
     )
+
+
+def _call_participant(
+    call_id: str,
+    authorization: str,
+    call_credential: str,
+):
+    call = call_store.get(call_id)
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found.")
+
+    profile = None
+    if authorization:
+        try:
+            profile = require_authenticated_staff(authorization)
+        except HTTPException:
+            profile = None
+    if profile is None and call_credential:
+        profile = staff_store.get_staff_for_call_credential(call_credential)
+    if profile is None:
+        raise HTTPException(status_code=401, detail="A valid call credential is required.")
+    if profile.staff_id not in {call["caller_id"], call["recipient_id"]}:
+        raise HTTPException(status_code=404, detail="Call not found.")
+    return call, profile
 
 
 @app.post("/api/v1/calls/invite")
@@ -1016,12 +1043,16 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
 
 
 @app.get("/api/v1/calls/{call_id}")
-def get_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
-    call = call_store.get(call_id)
+def get_call(
+    call_id: str,
+    authorization: str = Header(default=""),
+    x_oravi_call_credential: str = Header(default=""),
+):
+    call, profile = _call_participant(
+        call_id, authorization, x_oravi_call_credential
+    )
     if call is not None and profile.role not in CLINICAL_ROLES and (call['patient_id'] or call['loop_id']):
         raise HTTPException(404, 'Call not found.')
-    if call is None or profile.staff_id not in {call["caller_id"], call["recipient_id"]}:
-        raise HTTPException(status_code=404, detail="Call not found.")
     people = {p.staff_id: p for p in staff_store.get_active_staff_by_ids([call["caller_id"], call["recipient_id"]])}
     if call['caller_id'] not in people or call['recipient_id'] not in people:
         raise HTTPException(409, 'A call participant is no longer available.')
@@ -1030,8 +1061,14 @@ def get_call(call_id: str, profile: StaffProfile = Depends(require_communicating
 
 
 @app.post("/api/v1/calls/{call_id}/accept")
-def accept_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
-    call = call_store.get(call_id)
+def accept_call(
+    call_id: str,
+    authorization: str = Header(default=""),
+    x_oravi_call_credential: str = Header(default=""),
+):
+    call, profile = _call_participant(
+        call_id, authorization, x_oravi_call_credential
+    )
     if call is not None and profile.role not in CLINICAL_ROLES and (call['patient_id'] or call['loop_id']):
         raise HTTPException(404, 'Call not found.')
     if call is None or profile.staff_id != call["recipient_id"] or call['status'] != 'ringing':
@@ -1048,21 +1085,42 @@ def accept_call(call_id: str, profile: StaffProfile = Depends(require_communicat
 
 
 @app.post("/api/v1/calls/{call_id}/end")
-def end_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
+def end_call(
+    call_id: str,
+    authorization: str = Header(default=""),
+    x_oravi_call_credential: str = Header(default=""),
+):
+    _, profile = _call_participant(
+        call_id, authorization, x_oravi_call_credential
+    )
     if not call_store.mark_ended(call_id, profile.staff_id):
         raise HTTPException(status_code=404, detail="Call not found or already ended.")
     return {"success": True}
 
 
 @app.post("/api/v1/calls/{call_id}/decline")
-def decline_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
+def decline_call(
+    call_id: str,
+    authorization: str = Header(default=""),
+    x_oravi_call_credential: str = Header(default=""),
+):
+    _, profile = _call_participant(
+        call_id, authorization, x_oravi_call_credential
+    )
     if not call_store.mark_declined(call_id, profile.staff_id):
         raise HTTPException(status_code=409, detail="This call is no longer available.")
     return {"success": True, "status": "declined"}
 
 
 @app.post("/api/v1/calls/{call_id}/cancel")
-def cancel_call(call_id: str, profile: StaffProfile = Depends(require_communicating_staff)):
+def cancel_call(
+    call_id: str,
+    authorization: str = Header(default=""),
+    x_oravi_call_credential: str = Header(default=""),
+):
+    _, profile = _call_participant(
+        call_id, authorization, x_oravi_call_credential
+    )
     if not call_store.mark_cancelled(call_id, profile.staff_id):
         raise HTTPException(status_code=409, detail="This call is no longer ringing.")
     return {"success": True, "status": "cancelled"}

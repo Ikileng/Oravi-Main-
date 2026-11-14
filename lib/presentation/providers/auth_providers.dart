@@ -256,18 +256,7 @@ class AuthController extends Notifier<AuthState> {
   }
 
   void logout() {
-    final token = ref.read(authAccessTokenProvider);
-    if (token != null &&
-        ref.read(authenticatedStaffProvider)?.role != 'dev_admin') {
-      unawaited(
-        ref
-            .read(medicalIssuePushControllerProvider.notifier)
-            .unregister(
-              accessToken: token,
-              deviceId: ref.read(localDeviceIdProvider),
-            ),
-      );
-    }
+    // Keep the device registered for call availability after clinical logout.
     ref.read(authenticatedStaffProvider.notifier).setStaff(null);
     ref.read(authAccessTokenProvider.notifier).setToken(null);
     ref.read(selectedWardProvider.notifier).selectWard(_noWard());

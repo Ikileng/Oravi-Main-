@@ -79,6 +79,29 @@ class TestFcmInstallations(unittest.TestCase):
         finally:
             store.close()
 
+    def test_call_credential_is_device_scoped_and_resolvable(self):
+        store = StaffStore(db_path=":memory:")
+        try:
+            store.create_staff(
+                staff_id="NURSE-CALL",
+                name="Nurse Call",
+                role="ward_nurse",
+                ward_id="",
+                pin="1234",
+            )
+            credential = store.issue_call_device_credential(
+                "NURSE-CALL", "DEVICE-CALL", "android"
+            )
+
+            profile = store.get_staff_for_call_credential(credential)
+            self.assertIsNotNone(profile)
+            self.assertEqual(profile.staff_id, "NURSE-CALL")
+            self.assertIsNone(
+                store.get_staff_for_call_credential("invalid-call-credential")
+            )
+        finally:
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

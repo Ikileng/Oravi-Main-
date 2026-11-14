@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../Services/firebase_options.dart';
 import '../ward_board_service.dart';
@@ -33,6 +34,8 @@ class CallAlert {
 
 class MedicalIssuePushService {
   static const _channelId = 'medical_issue_alerts';
+  static const _callCredentialKey = 'oravi_call_credential';
+  static const _callCredentialStorage = FlutterSecureStorage();
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   final StreamController<MedicalIssueAlert> _openedAlerts =
@@ -122,13 +125,17 @@ class MedicalIssuePushService {
 
     final api = WardBoardService(getAccessToken: () => accessToken);
     Future<void> registerToken(String token) {
-      final operation = _pendingTokenRegistration.then(
-        (_) => api.registerFcmInstallation(
+      final operation = _pendingTokenRegistration.then((_) async {
+        final callCredential = await api.registerFcmInstallation(
           token: token,
           deviceId: deviceId,
           platform: platform,
-        ),
-      );
+        );
+        await _callCredentialStorage.write(
+          key: _callCredentialKey,
+          value: callCredential,
+        );
+      });
       // Keep later refreshes usable even if one backend request fails.
       _pendingTokenRegistration = operation.then<void>(
         (_) {},
@@ -185,6 +192,7 @@ class MedicalIssuePushService {
     } catch (caught) {
       error ??= caught;
     }
+    await _callCredentialStorage.delete(key: _callCredentialKey);
     if (error != null) {
       throw StateError('Could not fully remove the device token.');
     }
@@ -197,6 +205,10 @@ class MedicalIssuePushService {
     await _openedAlerts.close();
     await _openedCalls.close();
     await _openedInbox.close();
+  }
+
+  Future<String?> readCallCredential() {
+    return _callCredentialStorage.read(key: _callCredentialKey);
   }
 
   String get _supportedPlatform {
