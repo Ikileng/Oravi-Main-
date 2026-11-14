@@ -1,0 +1,222 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:oravi_app/data/auth/staff_auth_service.dart';
+import 'package:oravi_app/domain/models/staff_profile.dart';
+import 'package:oravi_app/presentation/lockscreen/digital_id_lockscreen.dart';
+import 'package:oravi_app/presentation/providers/auth_providers.dart';
+import 'package:oravi_app/presentation/ward_board_screen.dart';
+
+void main() {
+  group('M7: Digital ID Lockscreen & Quick PIN Authentication', () {
+    late StaffAuthService mockAuthService;
+    final testStaff = [
+      const StaffProfile(
+        staffId: 'NUR-401',
+        name: 'Mary Wanjiku, RN',
+        role: 'ward_nurse',
+        wardId: '',
+        avatarColor: '#059669',
+        initials: 'MW',
+      ),
+      const StaffProfile(
+        staffId: 'NUR-402',
+        name: 'Grace Achieng, RN',
+        role: 'charge_nurse',
+        wardId: '',
+        avatarColor: '#2563EB',
+        initials: 'GA',
+      ),
+    ];
+
+    setUp(() {
+      mockAuthService = StaffAuthService(
+        mockGetStaffHandler: (_) async => testStaff,
+        mockVerifyPinHandler: (staffId, pin) async {
+          if (staffId == 'NUR-401' && pin == '1234') {
+            return AuthResult(
+              success: true,
+              staff: testStaff[0],
+              token: 'mock_token_123',
+            );
+          } else if (staffId == 'NUR-402' && pin == '5678') {
+            return AuthResult(
+              success: true,
+              staff: testStaff[1],
+              token: 'mock_token_456',
+            );
+          }
+          return const AuthResult(
+            success: false,
+            error: 'Invalid PIN. 4 attempt(s) remaining.',
+          );
+        },
+      );
+    });
+
+    Widget createWidgetUnderTest() {
+      return ProviderScope(
+        overrides: [
+          staffAuthServiceProvider.overrideWithValue(mockAuthService),
+          localDeviceIdProvider.overrideWithValue('DEVICE-lockscreen-test'),
+        ],
+        child: const MaterialApp(home: DigitalIdLockscreen()),
+      );
+    }
+
+    for (final width in [320.0, 384.0]) {
+      testWidgets('Header fits $width pixel phones with enlarged text', (
+        tester,
+      ) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+
+        tester.view.physicalSize = Size(width, 900);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [wardStaffListProvider.overrideWith((ref) async => [])],
+            child: MaterialApp(
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(1.3)),
+                child: child!,
+              ),
+              home: const DigitalIdLockscreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Hospital staff sign-in'), findsOneWidget);
+        expect(find.byTooltip('Dev Admin'), findsOneWidget);
+        expect(
+          tester.getRect(find.byTooltip('Dev Admin')).right,
+          lessThanOrEqualTo(width),
+        );
+      });
+    }
+
+    testWidgets('1. Lockscreen displays provisioned staff Digital ID badges', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(createWidgetUnderTest());
+      await tester.pumpAndSettle();
+
+      // Verify Header
+      expect(find.text('ORAVI CLINICAL STATION'), findsOneWidget);
+      expect(find.text('Ward 4B'), findsNothing);
+
+      // Verify staff badges visible
+      expect(find.text('Mary Wanjiku, RN'), findsOneWidget);
+      expect(find.text('Grace Achieng, RN'), findsOneWidget);
+      expect(find.text('NUR-401'), findsOneWidget);
+      expect(find.text('NUR-402'), findsOneWidget);
+    });
+
+    testWidgets(
+      '2. Search filter narrows down staff cards by name or initials',
+      (tester) async {
+        tester.view.physicalSize = const Size(1080, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        await tester.pumpWidget(createWidgetUnderTest());
+        await tester.pumpAndSettle();
+
+        // Search for "Grace"
+        final searchField = find.byType(TextField);
+        await tester.enterText(searchField, 'Grace');
+        await tester.pumpAndSettle();
+
+        // Grace should be visible, Mary filtered out
+        expect(find.text('Grace Achieng, RN'), findsOneWidget);
+        expect(find.text('Mary Wanjiku, RN'), findsNothing);
+
+        // Clear search
+        await tester.tap(find.byIcon(Icons.clear));
+        await tester.pumpAndSettle();
+        expect(find.text('Mary Wanjiku, RN'), findsOneWidget);
+        expect(find.text('Grace Achieng, RN'), findsOneWidget);
+      },
+    );
+
+    testWidgets('3. Tapping staff badge opens 4-Digit Quick PIN Keypad', (
+      tester,
+    ) async {
+      await tester.pumpWidget(createWidgetUnderTest());
+      await tester.pumpAndSettle();
+
+      // Tap Mary Wanjiku
+      await tester.tap(find.text('Mary Wanjiku, RN'));
+      await tester.pumpAndSettle();
+
+      // Verify modal opened
+      expect(find.text('Enter 4-Digit Quick PIN'), findsOneWidget);
+      expect(find.text('Ward Nurse • NUR-401'), findsOneWidget);
+
+      // Keypad numbers 1 to 9 and 0 visible
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('9'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget);
+    });
+
+    testWidgets('4. Invalid PIN displays clinical error and remains locked', (
+      tester,
+    ) async {
+      await tester.pumpWidget(createWidgetUnderTest());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Mary Wanjiku, RN'));
+      await tester.pumpAndSettle();
+
+      // Punch wrong PIN: 9999
+      await tester.tap(find.text('9'));
+      await tester.pump();
+      await tester.tap(find.text('9'));
+      await tester.pump();
+      await tester.tap(find.text('9'));
+      await tester.pump();
+      await tester.tap(find.text('9'));
+      await tester.pumpAndSettle();
+
+      // Should show error message
+      expect(find.textContaining('Invalid PIN'), findsOneWidget);
+      expect(find.byType(WardBoardScreen), findsNothing);
+    });
+
+    testWidgets(
+      '5. Correct PIN unlocks and routes seamlessly to WardBoardScreen',
+      (tester) async {
+        await tester.pumpWidget(createWidgetUnderTest());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Mary Wanjiku, RN'));
+        await tester.pumpAndSettle();
+
+        // Punch correct PIN: 1234
+        await tester.tap(find.text('1'));
+        await tester.pump();
+        await tester.tap(find.text('2'));
+        await tester.pump();
+        await tester.tap(find.text('3'));
+        await tester.pump();
+        await tester.tap(find.text('4'));
+        await tester.pumpAndSettle();
+
+        // Should route to WardBoardScreen!
+        expect(find.byType(WardBoardScreen), findsOneWidget);
+        expect(find.textContaining('ORAVI'), findsOneWidget);
+        expect(
+          find.text('MW'),
+          findsOneWidget,
+        ); // Lock icon initials on Ward Board
+      },
+    );
+  });
+}

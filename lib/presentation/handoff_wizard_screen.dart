@@ -1,0 +1,1095 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../domain/models/loop_enums.dart';
+import '../domain/models/staff_profile.dart';
+import '../domain/projections/projections.dart';
+import 'handover_print_sheet_screen.dart';
+import 'providers/auth_providers.dart';
+import 'providers/ward_providers.dart';
+import 'providers/whiteboard_providers.dart';
+import 'providers/ward_context_providers.dart';
+import 'theme/clinical_theme.dart';
+
+/// Shift Handoff Wizard strictly implementing PRD Section 7.3:
+/// - FR-11: Pairs outgoing and incoming nurse and walks the board bed by bed.
+/// - FR-12: Transfers every unfinished Medical Issue; critical issues require individual acceptance.
+/// - FR-13: SBAR summary automatically compiled from structured entries.
+/// - FR-14: Explicit timestamped confirmation per bed ('nothing pending' or 'N loops transferred').
+/// - FR-16: Completed handoff is locked; corrections are appended.
+class HandoffWizardScreen extends ConsumerStatefulWidget {
+  const HandoffWizardScreen({super.key});
+
+  @override
+  ConsumerState<HandoffWizardScreen> createState() =>
+      _HandoffWizardScreenState();
+}
+
+class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
+  // Step tracking: 0 = Pairing, 1 = Bed Stepper, 2 = Summary & Lock
+  int _currentStep = 0;
+  int _currentBedIndex = 0;
+
+  String _outgoingNurse = '';
+  String _incomingNurse = '';
+  String? _incomingAcceptanceToken;
+
+  // Per-bed review state during stepper
+  final Set<String> _acknowledgedCriticalLoopIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _outgoingNurse = ref.read(authenticatedStaffProvider)?.staffId ?? '';
+  }
+
+  Future<void> _onStartHandoff() async {
+    final pin = await _requestIncomingPin();
+    if (pin == null) return;
+    final result = await ref
+        .read(staffAuthServiceProvider)
+        .verifyPin(_incomingNurse, pin);
+    final incomingToken = result.token;
+    if (!result.success ||
+        result.staff?.staffId != _incomingNurse ||
+        result.staff?.isWardNurse != true ||
+        incomingToken == null ||
+        incomingToken.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.error ?? 'Incoming nurse verification failed.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    _incomingAcceptanceToken = incomingToken;
+    try {
+      await ref
+          .read(wardControllerProvider.notifier)
+          .startHandoffSession(
+            outgoingNurseId: _outgoingNurse,
+            incomingNurseId: _incomingNurse,
+          );
+    } catch (error) {
+      _showHandoffError('Could not save the handoff: $error');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _currentStep = 1;
+      _currentBedIndex = 0;
+      _resetBedSelection();
+    });
+  }
+
+  Future<String?> _requestIncomingPin() async {
+    var enteredPin = '';
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Incoming nurse verification'),
+        content: TextField(
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 8,
+          onChanged: (value) => enteredPin = value,
+          decoration: const InputDecoration(
+            labelText: 'Enter the incoming nurse PIN',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final pin = enteredPin.trim();
+              if (pin.length >= 4 &&
+                  pin.length <= 8 &&
+                  int.tryParse(pin) != null) {
+                Navigator.of(dialogContext).pop(pin);
+              }
+            },
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHandoffError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _resetBedSelection() {
+    _acknowledgedCriticalLoopIds.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final patients = ref.watch(currentNurseShiftPatientsProvider);
+    final session = ref.watch(activeHandoffSessionProvider);
+    final ward = ref.watch(selectedWardProvider);
+    final boardState = ref.watch(wardBoardProvider);
+    final currentStaff = ref.watch(authenticatedStaffProvider);
+    final nurses =
+        (ref.watch(boardStaffListProvider).asData?.value ??
+                const <StaffProfile>[])
+            .where((staff) => staff.isWardNurse || staff.isChargeNurse)
+            .toList();
+
+    return Scaffold(
+      backgroundColor: ClinicalTheme.background,
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('SHIFT HANDOFF SESSION'),
+            Text(
+              '${ward.name} • PRD FR-11 to FR-17',
+              style: const TextStyle(
+                fontSize: 11,
+                color: ClinicalTheme.routineTeal,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: ward.wardId.isEmpty
+          ? _handoffMessage('No ward is assigned for this shift.')
+          : ref.watch(wardContextNeedsConfirmationProvider)
+          ? _handoffMessage('Confirm your ward before starting handoff.')
+          : boardState.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : boardState.hasError
+          ? _handoffMessage(
+              'The ward board could not be loaded: ${boardState.error}',
+            )
+          : _currentStep == 0 && patients.isEmpty
+          ? _handoffMessage(
+              'There are no patients assigned to hand over for this shift.',
+            )
+          : _buildCurrentStep(patients, session, nurses, currentStaff),
+    );
+  }
+
+  Widget _handoffMessage(String message) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: ClinicalTheme.textSecondary),
+      ),
+    ),
+  );
+
+  Widget _buildCurrentStep(
+    List<PatientStateProjection> patients,
+    HandoffSessionProjection? session,
+    List<StaffProfile> nurses,
+    StaffProfile? currentStaff,
+  ) {
+    if (_currentStep == 0) {
+      return _buildPairingView(nurses, currentStaff);
+    } else if (_currentStep == 1) {
+      if (patients.isEmpty || _currentBedIndex >= patients.length) {
+        return _buildSummaryLockView(session);
+      }
+      return _buildBedWalkthrough(
+        patients[_currentBedIndex],
+        patients.length,
+        session,
+      );
+    } else {
+      return _buildSummaryLockView(session);
+    }
+  }
+
+  // ==========================================
+  // Step 1: Nurse Pairing View (FR-11)
+  // ==========================================
+  Widget _buildPairingView(
+    List<StaffProfile> nurses,
+    StaffProfile? currentStaff,
+  ) {
+    final availableIncoming = nurses
+        .where((staff) => staff.staffId != currentStaff?.staffId)
+        .toList();
+    final incomingValue =
+        availableIncoming.any((staff) => staff.staffId == _incomingNurse)
+        ? _incomingNurse
+        : null;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: ClinicalTheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: ClinicalTheme.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.swap_horiz,
+                  color: ClinicalTheme.nurseBlue,
+                  size: 32,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Shift Handover Protocol',
+                        style: TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Pairs outgoing and incoming nurses to walk the board bed by bed. No patient is left unconfirmed.',
+                        style: TextStyle(
+                          color: ClinicalTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'OUTGOING NURSE (Handing Over)',
+            style: TextStyle(
+              color: ClinicalTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: ClinicalTheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: ClinicalTheme.border),
+            ),
+            child: Text(
+              currentStaff == null
+                  ? 'Sign in as the outgoing nurse.'
+                  : '${currentStaff.name} · ${currentStaff.staffId}',
+              style: const TextStyle(
+                color: ClinicalTheme.nurseBlue,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'INCOMING NURSE (Taking Over)',
+            style: TextStyle(
+              color: ClinicalTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: incomingValue,
+            dropdownColor: ClinicalTheme.surface,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: ClinicalTheme.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            hint: const Text(
+              'Select the incoming nurse',
+              style: TextStyle(color: ClinicalTheme.textSecondary),
+            ),
+            items: availableIncoming
+                .map(
+                  (staff) => DropdownMenuItem(
+                    value: staff.staffId,
+                    child: Text(
+                      '${staff.name} · ${staff.staffId}',
+                      style: const TextStyle(
+                        color: ClinicalTheme.doctorPink,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => _incomingNurse = value);
+            },
+          ),
+          const Spacer(),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: ClinicalTheme.nurseBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text(
+                'Begin Bed-by-Bed Walkthrough',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              onPressed:
+                  incomingValue == null || currentStaff?.isWardNurse != true
+                  ? null
+                  : _onStartHandoff,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // Step 2: Bed Walkthrough View (FR-11 to FR-14)
+  // ==========================================
+  Widget _buildBedWalkthrough(
+    PatientStateProjection patient,
+    int totalBeds,
+    HandoffSessionProjection? session,
+  ) {
+    final loops = ref.watch(patientLoopsProvider(patient.patientId));
+    final openLoops = loops.where((l) => l.isOpen).toList();
+    final criticalLoops = openLoops
+        .where((l) => l.urgency == LoopUrgency.critical)
+        .toList();
+    final routineLoops = openLoops
+        .where((l) => l.urgency != LoopUrgency.critical)
+        .toList();
+
+    final sbar = SbarSummary.fromPatientAndLoops(
+      patient: patient,
+      loops: loops,
+    );
+
+    final allCriticalAcknowledged =
+        criticalLoops.isEmpty ||
+        criticalLoops.every(
+          (l) => _acknowledgedCriticalLoopIds.contains(l.loopId),
+        );
+
+    return Column(
+      children: [
+        // Stepper Progress Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: ClinicalTheme.surfaceElevated,
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Bed ${_currentBedIndex + 1} of $totalBeds: ${patient.bedNumber}',
+                    style: const TextStyle(
+                      color: ClinicalTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  Text(
+                    '${((_currentBedIndex + 1) / totalBeds * 100).toInt()}% Complete',
+                    style: const TextStyle(
+                      color: ClinicalTheme.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: (_currentBedIndex + 1) / totalBeds,
+                backgroundColor: ClinicalTheme.surface,
+                color: ClinicalTheme.nurseBlue,
+              ),
+            ],
+          ),
+        ),
+
+        // Scrollable Bed Content
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(14),
+            children: [
+              // Patient Banner (FR-3: Two required identifiers)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ClinicalTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: ClinicalTheme.border),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: ClinicalTheme.nurseBlue.withValues(
+                        alpha: 0.15,
+                      ),
+                      child: Text(
+                        patient.bedNumber,
+                        style: const TextStyle(
+                          color: ClinicalTheme.nurseBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${patient.patientInitials} (${patient.age}y ${patient.sex})',
+                            style: const TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // SBAR Structured Summary Card (FR-13)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ClinicalTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: ClinicalTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.assignment_outlined,
+                          size: 16,
+                          color: ClinicalTheme.routineTeal,
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          'SBAR SUMMARY (Compiled without AI)',
+                          style: TextStyle(
+                            color: ClinicalTheme.routineTeal,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 16, color: ClinicalTheme.border),
+                    _buildSbarRow('S (Situation)', sbar.situation),
+                    const SizedBox(height: 6),
+                    _buildSbarRow('B (Background)', sbar.background),
+                    const SizedBox(height: 6),
+                    _buildSbarRow('A (Assessment)', sbar.assessment),
+                    const SizedBox(height: 6),
+                    _buildSbarRow('R (Recommendation)', sbar.recommendation),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Every unfinished issue transfers with the patient.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'ACTIVE MEDICAL ISSUES (${openLoops.length})',
+                    style: const TextStyle(
+                      color: ClinicalTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              if (openLoops.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.successGreen.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ClinicalTheme.successGreen),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        color: ClinicalTheme.successGreen,
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'ALL CLEAR: No open items pending on this bed.',
+                        style: TextStyle(
+                          color: ClinicalTheme.successGreen,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                // Critical issues still require individual verbal acceptance.
+                ...criticalLoops.map((loop) {
+                  final isAcked = _acknowledgedCriticalLoopIds.contains(
+                    loop.loopId,
+                  );
+                  return Card(
+                    color: ClinicalTheme.surface,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(
+                        color: isAcked
+                            ? ClinicalTheme.successGreen
+                            : ClinicalTheme.criticalRed,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: ClinicalTheme.criticalRed.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'CRITICAL / STAT',
+                                  style: TextStyle(
+                                    color: ClinicalTheme.criticalRed,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  loop.title,
+                                  style: const TextStyle(
+                                    color: ClinicalTheme.textPrimary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            loop.description,
+                            style: const TextStyle(
+                              color: ClinicalTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Divider(
+                            height: 16,
+                            color: ClinicalTheme.border,
+                          ),
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            value: isAcked,
+                            activeColor: ClinicalTheme.successGreen,
+                            title: const Text(
+                              'I have verbally discussed this STAT item and accept individual ownership (FR-12)',
+                              style: TextStyle(
+                                color: ClinicalTheme.textPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            onChanged: (val) {
+                              setState(() {
+                                if (val == true) {
+                                  _acknowledgedCriticalLoopIds.add(loop.loopId);
+                                } else {
+                                  _acknowledgedCriticalLoopIds.remove(
+                                    loop.loopId,
+                                  );
+                                }
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+
+                // Routine and urgent issues transfer automatically with the bed.
+                ...routineLoops.map((loop) {
+                  return Card(
+                    color: ClinicalTheme.surface,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: const BorderSide(color: ClinicalTheme.border),
+                    ),
+                    child: ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        Icons.medical_services_outlined,
+                        color: ClinicalTheme.nurseBlue,
+                      ),
+                      title: Text(
+                        '[${loop.urgency.name.toUpperCase()}] ${loop.title}',
+                        style: const TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        loop.description,
+                        style: const TextStyle(
+                          color: ClinicalTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+
+        // Bottom Action Bar: Explicit Bed Confirmation (FR-14)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: const BoxDecoration(
+            color: ClinicalTheme.surface,
+            border: Border(top: BorderSide(color: ClinicalTheme.border)),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: openLoops.isEmpty
+                ? FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: ClinicalTheme.successGreen,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: Text(
+                      'Confirm: Nothing Pending (${patient.bedNumber})',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () =>
+                        _confirmBed(patient, session, nothingPending: true),
+                  )
+                : FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: allCriticalAcknowledged
+                          ? ClinicalTheme.urgentAmber
+                          : Colors.grey[700],
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(Icons.arrow_forward),
+                    label: Text(
+                      allCriticalAcknowledged
+                          ? 'Confirm: Transfer ${openLoops.length} Issue(s) (${patient.bedNumber})'
+                          : 'Acknowledge Critical Medical Issue First',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: allCriticalAcknowledged
+                        ? () => _confirmBed(
+                            patient,
+                            session,
+                            nothingPending: false,
+                          )
+                        : null,
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _confirmBed(
+    PatientStateProjection patient,
+    HandoffSessionProjection? session, {
+    required bool nothingPending,
+  }) async {
+    final sessionId = session?.handoffSessionId ?? 'HANDOFF-ACTIVE';
+    final incomingToken = _incomingAcceptanceToken;
+    if (incomingToken == null) {
+      _showHandoffError('Verify the incoming nurse before accepting beds.');
+      return;
+    }
+
+    try {
+      await ref
+          .read(wardBoardProvider.notifier)
+          .acceptHandoffBeds(
+            bedNumbers: [patient.bedNumber],
+            outgoingStaffId: _outgoingNurse,
+            incomingAccessToken: incomingToken,
+            handoffSessionId: sessionId,
+            patientId: patient.patientId,
+            transferredLoopIds: ref
+                .read(patientLoopsProvider(patient.patientId))
+                .where((loop) => loop.isOpen)
+                .map((loop) => loop.loopId)
+                .toList(),
+          );
+      await ref
+          .read(wardControllerProvider.notifier)
+          .acceptBedInHandoff(
+            handoffSessionId: sessionId,
+            bedNumber: patient.bedNumber,
+            patientId: patient.patientId,
+            incomingNurseId: _incomingNurse,
+            nothingPendingConfirmed: nothingPending,
+          );
+    } catch (error) {
+      _showHandoffError('Could not save this bed handoff: $error');
+      return;
+    }
+    if (!mounted) return;
+
+    final patients = ref.read(currentNurseShiftPatientsProvider);
+    if (patients.isNotEmpty) {
+      setState(() {
+        _currentBedIndex = 0;
+        _resetBedSelection();
+      });
+    } else {
+      setState(() {
+        _currentStep = 2; // Jump to Summary
+      });
+    }
+  }
+
+  Widget _buildSbarRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: ClinicalTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: ClinicalTheme.textPrimary,
+              fontSize: 11.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==========================================
+  // Step 3: Shift Summary & Cryptographic Lock (FR-14 to FR-16)
+  // ==========================================
+  Widget _buildSummaryLockView(HandoffSessionProjection? session) {
+    final patients = ref.watch(currentNurseShiftPatientsProvider);
+    final isLocked = session?.isLocked ?? false;
+
+    final totalTransferred = session?.totalLoopsTransferred ?? 0;
+    final totalBedsHandedOver = session?.totalBedsHandedOver ?? 0;
+    final totalBeds = totalBedsHandedOver + patients.length;
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ClinicalTheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isLocked
+                    ? ClinicalTheme.successGreen
+                    : ClinicalTheme.border,
+              ),
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  isLocked ? Icons.lock : Icons.task_alt,
+                  color: isLocked
+                      ? ClinicalTheme.successGreen
+                      : ClinicalTheme.nurseBlue,
+                  size: 44,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  isLocked
+                      ? 'Handoff Locked & Finalized'
+                      : 'Handoff Walkthrough Complete',
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${session?.outgoingNurseId ?? _outgoingNurse} ➔ ${session?.incomingNurseId ?? _incomingNurse}',
+                  style: const TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Statistics Card
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ClinicalTheme.border),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$totalBedsHandedOver / $totalBeds',
+                        style: const TextStyle(
+                          color: ClinicalTheme.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Beds Reviewed',
+                        style: TextStyle(
+                          color: ClinicalTheme.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ClinicalTheme.border),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$totalTransferred',
+                        style: const TextStyle(
+                          color: ClinicalTheme.urgentAmber,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Medical Issues Transferred',
+                        style: TextStyle(
+                          color: ClinicalTheme.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // PRD FR-16 notice
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'PRD FR-16: A completed handoff record is locked. Corrections are appended, never overwritten.',
+                    style: TextStyle(color: Colors.amber, fontSize: 11.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+
+          // Secondary Action: 1-Page Printable Sheet (FR-15)
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: ClinicalTheme.border),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              icon: const Icon(
+                Icons.print_outlined,
+                color: ClinicalTheme.textPrimary,
+              ),
+              label: const Text(
+                'View 1-Page Handover Sheet (FR-15)',
+                style: TextStyle(color: ClinicalTheme.textPrimary),
+              ),
+              onPressed: session == null
+                  ? null
+                  : () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              HandoverPrintSheetScreen(session: session),
+                        ),
+                      );
+                    },
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Primary Action: Lock Record
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: isLocked
+                    ? ClinicalTheme.border
+                    : ClinicalTheme.successGreen,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              icon: Icon(isLocked ? Icons.check : Icons.lock_outline),
+              label: Text(
+                isLocked
+                    ? 'Handoff Locked & Completed'
+                    : 'End Shift & Lock Handover',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              onPressed: isLocked || session == null || patients.isNotEmpty
+                  ? null
+                  : () async {
+                      try {
+                        await ref
+                            .read(wardControllerProvider.notifier)
+                            .completeHandoffSession(
+                              handoffSessionId: session.handoffSessionId,
+                              authorId: _outgoingNurse,
+                              totalBedsHandedOver: totalBedsHandedOver,
+                              totalLoopsTransferred: totalTransferred,
+                            );
+                      } catch (error) {
+                        _showHandoffError(
+                          'Could not save the completed handoff: $error',
+                        );
+                        return;
+                      }
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text(
+                            'Shift handoff locked and signed. Record is immutable.',
+                          ),
+                          backgroundColor: ClinicalTheme.successGreen,
+                        ),
+                      );
+                    },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

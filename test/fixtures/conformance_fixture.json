@@ -1,0 +1,87 @@
+{
+  "description": "Canonical M0-M3 event stream fixture validating pure reducer projections and server hash chain",
+  "events": [
+    {
+      "event_id": "0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60001",
+      "type": "LoopOpened",
+      "patient_id": "PAT-401",
+      "loop_id": "LOOP-001",
+      "author_id": "NURSE-MWANGI",
+      "device_id": "DEV-A",
+      "client_created_at": "2026-10-21T08:00:00Z",
+      "server_seq": 1,
+      "server_received_at": "2026-10-21T08:00:02Z",
+      "schema_version": 1,
+      "payload": {
+        "title": "Check IV cannulation site",
+        "description": "Assess for phlebitis every 4 hours",
+        "loop_type": "taskOrPendingResult",
+        "urgency": "routine",
+        "initial_owner_id": "NURSE-MWANGI",
+        "initial_owner_role": "ward_nurse"
+      }
+    },
+    {
+      "event_id": "0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60002",
+      "type": "MessagePosted",
+      "patient_id": "PAT-401",
+      "loop_id": "LOOP-001",
+      "author_id": "NURSE-MWANGI",
+      "device_id": "DEV-A",
+      "client_created_at": "2026-10-21T08:30:00Z",
+      "server_seq": 2,
+      "server_received_at": "2026-10-21T08:30:01Z",
+      "schema_version": 1,
+      "payload": {
+        "message_id": "MSG-001",
+        "content": "Site clean, no erythema or swelling.",
+        "role_mentions": []
+      }
+    },
+    {
+      "event_id": "0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60003",
+      "type": "CallLogged",
+      "patient_id": "PAT-401",
+      "loop_id": "LOOP-001",
+      "author_id": "NURSE-MWANGI",
+      "device_id": "DEV-A",
+      "client_created_at": "2026-10-21T09:00:00Z",
+      "server_seq": 3,
+      "server_received_at": "2026-10-21T09:00:01Z",
+      "schema_version": 1,
+      "payload": {
+        "call_id": "CALL-001",
+        "caller_id": "Nurse Mwangi, RN",
+        "caller_role": "ward_nurse",
+        "recipient_id": "Dr. Kimani",
+        "recipient_role": "gynaecologist",
+        "outcome_note": "Agreed to continue current infusion rate",
+        "duration_seconds": 45
+      }
+    },
+    {
+      "event_id": "0192a5b6-7c8d-7e0f-a1b2-c3d4e5f60004",
+      "type": "LoopClosed",
+      "patient_id": "PAT-401",
+      "loop_id": "LOOP-001",
+      "author_id": "NURSE-MWANGI",
+      "device_id": "DEV-A",
+      "client_created_at": "2026-10-21T10:00:00Z",
+      "server_seq": 4,
+      "server_received_at": "2026-10-21T10:00:01Z",
+      "schema_version": 1,
+      "payload": {
+        "reason_code": "actionTaken",
+        "free_text_note": "Cannula flushed and dressing changed",
+        "resolution_type": "resolved"
+      }
+    }
+  ],
+  "expected_final_state": {
+    "loop_id": "LOOP-001",
+    "state": "closed",
+    "total_messages": 2,
+    "closure_reason": "actionTaken",
+    "is_open": false
+  }
+}

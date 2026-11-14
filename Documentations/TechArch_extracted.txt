@@ -1,0 +1,373 @@
+Oravi: Technical Architecture
+Version 0.1 (working draft) | Companion to the Oravi PRD v0.1 | October 18, 2026 | Owner: Ikileng (Bradley Ikileng Etyang)
+Status labels. [Decided] is settled for now. [Assumed] is the working plan and must be tested. [Open] is undecided, with options listed. Targets are targets until measured. This document records technical decisions and constraints. Product behavior lives in the PRD, and section numbers below refer to it.
+1. Purpose and scope
+This document describes how Oravi is built so that the first milestone, the nurse capabilities, and the second milestone, the Ask Oravi agent, can be built and tested on hospital visits. Other roles (doctors, ER staff, paramedics) are designed for but not built first. [Decided]
+Design drivers, in priority order: (1) correctness of clinical records and audit, (2) works offline on budget Android phones, (3) low operating cost and a deployment that can move between cloud and ward hardware, (4) speed of development for a solo builder, (5) a path to integration with other systems later.
+2. Decisions at a glance
+Area
+Decision
+Status
+Client
+Flutter, domain logic kept free of UI code
+Decided
+Device storage
+SQLite through Drift, encrypted with SQLCipher
+Decided
+System of record
+PostgreSQL
+Decided
+Record model
+Append-only event log, state derived from events, client-generated IDs
+Decided
+Sync
+Own event-log sync versus PowerSync, chosen by a spike
+Open
+Backend runtime
+Python (FastAPI) to start, revisit for a ward hub
+Assumed
+Hosting and topology
+Docker Compose for on-premises ward server or local cloud VPS; satisfies Kenya Data Protection Act 2019 data residency
+Decided
+Push and alerts
+FCM, with acknowledgement timeouts and SMS fallback
+Assumed
+Audit integrity
+Hash chain, revoked UPDATE and DELETE, signed exports kept off the server
+Decided
+Ask Oravi
+Quote-first retrieval with automatic verification, synthetic data in early tests
+Decided
+Firebase
+Realtime Database retired as the main store, FCM kept
+Decided
+3. System overview
+[Flutter app on phone]                                [Backend service]  UI -> application state -> domain core                API (REST + realtime hint)        |                                               |   Drift/SQLite (encrypted)  <---- sync (push/pull) ---> PostgreSQL   event store + projections                              event log + projections   outbox (pending events)                                jobs: timers, escalation, search index        |                                               |   local search (FTS5)                                 FCM push, SMS provider, model API (later)
+Principle [Decided]. The phone is a full working copy of the patients it can see. It never waits for the server to record an event. The server is the authority on order and permissions, not on whether the phone may work.
+4. Data model
+4.1 The event log
+Every change is an immutable event. Current state is computed from events. [Decided]
+Field
+Meaning
+event_id
+UUID version 7, generated on the client, used for idempotent retries
+patient_id
+The patient the event belongs to
+loop_id
+The loop or thread, when applicable
+type
+Event type from the catalog in the appendix
+payload
+Event details as structured data
+author_id, device_id
+Who and which enrolled device
+client_created_at
+The phone's clock, used for display only
+server_received_at, server_seq
+Assigned by the server, authoritative for order
+schema_version
+Version of the event format
+prev_hash, hash
+Hash chain fields (section 7)
+Clock rule [Decided]. Budget phones often have wrong clocks. Ordering uses server_seq. Time shown to users is client_created_at, flagged when it differs from server time by more than a threshold, so a wrong phone clock never reorders the record.
+4.2 Core entities (derived and reference tables)
+Facility, Ward, Bed, Patient and Encounter, User, RoleAssignment (time-ranged), Shift, Loop (current state), LoopLink, Message, HandoffSession, HandoffAcceptance, Escalation, Flag, AuditCheckpoint. Reference data (users, wards, beds) changes through administrative events and is also versioned. [Assumed]
+4.3 Projections
+The server updates projections in the same transaction that appends the event. The phone recomputes the same projections locally from its events, so it works offline. [Decided]
+Risk and mitigation [Decided]. Two implementations of the same rules (Dart on the phone, Python on the server) can drift apart. A shared conformance suite of JSON fixtures (a sequence of events and the expected resulting state) runs in both test suites on every change.
+4.4 Identifiers and patient safety
+Patients have an internal ID plus the second identifier required by the PRD (admission number). Both appear on every loop, escalation, and handoff item. [Decided]
+5. Loop lifecycle
+A loop is a clinical item with an owner, a thread, and a state. States follow PRD section 6. [Decided]
+From
+Event
+To
+Rule
+(none)
+LoopOpened
+Raised
+Any clinician with patient access. Default owner assigned
+Raised
+LoopAcknowledged
+Acknowledged
+By the owner or a delegate
+Raised or Acknowledged
+Owner starts work
+In progress
+Optional state
+Any open state
+LoopClosed
+Closed (routine, urgent)
+Requires reason code, note when required, and resolution type
+Any open state
+LoopClosed on a Critical loop
+Closed awaiting confirmation
+Opener or a senior confirms or reopens
+Closed awaiting confirmation
+LoopClosureConfirmed
+Closed
+Records who confirmed
+Closed awaiting confirmation
+No confirmation within the timeout
+Escalated confirmation
+Passes to the next doctor or the nurse-in-charge ([Assumed])
+Closed
+LoopReopened
+Raised
+Reason required. Reopen history stays on the thread
+Closed
+LoopLinked
+(new loop)
+New thread linked to the earlier one
+The reopen window default is 24 hours, configurable. [Assumed]
+The state machine is defined once as data (a table of allowed transitions) and checked by both the phone and the server. A transition that is not allowed is rejected with a reason and kept visible to the user, never dropped silently. [Decided]
+6. Sync design
+6.1 Protocol (own event-log version)
+Write path. An action creates an event in the local database and an outbox row, and the UI updates at once.
+Push. The app sends pending events in batches. The server validates each (permissions, schema, allowed transition), appends valid events with server_seq, and returns accepted IDs and rejected events with reasons. Retrying a batch is safe because event_id is the idempotency key. [Decided]
+Pull. The app requests events after its last cursor, limited to the patients and wards it can access. It stores them and recomputes projections. [Decided]
+Wake-up. A real-time connection or an FCM data message says new events exist, which triggers a pull. Polling with backoff is the fallback. [Assumed]
+Scope. Each phone holds active patients on its wards plus recently discharged patients for a configurable period. Older data is removed from the device. [Assumed]
+6.2 Conflict rules
+The server appends every valid event. State is derived deterministically by server_seq. Nothing valid is silently discarded. [Decided]
+Situation
+Rule
+Two users close the same loop
+The first by server_seq is the closure. The second is kept as an added note. Both are visible
+Close and reopen at the same time
+Order by server_seq. Both are visible
+Two owner changes
+The later by server_seq wins. The displaced owner is notified
+Two messages
+Both kept, ordered by server_seq
+Message edit
+A new event. Display shows the latest with history
+Two nurses accept the same bed at handoff
+First wins. The second is flagged
+Loop created offline after the patient was discharged
+Accepted and flagged as raised after discharge
+Event fails validation (permission, schema, transition)
+Returned to the author with the reason and kept in a visible list
+6.3 The sync spike
+A time-boxed comparison of (A) the protocol above and (B) PowerSync with a custom upload path. [Open]
+Criterion
+What to check
+Build effort
+Days to a working loop and thread flow
+Conflict control
+Can the rules above be expressed exactly
+Offline correctness
+Chaos test: 1,000 events with airplane mode, app kill, and replays. Pass: zero lost, zero duplicated
+Poor network
+50 queued events sync in under about five seconds on a throttled 3G profile (target to confirm)
+Self-hosting
+License, footprint on a small server, number of moving parts
+Flutter support
+SDK maturity and encryption compatibility
+Battery and data
+Measured over a simulated shift
+Cost
+Hosted versus self-hosted
+7. Security and audit
+Roles and access [Decided]. Roles (nurse, doctor, nurse-in-charge, administrator) and ward assignments decide which patients a user may see. Enforced twice: in API checks and in PostgreSQL row-level security.
+Device enrollment [Decided]. Each phone is enrolled with its own credential and revocable token. Shared devices support quick user switching with a PIN, lockout, and auto-lock.
+Local data protection [Decided]. SQLCipher with the key held in the Android keystore. Remote wipe takes effect at the next connection, and tokens are revoked server-side at once.
+Transport [Decided]. TLS everywhere. A private certificate authority if a ward server is used.
+Notification privacy [Decided]. Push payloads carry opaque IDs only. The app fetches content after opening. Lock screens show no patient information.
+Audit hash chain [Decided]. hash = SHA-256 of the previous hash plus the canonical event. One chain per ward. UPDATE and DELETE are revoked on event tables. A signed checkpoint (last hash and sequence number) is exported daily to storage outside the server, so tampering is detectable. Administrators with database access could still alter data, so the exports are what make that visible.
+Query log [Decided]. Every Ask Oravi query is recorded with user, patient, time, and question.
+Compliance [Open]. Data Protection Act 2019 and Digital Health Act 2023 obligations, controller and processor roles, registration, and retention are verified with counsel (PRD sections 10 and 14).
+8. Notifications and escalation
+The key rule [Decided]. Push delivery is never assumed. Safety depends on acknowledgement timeouts, not on delivery.
+Server-side timers. Escalation and confirmation timers live in the database and run as jobs, so a restart never loses them. A Postgres-backed job queue is preferred over adding Redis in v1. [Assumed]
+Push. High-priority FCM data messages, with a notification channel for critical items. [Assumed]
+Acknowledgement window. If a device does not acknowledge within the window, the chain moves on: SMS to the same person, then the next doctor, then the nurse-in-charge. Windows are configurable by urgency. [Assumed]
+SMS fallback. Through a local provider (Africa's Talking is a candidate, not yet evaluated). Messages contain no clinical detail, only a ward reference and a reply code, and replies are accepted only from the registered number. Cost and reliability are unverified. [Open]
+Aggressive phone settings. Transsion and Xiaomi phones may stop background apps. The app asks for battery-optimization exemption and guides the user to the manufacturer's autostart setting at first run. A device with no recent heartbeat is shown as unreachable to the escalation logic. [Assumed]
+
+8A. In-app calling
+Decision [Decided]. The Call button places a voice call inside Oravi to any registered Oravi user, without anyone needing to know the other person's phone number. A nurse who does not have a doctor's number taps Call beside their message or loop and reaches them.
+• Technology [Decided]. LiveKit. Open-source (Apache-2.0), self-hostable via Docker Compose on a cloud server or a local ward server, WebRTC based, with an official Flutter SDK. The same client code works against LiveKit's hosted cloud or a self-hosted server.
+• Calling bridge and lock screen UI [Assumed]. Handled via flutter_callkit_incoming (or equivalent). On Android, this binds to the Telecom framework (ConnectionService) and full-screen intent notifications (USE_FULL_SCREEN_INTENT) on a high-priority channel, guaranteeing the incoming call displays a full-screen ringing UI over the lock screen. On iOS, it integrates Apple CallKit to display the native system dialer interface.
+• Push and wake-up architecture [Decided]. Dual-channel: high-priority FCM data messages on Android, and Apple PushKit (VoIP push) on iOS. PushKit is mandatory on iOS to wake suspended or terminated apps and immediately trigger CallKit (reportNewIncomingCall), as standard APNs cannot reliably wake apps for real-time ringing.
+• Ringing and late media connect [Decided]. Incoming calls ring purely through local signaling payloads (carrying caller identity, ward, and loop scope). The client does NOT establish a WebRTC connection or join the LiveKit room while ringing; room connection occurs only when the callee actively taps 'Answer' (ACTION_CALL_ACCEPT). This saves bandwidth, eliminates battery drain on unanswered calls, and prevents ringtone audio conflicts.
+• Audio session routing [Decided]. Native audio session handover (AVAudioSession on iOS, AudioManager on Android) cleanly transfers focus from system ringing to the LiveKit WebRTC audio track upon answering, ensuring seamless speaker, earpiece, and Bluetooth headset routing without microphone lockouts.
+• No answer and escalation [Assumed]. If the callee is unreachable or does not answer within a set time (about 30 seconds), the caller is offered an urgent message on the loop or the escalation chain. The missed call is recorded and the callee sees it linked to the patient and loop.
+• Logging [Decided]. Each call records who called whom, from which loop or quote, start time, duration, and outcome (answered, missed, declined), taken from LiveKit server events. After the call, a mandatory outcome note posts to the loop thread (FR-54). Audio is never recorded.
+• Network and TURN [Assumed]. A self-hosted LiveKit server in Docker needs reachable ports and a relay (TURN) for hospital networks that block UDP or isolate client devices, with TCP and TLS fallback. This is tested on real ward Wi-Fi and mobile data.
+• Hosting [Decided]. LiveKit runs as a container within the Docker Compose stack alongside the FastAPI backend and PostgreSQL, on either the local ward server or cloud VPS.
+• Privacy [Decided]. No phone numbers are shown. Call metadata becomes part of the audit record. Only enrolled users can call or be called.
+• Fallback to a normal phone call [Open]. Not in v1. A later option is a bridge to a phone number through a SIP gateway.
+Spike criteria [Assumed]. Does the call ring on locked budget phones (Transsion/Xiaomi) after an hour idle; does PushKit reliably trigger CallKit on iOS; connection latency upon answering; audio quality on ward Wi-Fi and 3G; traversal through ward network firewalls; and battery impact over a 12-hour shift. Ringing on Transsion and Xiaomi phones is tested together with alerts in section 8.
+
+9. Client architecture (Flutter)
+Layers [Decided]. Presentation (widgets), application (state management), domain (entities, state machine, reducers, rules, pure Dart with no Flutter imports), and data (Drift database, outbox, sync engine, API client). The domain layer is what the conformance suite tests.
+State management [Open]. Riverpod or Bloc. Pick one and keep it consistent.
+Timers [Decided]. Ages and countdowns are computed from stored timestamps, driven by one shared ticker, and only visible rows rebuild. This keeps a 40-bed board smooth on budget phones.
+Background work [Assumed]. WorkManager for periodic sync, plus sync triggered by FCM data messages. No always-on service.
+Local search [Assumed]. SQLite full-text search on device, so timeline and keyword search work offline.
+Schema changes [Decided]. Additive migrations only. Events carry schema_version. A phone ignores unknown event types without crashing. The server refuses clients below a minimum version with a clear update prompt. Migration tests run against saved old databases.
+Retention on device [Assumed]. Active and recently discharged patients only, with a purge policy.
+10. Backend architecture
+Runtime [Assumed]. Python with FastAPI and PostgreSQL, because it matches current skills and speed matters. A single compiled service for a ward hub is revisited only if the hub option is chosen. [Open]
+API surface [Assumed]. Authentication and enrollment, sync push and pull, patient and ward reference data, escalation actions, and later the ask endpoint.
+Jobs [Assumed]. Timers, escalation steps, SMS and push sending, search indexing.
+Migrations [Decided]. Versioned database migrations, always tested against a copy of production-shaped data.
+Environments [Assumed]. Development, staging with synthetic data only, production. Secrets held outside the code.
+Deployment and containerization [Decided]. Docker Compose packages PostgreSQL 16, the FastAPI backend, and the LiveKit WebRTC server into a single reproducible stack. This enables zero-cloud on-premises ward server deployments on hospital hardware (Mini PC/NUC) communicating over local ward Wi-Fi (independent of external internet outages), while adhering to Kenya Data Protection Act 2019 data residency requirements. The identical Compose configuration deploys to a Kenyan cloud VPS when central hosting is preferred. In development, Python services run directly on localhost, containerizing only for integration and staging.
+11. Ask Oravi architecture (second milestone)
+Product behavior is in PRD section 8A. This is how it is built.
+Indexing. On each event append, messages and closure reasons are indexed per patient with keyword search (including typo tolerance) and optionally embeddings. [Assumed]
+Lexicon. A ward vocabulary maps terms and abbreviations across English, Kiswahili, and mixed speech to topics, grown from failures found in testing. [Assumed]
+Time windows. Relative phrases such as last 8 hours are resolved by code against the server clock. The model never does date arithmetic. [Decided]
+Retrieval. A strict patient filter at the database level, enforced by row-level security, then candidate snippets from keyword and optional semantic search. [Decided]
+Selection. Deterministic ranking first. A model may choose and order snippets from the candidate list. It sees only that patient's candidates, with staff shown as role tokens and no patient identifiers. [Assumed]
+Assembly. The answer is built from verbatim snippets with author, role, time, and thread. Model-written text is minimal and labeled. [Decided]
+Verification. Before display, check that every quote matches the record exactly, every number in model text appears in a cited quote, and every author and time is correct. A failed check removes the line or blocks the answer. [Decided]
+Coverage and absence. The answer states what was searched, and says no record in Oravi when nothing is found. [Decided]
+Pattern counts. SQL over events: reopen counts, repeated escalations, a topic recurring across consecutive shifts. [Assumed]
+Fallback. If the model service is unavailable, the app shows the deterministic timeline and search. [Decided]
+Data in early tests [Decided]. Synthetic data only, until ethical approval and a data agreement exist. The model is called only from the server, with keys held there.
+Model and embeddings [Open]. Hosted model versus a smaller one nearer the ward, and a self-hosted embedding model if embeddings are used. Kiswahili is not a major concern for now, so its quality is checked lightly. The plug-in design is in section 11A.
+The ten examples in PRD section 8A are the first acceptance tests.
+11A. Model layer (pluggable)
+Purpose [Decided]. Use free models for testing now, and plug in whichever model a hospital requires later, without rewriting the product. Every model-dependent feature goes through one interface.
+Interface
+One internal interface [Decided]. The backend calls a single LanguageModel interface: complete(messages, optional JSON schema, timeout), returning text or structured output plus metadata (provider, model, version, token counts, latency). Adapters implement it.
+First adapter [Decided]. OpenAI-compatible chat completions. This covers Ollama, llama.cpp and vLLM servers, OpenRouter, and other providers with a compatible endpoint. Further adapters are written only for providers with their own API.
+Embeddings [Assumed]. A separate EmbeddingModel interface built the same way.
+Configuration, not code [Decided]. Provider, base URL, model name, key reference, timeouts, token limits, data class, and region live in configuration. Changing models needs no code change.
+Prompts [Decided]. Stored as versioned files, with the prompt version recorded alongside each answer.
+Adapters named [Decided]. An OpenAI-compatible adapter (covers Ollama, Groq, ChatGPT, Azure OpenAI, and a hospital's own model server) and a small Anthropic adapter for Claude.
+Where settings live [Decided]. In the backend's configuration: an environment file or the host's environment variables, one set per deployment, so configuring one hospital never touches another. Changing models means editing the values and restarting the backend. The Flutter app holds no model settings and no keys.
+Example for development:
+LLM_PROVIDER=openai_compatibleLLM_BASE_URL=http://localhost:11434/v1LLM_MODEL=llama3.1:8bLLM_API_KEY=ollama
+For Groq, only the base URL, model (llama-3.1-8b-instant), and key change. For Claude, set LLM_PROVIDER to anthropic with the model name and key.
+Data-class gate [Decided]
+Each provider configuration declares the most sensitive data it may receive: synthetic, de-identified, or real patient data. The server refuses to send a request whose data class exceeds the provider's clearance. Every new provider starts as synthetic only. Raising it is a deliberate, recorded configuration change, made only after ethical approval, a data agreement, and legal review. Identifiers are also minimized before sending, as described in section 11.
+The model's role stays narrow [Decided]
+The model chooses and orders snippet IDs from a candidate list for one patient, with an optional short labeled note. Quote verification (every quote matches the record exactly) does not depend on the model. Safety therefore does not depend on which model is plugged in.
+Starting setup [Assumed]
+Development. A small local model served through Ollama (a Llama, Qwen3, or Gemma family model sized to the laptop's memory; Llama is a sensible default because the same family can also run on Groq and on a hospital server; for example, llama3.1:8b locally, or llama-3.1-8b-instant on Groq), reached over the OpenAI-compatible endpoint on localhost, with synthetic data.
+Comparison. A free hosted tier, such as Groq or the Gemini API free tier, with synthetic data only. A fast hosted option is also good for visit demos, with local Ollama as the offline fallback. Free tiers commonly allow the provider to use inputs and outputs, limits and terms change without notice, and availability is not guaranteed, so a free hosted tier is never a product dependency.
+Later. Whatever the hospital requires: an on-premise model server, a cloud model under contract, or no model at all, in which case the deterministic timeline and search already work.
+Evaluation harness [Assumed]
+A repeatable test set that runs against any configured provider. It starts with the ten examples in PRD section 8A and adds real ward phrases from hospital visits, including Kiswahili and mixed language, nothing-found questions, and conflicting entries. Metrics: recall of relevant snippets, wrong inclusions, verification failures (target: none reach users), time to answer, cost per query, and behavior on malformed output. Switching models means re-running the harness and comparing. Moving to a hospital's chosen model, or to a smaller or quantized version of the same family, always means re-running it, even when the model family is the same. Acceptance thresholds are set after the first round.
+Audit and operations [Decided]
+Every answer records the provider, model name and version, prompt version, and verification result. Timeouts and retries are handled in the adapter. Any failure falls back to the deterministic timeline and search. Keys are held on the server only.
+Open questions [Open]
+Which model class meets the accuracy needs (English clinical text and reliable structured output first, Kiswahili checked lightly) at acceptable speed on the target hardware.
+Whether a hospital's chosen model is hosted in-country, on premises, or offshore, and what that means for data transfer.
+Retention and training terms for any hosted provider.
+12. Failure behavior
+Failure
+Behavior
+Phone offline
+Everything works locally. Outbox fills. A banner shows sync state
+App killed or phone restarted
+Outbox is durable and resumes at next open or on a wake-up
+Server unreachable
+Same as offline. Escalation timers run on the server when it returns, with late events flagged
+Push not delivered
+Acknowledgement timeout triggers SMS and the next person in the chain
+Wrong phone clock
+Ordering by server time. Clock difference flagged
+Two phones edit offline
+Rules in section 6.2. Both events are kept
+Lost or stolen phone
+Token revoked, remote wipe at next connection, no patient data in notifications
+Old app version
+Unknown events ignored. Below minimum version shows an update prompt
+Event rejected
+Returned with the reason and kept visible to the author
+Model service down
+Timeline and search only
+Database failure
+Restore from backup. Phones keep working and re-sync
+13. Operations
+Backups [Assumed]. Continuous archiving for point-in-time recovery to an off-site location, with a restore drill on a schedule.
+Monitoring [Assumed]. Sync lag, failed jobs, unacknowledged escalations, error rates, and storage, with alerts.
+Upgrades and migrations [Decided]. Staged, with rollback, and tested against the oldest supported app version.
+Keys and secrets [Decided]. Rotation plan, with no secrets in the app.
+Support [Open]. Who responds when something breaks on a ward, and how quickly, depends on the deployment option.
+14. Build plan for the first milestones (suggested)
+Step
+Content
+Why now
+M0
+Domain core: events, state machine, reducers, conformance fixtures
+Survives whatever the visits change
+M1
+Ward board, patient view, loops, threads, and the close flow on a local seeded fake ward, offline only
+The first thing nurses can react to
+M2
+Handoff session and Kardex summary
+Core nurse workflow
+M3
+Backend, sync spike, and a simple simulated doctor role for escalations
+Tests the end-to-end loop
+M4
+Ask Oravi as timeline and search, with the scripted scenario
+Second milestone, works without a model
+M5
+Model-assisted answers with verification, on synthetic data
+Only after M4 behaves well
+Spikes to run early: the chaos sync test, a background-and-alert test on a real budget phone, a Drift migration test, and a small Kiswahili retrieval test. [Assumed]
+15. Risks and open decisions
+Item
+Risk or question
+Resolve by
+Sync approach
+Own build versus PowerSync
+Spike
+Topology
+Cloud, ward hub, or hybrid
+Hospital visits and legal review
+Data residency
+Rules for health data hosting
+Counsel
+Duplicate logic
+Dart and Python rules drifting apart
+Shared conformance suite
+Phone background limits
+Alerts that do not arrive
+Real-device test and acknowledgement timeouts
+SMS cost and reliability
+Unverified
+Pilot
+Kiswahili retrieval quality
+Embedding quality unknown
+Retrieval test with real phrases
+Solo capacity
+Too much at once
+Strict milestone order
+Model provider terms
+Retention and transfer
+Review before real data
+Appendix A. Event catalog (first milestones)
+Event
+Purpose
+PatientAdmitted, PatientTransferred, PatientDischarged
+Patient presence and location
+LoopOpened, LoopAcknowledged, LoopOwnerChanged
+Loop start and ownership
+MessagePosted, MessageEdited
+CallLogged Clinical telephone contact record and mandatory outcome summary note
+Thread content
+LoopClosed, LoopClosureConfirmed, LoopReopened, LoopLinked
+Closure and recurrence
+HandoffStarted, HandoffBedAccepted, HandoffCompleted
+Shift handoff
+EscalationRaised, EscalationAcknowledged, EscalationPassedOn
+Escalation chain
+FlagRaised, FlagDismissed
+Rule-based flags
+QueryAsked
+Ask Oravi query log
+Appendix B. Change log
+Version
+Date
+Change
+0.1
+Oct 18, 2026
+First draft, aligned with PRD v0.1
