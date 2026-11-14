@@ -5,6 +5,11 @@ from .communications import CommunicationsStore, build_router
 from .inbox import build_inbox_router
 from .notebook import NotebookStore, build_notebook_router
 from .ward_transfers import build_transfer_router
+from .rituals import (
+    ClinicalRitualStore,
+    build_router as build_ritual_router,
+    dispatch_due_notifications,
+)
 import logging
 import os
 from pathlib import Path
@@ -28,6 +33,8 @@ from .call_store import CallStore
 from .staff_store import StaffStore
 from .ward_store import WardStore
 from .services.llm_service import LLMService
+from .services.elevenlabs_service import ElevenLabsTranscriptionService
+from .services.livekit_egress_service import LiveKitEgressService
 from .services.fcm_service import FcmService
 from .services.medical_issue_validation import (
     carried_forward_owner_id,
@@ -49,10 +56,13 @@ store = EventStore(db_path=database_path)
 staff_store = StaffStore(db_path=database_path)
 ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
+transcription_service = ElevenLabsTranscriptionService()
+livekit_egress_service = LiveKitEgressService()
 fcm_service = FcmService()
 call_store = CallStore(db_path=database_path)
 communications_store = CommunicationsStore(database_path)
 notebook_store = NotebookStore(database_path)
+ritual_store = ClinicalRitualStore(database_path)
 logger = logging.getLogger(__name__)
 
 
@@ -389,6 +399,7 @@ async def _medical_issue_notification_worker() -> None:
     while True:
         try:
             await asyncio.to_thread(_dispatch_due_medical_issue_notifications)
+            await asyncio.to_thread(dispatch_due_notifications, sys.modules[__name__])
             await asyncio.to_thread(call_store.cleanup)
         except Exception as error:
             logger.error(
@@ -1346,3 +1357,4 @@ app.include_router(build_router(sys.modules[__name__]))
 app.include_router(build_inbox_router(sys.modules[__name__]))
 app.include_router(build_notebook_router(sys.modules[__name__]))
 app.include_router(build_transfer_router(sys.modules[__name__]))
+app.include_router(build_ritual_router(sys.modules[__name__]))

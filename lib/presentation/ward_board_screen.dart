@@ -9,6 +9,7 @@ import 'communications/personal_inbox.dart';
 import 'notebook/personal_notebook_screen.dart';
 import 'whiteboard/ward_transfer_screen.dart';
 import '../domain/projections/projections.dart';
+import '../domain/models/clinical_ritual.dart';
 import '../data/database/database_provider.dart';
 import 'handoff_wizard_screen.dart';
 import 'lockscreen/digital_id_lockscreen.dart';
@@ -22,6 +23,10 @@ import 'providers/dashboard_issue_summary.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_search_sheet.dart';
 import 'widgets/ward_selection_dialog.dart';
+import '../data/clinical_ritual_service.dart';
+import '../data/ward_board_service.dart';
+import 'clinical_ritual_room_screen.dart';
+import 'clinical_ritual_review_screen.dart';
 
 /// Pixel-perfect implementation of the Nurse Dashboard designed to eliminate clutter:
 /// - Clean Header with hospital name, sync status, notifications, and profile avatar.
@@ -165,6 +170,8 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                       ),
                     ),
                     _buildGreetingSection(nurseName),
+                    if (_activeNavIndex == 0)
+                      _buildClinicalRitualNotifications(context),
                     const NotebookReminderBanner(),
                     const WardTransferNotice(),
                     const SizedBox(height: 14),
@@ -185,19 +192,23 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                         summary.closedIssues,
                       ),
                       const SizedBox(height: 14),
-                      _buildFilterRow(
-                        totalPatients,
-                        summary.pendingPatients.length,
-                        summary.completedPatients.length,
-                      ),
-                      const SizedBox(height: 14),
-                      _buildPatientListSection(
-                        filteredPatients,
-                        doctorMap,
-                        hasAnyPatients: myPatients.isNotEmpty,
-                      ),
-                      const SizedBox(height: 18),
-                      _buildShiftHandoffBanner(context),
+                      if (_activeNavIndex == 0)
+                        _buildShiftHandoffBanner(context)
+                      else ...[
+                        _buildFilterRow(
+                          totalPatients,
+                          summary.pendingPatients.length,
+                          summary.completedPatients.length,
+                        ),
+                        const SizedBox(height: 14),
+                        _buildPatientListSection(
+                          filteredPatients,
+                          doctorMap,
+                          hasAnyPatients: myPatients.isNotEmpty,
+                        ),
+                        const SizedBox(height: 18),
+                        _buildShiftHandoffBanner(context),
+                      ],
                       const SizedBox(height: 20),
                     ],
                   ],
@@ -229,6 +240,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         ),
       );
     }
+
     final issues = (state.asData?.value ?? const [])
         .where((issue) => issue['is_open'] == true)
         .toList();
@@ -263,6 +275,8 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   }
 
   Future<void> _openCarriedForwardIssue(Map<String, dynamic> issue) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     try {
       final patientId = issue['patient_id'] as String;
       final loopId = issue['loop_id'] as String;
@@ -277,6 +291,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           'This Medical Issue is no longer assigned to your account.',
         );
       }
+
       final rawEvents = carriedIssue['events'];
       if (rawEvents is! List) {
         throw const FormatException(
@@ -305,7 +320,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         );
       }
       if (!mounted) return;
-      Navigator.of(context).push(
+      navigator.push(
         MaterialPageRoute(
           builder: (_) => PatientDetailScreen(
             patient: PatientStateProjection(
@@ -325,7 +340,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Could not open the assigned issue: $error')),
       );
     }
@@ -418,6 +433,83 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           ),
           if (action != null) ...[const SizedBox(height: 12), action],
         ],
+      ),
+    );
+  }
+
+  Widget _buildClinicalRitualNotifications(BuildContext context) {
+    final service = ClinicalRitualService(
+      WardBoardService(getAccessToken: () => ref.read(authAccessTokenProvider)),
+    );
+    return FutureBuilder<List<ClinicalRitual>>(
+      future: service.list(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final rituals = snapshot.data!.take(3).toList();
+        return Card(
+          color: const Color(0xFF123047),
+          child: Column(
+            children: [
+              const ListTile(
+                leading: Icon(
+                  Icons.groups_2_outlined,
+                  color: Color(0xFF67E8F9),
+                ),
+                title: Text(
+                  'Clinical Rituals',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  'Recent and scheduled team rituals',
+                  style: TextStyle(color: Color(0xFFBAE6FD)),
+                ),
+              ),
+              ...rituals.map(
+                (ritual) => ListTile(
+                  dense: true,
+                  title: Text(
+                    ritual.title,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Text(
+                    '${ritual.ritualType.toUpperCase()} · ${ritual.status}',
+                    style: const TextStyle(color: Color(0xFFBAE6FD)),
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: Color(0xFFBAE6FD),
+                  ),
+                  onTap: () => _openRitual(context, ritual),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openRitual(
+    BuildContext context,
+    ClinicalRitual ritual,
+  ) async {
+    if (ritual.status == 'requested' ||
+        ritual.recordingStatus == 'not_started') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualRoomScreen(ritualId: ritual.ritualId),
+        ),
+      );
+    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
       ),
     );
   }

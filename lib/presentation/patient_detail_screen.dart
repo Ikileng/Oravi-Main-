@@ -10,6 +10,9 @@ import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
 import 'theme/clinical_theme.dart';
 import 'call_screen.dart';
+import '../data/clinical_ritual_service.dart';
+import 'clinical_ritual_review_screen.dart';
+import 'clinical_ritual_room_screen.dart';
 import 'communications/personal_inbox.dart';
 import 'widgets/close_loop_dialog.dart';
 import 'widgets/create_loop_dialog.dart';
@@ -295,6 +298,159 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
         ),
       );
     }
+
+  }
+
+  Future<void> _requestClinicalRitual() async {
+    final titleController = TextEditingController();
+    var ritualType = 'huddle';
+    var scheduled = false;
+    DateTime? scheduledFor;
+    try {
+      final request = await showDialog<(String, String, DateTime?)>(
+          context: context,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('Request Clinical Ritual'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: ritualType,
+                    decoration: const InputDecoration(labelText: 'Ritual type'),
+                    items: const [
+                      DropdownMenuItem(value: 'brief', child: Text('Brief')),
+                      DropdownMenuItem(value: 'huddle', child: Text('Huddle')),
+                      DropdownMenuItem(
+                        value: 'debrief',
+                        child: Text('Debrief'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() {
+                          ritualType = value;
+                          if (value == 'huddle') scheduled = false;
+                        });
+                      }
+                    },
+                  ),
+                  if (ritualType != 'huddle') ...[
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Schedule for later'),
+                      value: scheduled,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          scheduled = value;
+                          if (!value) scheduledFor = null;
+                        });
+                      },
+                    ),
+                    if (scheduled)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          scheduledFor == null
+                              ? 'Choose date and time'
+                              : _formatTimestamp(scheduledFor!),
+                        ),
+                        leading: const Icon(Icons.calendar_today),
+                        onTap: () async {
+                          final date = await showDatePicker(
+                            context: dialogContext,
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 365),
+                            ),
+                            initialDate: scheduledFor ?? DateTime.now(),
+                          );
+                          if (date == null || !dialogContext.mounted) return;
+                          final time = await showTimePicker(
+                            context: dialogContext,
+                            initialTime: scheduledFor == null
+                                ? TimeOfDay.now()
+                                : TimeOfDay.fromDateTime(scheduledFor!),
+                          );
+                          if (time == null) return;
+                          setDialogState(() {
+                            scheduledFor = DateTime(
+                              date.year,
+                              date.month,
+                              date.day,
+                              time.hour,
+                              time.minute,
+                            );
+                          });
+                        },
+                      ),
+                  ],
+                  TextField(
+                    controller: titleController,
+                    autofocus: true,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      hintText: 'e.g. Bed 12 post-op bleeding',
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final title = titleController.text.trim();
+                    if (title.length >= 3 &&
+                        (!scheduled ||
+                            (scheduledFor != null &&
+                                scheduledFor!.isAfter(DateTime.now())))) {
+                      Navigator.pop(
+                        dialogContext,
+                        (ritualType, title, scheduledFor),
+                      );
+                    }
+                  },
+                  child: Text(scheduled ? 'Schedule' : 'Create'),
+                ),
+              ],
+            ),
+          ),
+        );
+      if (request == null || !mounted) return;
+      final api = WardBoardService(
+        getAccessToken: () => ref.read(authAccessTokenProvider),
+      );
+      final ritual = await ClinicalRitualService(api).create(
+        ritualType: request.$1,
+        title: request.$2,
+        patientId: widget.patient.patientId,
+        scheduledFor: request.$3?.toUtc().toIso8601String(),
+      );
+      if (!mounted) return;
+      if (request.$3 != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clinical Ritual scheduled.')),
+        );
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualRoomScreen(ritualId: ritual.ritualId),
+        ),
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
+        ),
+      );
+    } finally {
+      titleController.dispose();
+    }
   }
 
   String _formatTimestamp(DateTime dt) {
@@ -422,6 +578,14 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
               ),
           ],
         ),
+        actions: [
+          if (widget.issueOnlyLoopIds == null)
+            IconButton(
+              tooltip: 'Request Clinical Ritual',
+              icon: const Icon(Icons.groups_2_outlined),
+              onPressed: _requestClinicalRitual,
+            ),
+        ],
       ),
       body: Column(
         children: [
