@@ -268,6 +268,10 @@ void main() {
   testWidgets('Tapping a bed row opens PatientDetailScreen with loops', (
     WidgetTester tester,
   ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final container = await _pumpWardBoard(tester);
 
     // Open Bed 1 using the visible patient identity.
@@ -293,6 +297,8 @@ void main() {
     );
 
     await tester.ensureVisible(find.text('Reply').first);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -120));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Reply').first);
     await tester.pumpAndSettle();
     final replyField = find.byWidgetPredicate(
@@ -315,6 +321,41 @@ void main() {
     expect(reply.mentionedStaffIds, [SeededWardData.testNurseId]);
     await tester.pumpWidget(const SizedBox.shrink());
     container.invalidate(syncEngineProvider);
+  });
+
+  testWidgets('Raise Medical Issue dialog fits a compact phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final container = await _pumpWardBoard(tester);
+
+    await tester.tap(find.text('Patients').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('01'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Raise medical issue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Raise Medical Issue'), findsNWidgets(2));
+    final dialog = find.byType(AlertDialog);
+    expect(
+      find.descendant(of: dialog, matching: find.text('ROUTINE')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.text('URGENT')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.text('CRITICAL')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    container.dispose();
   });
 
   testWidgets(

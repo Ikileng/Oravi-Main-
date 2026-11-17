@@ -1242,7 +1242,10 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   // 4. FILTER PILLS & SEARCH / FILTER ROW
   // ==========================================
   Widget _buildFilterRow(int allCount, int pendingCount, int completedCount) {
-    return Row(
+    return Wrap(
+      spacing: 6,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         // All Filter Pill
         _buildFilterPill(
@@ -1250,22 +1253,18 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           isSelected: _activeFilterIndex == 0,
           onTap: () => setState(() => _activeFilterIndex = 0),
         ),
-        const SizedBox(width: 6),
         // Pending Filter Pill
         _buildFilterPill(
           label: 'Pending ($pendingCount)',
           isSelected: _activeFilterIndex == 1,
           onTap: () => setState(() => _activeFilterIndex = 1),
         ),
-        const SizedBox(width: 6),
         // Completed Filter Pill
         _buildFilterPill(
           label: 'Completed ($completedCount)',
           isSelected: _activeFilterIndex == 2,
           onTap: () => setState(() => _activeFilterIndex = 2),
         ),
-
-        const Spacer(),
 
         // Search Button
         InkWell(
@@ -1288,7 +1287,6 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
             child: const Icon(Icons.search, size: 16, color: Color(0xFF94A3B8)),
           ),
         ),
-        const SizedBox(width: 6),
 
         // Filter / Sort Options Button
         InkWell(
@@ -1590,15 +1588,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                     children: [
                       Row(
                         children: [
-                          Text(
-                            patient.patientInitials,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                          Flexible(
+                            child: Text(
+                              patient.patientInitials,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 4),
                           Text(
                             '${patient.age}y / ${patient.sex}',
                             style: const TextStyle(
@@ -1629,12 +1631,16 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                             color: Color(0xFF38BDF8),
                           ),
                           const SizedBox(width: 3),
-                          Text(
-                            doctor,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF38BDF8),
-                              fontWeight: FontWeight.w600,
+                          Expanded(
+                            child: Text(
+                              doctor,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF38BDF8),
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
