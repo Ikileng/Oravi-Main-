@@ -180,9 +180,11 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
             children: [
               Icon(Icons.add_circle_outline, color: ClinicalTheme.routineTeal),
               SizedBox(width: 8),
-              Text(
-                'Raise Medical Issue',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  'Raise Medical Issue',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
@@ -296,29 +298,28 @@ class _CreateLoopDialogState extends State<CreateLoopDialog> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Row(
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
                   children: LoopUrgency.values.map((urg) {
                     final isSel = _urgency == urg;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: ChoiceChip(
-                        label: Text(
-                          urg.wireName.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isSel
-                                ? Colors.white
-                                : ClinicalTheme.urgencyColor(urg),
-                          ),
+                    return ChoiceChip(
+                      label: Text(
+                        urg.wireName.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isSel
+                              ? Colors.white
+                              : ClinicalTheme.urgencyColor(urg),
                         ),
-                        selected: isSel,
-                        selectedColor: ClinicalTheme.urgencyColor(urg),
-                        backgroundColor: ClinicalTheme.surfaceElevated,
-                        onSelected: (val) {
-                          if (val) setState(() => _urgency = urg);
-                        },
                       ),
+                      selected: isSel,
+                      selectedColor: ClinicalTheme.urgencyColor(urg),
+                      backgroundColor: ClinicalTheme.surfaceElevated,
+                      onSelected: (val) {
+                        if (val) setState(() => _urgency = urg);
+                      },
                     );
                   }).toList(),
                 ),
