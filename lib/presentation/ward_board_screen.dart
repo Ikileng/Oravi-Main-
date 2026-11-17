@@ -155,6 +155,22 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       return true;
     }).toList();
 
+    final homeIssues =
+        <({PatientStateProjection patient, LoopStateProjection issue})>[
+          for (final patient in myPatients)
+            for (final issue in ref.watch(
+              patientLoopsProvider(patient.patientId),
+            ))
+              if (issue.isOpen) (patient: patient, issue: issue),
+        ]..sort((left, right) {
+          final urgencyOrder = _urgencyRank(
+            right.issue.urgency,
+          ).compareTo(_urgencyRank(left.issue.urgency));
+          if (urgencyOrder != 0) return urgencyOrder;
+          return right.issue.updatedAt.compareTo(left.issue.updatedAt);
+        });
+    final pendingPersonalTasks = ref.watch(pendingPersonalTasksProvider);
+
     final wardDestination = SafeArea(
       child: Column(
         children: [
@@ -170,21 +186,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      icon: const InboxBadge(),
-                      label: const Text('Messages & calls'),
-                      onPressed: () => setState(() => _activeNavIndex = 2),
-                    ),
-                  ),
                   if (_activeNavIndex == 0) ...[
-                    _buildGreetingSection(nurseName),
-                    _buildClinicalRitualNotifications(context),
-                    const NotebookReminderBanner(),
-                    const WardTransferNotice(),
-                    const SizedBox(height: 14),
-                    _buildCarriedForwardIssues(carriedIssuesState),
+                    _buildGreetingSection(nurseName, currentWard.name),
+                    const SizedBox(height: 18),
+                    _buildNeedsAttention(homeIssues),
+                    const SizedBox(height: 18),
                   ] else
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 16),
@@ -210,16 +216,26 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                   else ...[
                     if (_activeNavIndex == 0 && totalPatients == 0)
                       _buildHomeEmptyState(),
-                    if (_activeNavIndex == 0 && totalPatients > 0)
+                    if (_activeNavIndex == 0) ...[
                       _buildAtAGlanceCards(
                         totalPatients,
                         summary.openIssues,
-                        summary.closedIssues,
+                        pendingPersonalTasks,
                       ),
-                    const SizedBox(height: 14),
-                    if (_activeNavIndex == 0 && totalPatients > 0)
-                      _buildShiftHandoffBanner(context)
-                    else if (_activeNavIndex == 1) ...[
+                      const SizedBox(height: 20),
+                      _sectionHeading(
+                        'Shift workflow',
+                        'Prepare, coordinate, and hand over safely',
+                      ),
+                      const SizedBox(height: 10),
+                      _buildShiftHandoffBanner(context),
+                      const SizedBox(height: 8),
+                      const WardTransferNotice(),
+                      const SizedBox(height: 18),
+                      _buildClinicalRitualNotifications(context),
+                      const NotebookReminderBanner(),
+                      _buildCarriedForwardIssues(carriedIssuesState),
+                    ] else if (_activeNavIndex == 1) ...[
                       if (totalPatients > 0)
                         _buildFilterRow(
                           totalPatients,
@@ -314,7 +330,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                 leading: const Icon(Icons.assignment_late_outlined),
                 title: Text(issue['title'] as String? ?? 'Medical Issue'),
                 subtitle: Text(
-                  'Patient ${issue['patient_id']} · ${issue['urgency']} urgency · issue thread access only',
+                  'Assigned issue · ${issue['urgency']} urgency · issue thread access only',
                 ),
                 onTap: () => _openCarriedForwardIssue(issue),
               ),
@@ -689,16 +705,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                     IconButton(
                       tooltip: 'Sync now',
                       visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 25,
-                        height: 22,
-                      ),
-                      padding: EdgeInsets.zero,
                       onPressed: () =>
                           unawaited(ref.read(syncEngineProvider).syncAll()),
                       icon: const Icon(
                         Icons.sync,
-                        size: 14,
+                        size: 17,
                         color: Color(0xFF94A3B8),
                       ),
                     ),
@@ -707,6 +718,13 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
               ],
             ),
           ),
+
+          IconButton(
+            tooltip: 'Open inbox',
+            onPressed: () => setState(() => _activeNavIndex = 2),
+            icon: const InboxBadge(),
+          ),
+          const SizedBox(width: 2),
 
           // Profile Avatar with Quick Lock Station
           InkWell(
@@ -758,7 +776,13 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   // ==========================================
   // 2. GREETING & SHIFT SECTION
   // ==========================================
-  Widget _buildGreetingSection(String nurseName) {
+  int _urgencyRank(LoopUrgency urgency) => switch (urgency) {
+    LoopUrgency.critical => 3,
+    LoopUrgency.urgent => 2,
+    LoopUrgency.routine => 1,
+  };
+
+  Widget _buildGreetingSection(String nurseName, String wardName) {
     final now = DateTime.now();
     final shift = ref.watch(selectedShiftTypeProvider);
     final hasWard = ref.watch(selectedWardProvider).wardId.isNotEmpty;
@@ -766,271 +790,453 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${clinicalGreeting(now)}, $nurseName',
+          MaterialLocalizations.of(context).formatFullDate(now).toUpperCase(),
           style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: Color(0xFF64748B),
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.9,
           ),
         ),
-        const SizedBox(height: 3),
-        const Text(
-          "You've got this. Here's your shift overview.",
-          style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+        const SizedBox(height: 5),
+        Text(
+          '${clinicalGreeting(now)}, $nurseName',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 22,
+            height: 1.15,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: -0.4,
+          ),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            // Date Pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10192E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF101D33),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF1D3552)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  shift == 'night'
+                      ? Icons.nights_stay_outlined
+                      : Icons.medical_services_outlined,
+                  color: const Color(0xFF38BDF8),
+                  size: 20,
+                ),
               ),
-              child: Row(
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ON SHIFT',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${clinicalShiftLabel(shift, hasWard: hasWard)} · ${wardName.isEmpty ? 'Ward not selected' : wardName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.calendar_month_outlined,
-                    size: 13,
-                    color: Color(0xFF38BDF8),
-                  ),
-                  SizedBox(width: 6),
+                  Icon(Icons.circle, size: 7, color: Color(0xFF4ADE80)),
+                  SizedBox(width: 5),
                   Text(
-                    MaterialLocalizations.of(context).formatFullDate(now),
+                    'Active',
                     style: TextStyle(
+                      color: Color(0xFF86EFAC),
                       fontSize: 11,
-                      color: Color(0xFFCBD5E1),
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNeedsAttention(
+    List<({PatientStateProjection patient, LoopStateProjection issue})> items,
+  ) {
+    final top = items.firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Needs attention',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-
-            // Shift Pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10192E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
+            if (items.length > 1)
+              TextButton(
+                onPressed: () => setState(() {
+                  _activeNavIndex = 1;
+                  _activeFilterIndex = 1;
+                }),
+                child: Text('View all (${items.length})'),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    shift == 'night'
-                        ? Icons.nights_stay_outlined
-                        : Icons.wb_sunny_outlined,
-                    size: 13,
-                    color: Color(0xFFFBBF24),
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    clinicalShiftLabel(shift, hasWard: hasWard),
+          ],
+        ),
+        const SizedBox(height: 9),
+        if (top == null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D2122),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFF10B981).withValues(alpha: 0.35),
+              ),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: Color(0xFF34D399)),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'No open clinical issues need your attention.',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFCBD5E1),
+                      color: Color(0xFFD1FAE5),
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                ),
+              ],
+            ),
+          )
+        else
+          _attentionCard(top.patient, top.issue),
+      ],
+    );
+  }
+
+  Widget _attentionCard(
+    PatientStateProjection patient,
+    LoopStateProjection issue,
+  ) {
+    final critical = issue.urgency == LoopUrgency.critical;
+    final accent = critical
+        ? const Color(0xFFEF4444)
+        : issue.urgency == LoopUrgency.urgent
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF38BDF8);
+    final label = critical
+        ? 'CRITICAL'
+        : issue.urgency == LoopUrgency.urgent
+        ? 'URGENT'
+        : 'OPEN';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: critical ? const Color(0xFF231318) : const Color(0xFF211C14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PatientDetailScreen(
+                patient: patient,
+                initialExpandedLoopId: issue.loopId,
+              ),
+            ),
+          ),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(
+                        critical
+                            ? Icons.warning_amber_rounded
+                            : Icons.monitor_heart_outlined,
+                        color: accent,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${patient.bedNumber} · ${patient.patientInitials}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            patient.shortAdmittingNote,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.13),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  issue.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.25,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (issue.description.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    issue.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
                 ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${issue.currentOwnerRole.replaceAll('_', ' ')} · Updated ${_relativeTime(issue.updatedAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'View issue',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Icon(Icons.chevron_right, color: accent, size: 18),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _relativeTime(DateTime value) {
+    final difference = DateTime.now().difference(value.toLocal());
+    if (difference.inMinutes < 1) return 'now';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
+  }
+
+  Widget _sectionHeading(String title, String subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        subtitle,
+        style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+      ),
+    ],
+  );
+
+  Widget _buildAtAGlanceCards(
+    int patientCount,
+    int openIssues,
+    int pendingTasks,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _sectionHeading('At a glance', 'Your current clinical workload'),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.people_outline_rounded,
+              value: patientCount,
+              label: 'Patients',
+              color: const Color(0xFF38BDF8),
+              onTap: () => setState(() => _activeNavIndex = 1),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.error_outline_rounded,
+              value: openIssues,
+              label: 'Open issues',
+              color: const Color(0xFFF59E0B),
+              onTap: () => setState(() {
+                _activeNavIndex = 1;
+                _activeFilterIndex = 1;
+              }),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.checklist_rounded,
+              value: pendingTasks,
+              label: 'Tasks',
+              color: const Color(0xFF34D399),
+              onTap: () => setState(() => _activeNavIndex = 3),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _summaryCard({
+    required IconData icon,
+    required int value,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) => Material(
+    color: const Color(0xFF10192E),
+    borderRadius: BorderRadius.circular(13),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      child: Container(
+        height: 96,
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 19),
+            const Spacer(),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 21,
+                height: 1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
         ),
-      ],
-    );
-  }
-
-  // ==========================================
-  // 3. AT A GLANCE KPI CARDS
-  // ==========================================
-  Widget _buildAtAGlanceCards(
-    int patientCount,
-    int pendingTasks,
-    int completedToday,
-  ) {
-    return Row(
-      children: [
-        // My Patients
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0E1A33),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFF1E3A8A).withValues(alpha: 0.6),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.people,
-                      size: 16,
-                      color: Color(0xFF38BDF8),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$patientCount',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'My Patients',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF38BDF8),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFF38BDF8),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Pending Tasks
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF191E2A),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFFEAB308).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: Color(0xFFF59E0B),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$pendingTasks',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'Open issues',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFFF59E0B),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFFF59E0B),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Completed Today
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D2122),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFF10B981).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      size: 16,
-                      color: Color(0xFF10B981),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$completedToday',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'Closed issues',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF34D399),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFF34D399),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+      ),
+    ),
+  );
 
   // ==========================================
   // 4. FILTER PILLS & SEARCH / FILTER ROW
