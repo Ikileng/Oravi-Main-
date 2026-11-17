@@ -42,7 +42,12 @@ class LLMService:
         self.api_key = os.getenv("LLM_API_KEY", "ollama")
         self.model_name = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b")
 
-    def _call_openai_compatible_api(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    def _call_openai_compatible_api(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_tokens: int = 120,
+    ) -> Optional[Dict[str, Any]]:
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -52,7 +57,7 @@ class LLMService:
             "model": self.model_name,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 120,
+            "max_tokens": max_tokens,
         }
         if tools:
             payload["tools"] = tools
@@ -154,4 +159,69 @@ class LLMService:
             "verification_passed": verification.is_valid,
             "model_provider": self.provider,
             "model_name": self.model_name,
+        }
+
+    def summarize_ritual(
+        self, *, ritual_type: str, title: str, transcript: str
+    ) -> Dict[str, Any]:
+        response = self._call_openai_compatible_api(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an Oravi clinical documentation assistant. "
+                        "Create a concise draft summary from the supplied transcript. "
+                        "Do not diagnose, prescribe, infer, or invent facts. "
+                        "Use 'Not stated' when information is absent. "
+                        "Return JSON only with these string-array fields: "
+                        "situation, decisions, actions, owners, follow_up, unresolved_questions."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Ritual type: {ritual_type}\nTitle: {title}\n"
+                        f"Transcript:\n{transcript}"
+                    ),
+                },
+            ],
+            max_tokens=800,
+        )
+        if not response or not response.get("choices"):
+            raise RuntimeError("The configured LLM did not return a ritual draft.")
+        content = response["choices"][0]["message"].get("content", "").strip()
+        if content.startswith("```"):
+            content = content.strip("`")
+            if content.startswith("json"):
+                content = content[4:].lstrip()
+        try:
+            summary = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                "The configured LLM returned an invalid ritual draft."
+            ) from error
+        if not isinstance(summary, dict):
+            raise RuntimeError("The configured LLM returned an invalid ritual draft.")
+        fields = (
+            "situation",
+            "decisions",
+            "actions",
+            "owners",
+            "follow_up",
+            "unresolved_questions",
+        )
+        if any(
+            field not in summary
+            or not isinstance(summary[field], list)
+            or not all(isinstance(item, str) for item in summary[field])
+            for field in fields
+        ):
+            raise RuntimeError("The configured LLM returned an incomplete ritual draft.")
+        return {
+            "ritual_type": ritual_type,
+            "title": title,
+            "sections": {field: summary[field] for field in fields},
+            "model_provider": self.provider,
+            "model_name": self.model_name,
+            "draft_status": "ai_generated",
         }

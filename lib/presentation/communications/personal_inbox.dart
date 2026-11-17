@@ -45,6 +45,7 @@ Future<void> markInboxRead(WidgetRef ref, List<String> ids) async {
         );
   }
   ref.invalidate(personalInboxProvider);
+  ref.invalidate(staffInboxProvider);
 }
 
 Future<void> markLoadedIssueRead(
@@ -245,7 +246,16 @@ class ReceivedInbox extends ConsumerWidget {
           title: Text('Could not load received activity. Please retry.'),
         ),
         data: (inbox) {
-          final items = (inbox['items'] as List).cast<Map<String, dynamic>>();
+          final items = (inbox['items'] as List).cast<Map<String, dynamic>>()
+            ..sort((left, right) {
+              final unreadOrder = (right['unread'] == true ? 1 : 0).compareTo(
+                left['unread'] == true ? 1 : 0,
+              );
+              if (unreadOrder != 0) return unreadOrder;
+              return (right['created_at'] as String? ?? '').compareTo(
+                left['created_at'] as String? ?? '',
+              );
+            });
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

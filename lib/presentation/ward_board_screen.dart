@@ -9,7 +9,9 @@ import 'communications/personal_inbox.dart';
 import 'notebook/personal_notebook_screen.dart';
 import 'whiteboard/ward_transfer_screen.dart';
 import '../domain/projections/projections.dart';
+import '../domain/models/clinical_ritual.dart';
 import '../data/database/database_provider.dart';
+import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'lockscreen/digital_id_lockscreen.dart';
 import 'patient_detail_screen.dart';
@@ -22,6 +24,21 @@ import 'providers/dashboard_issue_summary.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_search_sheet.dart';
 import 'widgets/ward_selection_dialog.dart';
+import '../data/clinical_ritual_service.dart';
+import '../data/ward_board_service.dart';
+import 'clinical_ritual_room_screen.dart';
+import 'clinical_ritual_review_screen.dart';
+
+final clinicalRitualAlertsProvider =
+    FutureProvider.autoDispose<List<ClinicalRitual>>((ref) async {
+      final token = ref.watch(authAccessTokenProvider);
+      if (token == null) return const [];
+      return ClinicalRitualService(
+        WardBoardService(
+          getAccessToken: () => ref.read(authAccessTokenProvider),
+        ),
+      ).activeAlerts();
+    });
 
 /// Pixel-perfect implementation of the Nurse Dashboard designed to eliminate clutter:
 /// - Clean Header with hospital name, sync status, notifications, and profile avatar.
@@ -80,6 +97,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   @override
   Widget build(BuildContext context) {
     final authStaff = ref.watch(authenticatedStaffProvider);
+    final offlineSession = ref.watch(offlineSessionProvider);
     if (authStaff?.role == 'dev_admin') {
       return const DevAdminDashboardScreen();
     }
@@ -140,10 +158,12 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           children: [
             // Top Clean Header
             _buildCleanHeader(context, currentWard.name, authStaff),
+            if (offlineSession) _buildOfflineSessionBanner(),
 
             // Scrollable Dashboard Body
             Expanded(
               child: SingleChildScrollView(
+                key: PageStorageKey('clinician-tab-$_activeNavIndex'),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14.0,
                   vertical: 8.0,
@@ -164,40 +184,62 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                         ),
                       ),
                     ),
-                    _buildGreetingSection(nurseName),
-                    const NotebookReminderBanner(),
-                    const WardTransferNotice(),
-                    const SizedBox(height: 14),
-                    if (authStaff != null)
+                    if (_activeNavIndex == 0) ...[
+                      _buildGreetingSection(nurseName),
+                      _buildClinicalRitualNotifications(context),
+                      const NotebookReminderBanner(),
+                      const WardTransferNotice(),
+                      const SizedBox(height: 14),
                       _buildCarriedForwardIssues(carriedIssuesState),
-                    if (currentWard.wardId.isEmpty)
-                      _buildNoWardPanel(authStaff)
-                    else if (ref.watch(wardContextNeedsConfirmationProvider))
+                    ] else
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'My Patients',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    if (currentWard.wardId.isEmpty) ...[
+                      if (_activeNavIndex == 0) _buildHomeEmptyState(),
+                      _buildNoWardPanel(authStaff),
+                    ] else if (authStaff?.isChargeNurse == true &&
+                        ref.watch(wardContextNeedsConfirmationProvider))
                       _buildWardConfirmationPanel(currentWard.name)
                     else if (boardState.isLoading)
                       const Center(child: CircularProgressIndicator())
                     else if (boardState.hasError)
                       _buildBoardLoadError(boardState.error)
                     else ...[
-                      _buildAtAGlanceCards(
-                        totalPatients,
-                        summary.openIssues,
-                        summary.closedIssues,
-                      ),
+                      if (_activeNavIndex == 0 && totalPatients == 0)
+                        _buildHomeEmptyState(),
+                      if (_activeNavIndex == 0 && totalPatients > 0)
+                        _buildAtAGlanceCards(
+                          totalPatients,
+                          summary.openIssues,
+                          summary.closedIssues,
+                        ),
                       const SizedBox(height: 14),
-                      _buildFilterRow(
-                        totalPatients,
-                        summary.pendingPatients.length,
-                        summary.completedPatients.length,
-                      ),
-                      const SizedBox(height: 14),
-                      _buildPatientListSection(
-                        filteredPatients,
-                        doctorMap,
-                        hasAnyPatients: myPatients.isNotEmpty,
-                      ),
-                      const SizedBox(height: 18),
-                      _buildShiftHandoffBanner(context),
+                      if (_activeNavIndex == 0 && totalPatients > 0)
+                        _buildShiftHandoffBanner(context)
+                      else if (_activeNavIndex == 1) ...[
+                        if (totalPatients > 0)
+                          _buildFilterRow(
+                            totalPatients,
+                            summary.pendingPatients.length,
+                            summary.completedPatients.length,
+                          ),
+                        const SizedBox(height: 14),
+                        _buildPatientListSection(
+                          filteredPatients,
+                          doctorMap,
+                          hasAnyPatients: myPatients.isNotEmpty,
+                        ),
+                        const SizedBox(height: 18),
+                      ],
                       const SizedBox(height: 20),
                     ],
                   ],
@@ -212,6 +254,24 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       ),
     );
   }
+
+  Widget _buildOfflineSessionBanner() => Container(
+    width: double.infinity,
+    color: const Color(0xFF78350F),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    child: const Row(
+      children: [
+        Icon(Icons.cloud_off, color: Color(0xFFFDE68A), size: 19),
+        SizedBox(width: 9),
+        Expanded(
+          child: Text(
+            'Offline access · showing saved data. Calls, rituals, and server actions need a connection.',
+            style: TextStyle(color: Color(0xFFFFFBEB), fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _buildCarriedForwardIssues(
     AsyncValue<List<Map<String, dynamic>>> state,
@@ -229,6 +289,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         ),
       );
     }
+
     final issues = (state.asData?.value ?? const [])
         .where((issue) => issue['is_open'] == true)
         .toList();
@@ -263,6 +324,8 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   }
 
   Future<void> _openCarriedForwardIssue(Map<String, dynamic> issue) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     try {
       final patientId = issue['patient_id'] as String;
       final loopId = issue['loop_id'] as String;
@@ -277,6 +340,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           'This Medical Issue is no longer assigned to your account.',
         );
       }
+
       final rawEvents = carriedIssue['events'];
       if (rawEvents is! List) {
         throw const FormatException(
@@ -305,7 +369,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         );
       }
       if (!mounted) return;
-      Navigator.of(context).push(
+      navigator.push(
         MaterialPageRoute(
           builder: (_) => PatientDetailScreen(
             patient: PatientStateProjection(
@@ -325,16 +389,29 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Could not open the assigned issue: $error')),
       );
     }
   }
 
+  Widget _buildHomeEmptyState() => _contextPanel(
+    title: 'Nothing on your Home page yet',
+    message:
+        'Your patient overview will appear here when patients are assigned. '
+        'Reminders and team updates appear above when available.',
+    action: TextButton(
+      onPressed: () => setState(() => _activeNavIndex = 1),
+      child: const Text('View my patients'),
+    ),
+  );
+
   Widget _buildNoWardPanel(StaffProfile? staff) {
     final isChargeNurse = staff?.isChargeNurse ?? false;
     return _contextPanel(
-      title: staff?.isDoctorOnCall == true
+      title: _activeNavIndex == 1
+          ? 'You have no patients'
+          : staff?.isDoctorOnCall == true
           ? 'No patients assigned to you'
           : 'No ward assigned for this shift',
       message: isChargeNurse
@@ -422,6 +499,104 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     );
   }
 
+  Widget _buildClinicalRitualNotifications(BuildContext context) {
+    return ref
+        .watch(clinicalRitualAlertsProvider)
+        .when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
+          data: (alerts) {
+            if (alerts.isEmpty) return const SizedBox.shrink();
+            final rituals = alerts.take(3).toList();
+            return Card(
+              color: const Color(0xFF123047),
+              child: Column(
+                children: [
+                  const ListTile(
+                    leading: Icon(
+                      Icons.groups_2_outlined,
+                      color: Color(0xFF67E8F9),
+                    ),
+                    title: Text(
+                      'Clinical Rituals',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Invitations, active rituals, and summaries to review',
+                      style: TextStyle(color: Color(0xFFBAE6FD)),
+                    ),
+                  ),
+                  ...rituals.map(
+                    (ritual) => ListTile(
+                      dense: true,
+                      title: Text(
+                        ritual.title,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        ritual.alertType == 'review'
+                            ? 'Summary ready for your review'
+                            : ritual.alertType == 'invitation'
+                            ? 'Invitation to join · ${ritual.ritualType.toUpperCase()}'
+                            : '${ritual.ritualType.toUpperCase()} · ${ritual.status}',
+                        style: const TextStyle(color: Color(0xFFBAE6FD)),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: Color(0xFFBAE6FD),
+                      ),
+                      onTap: () => _openRitual(context, ritual),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+  }
+
+  Future<void> _openRitual(BuildContext context, ClinicalRitual ritual) async {
+    final scheduledFor = DateTime.tryParse(ritual.scheduledFor ?? '');
+    if (scheduledFor != null && scheduledFor.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This ritual is scheduled for ${scheduledFor.toLocal()}',
+          ),
+        ),
+      );
+      return;
+    }
+    if (ritual.alertType == 'review' ||
+        ritual.status == 'draft_ready' ||
+        ritual.status == 'approved' ||
+        ritual.recordingStatus == 'transcribed') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
+        ),
+      );
+      ref.invalidate(clinicalRitualAlertsProvider);
+      return;
+    }
+    if (ritual.status == 'requested' ||
+        ritual.status == 'in_progress' ||
+        ritual.recordingStatus == 'not_started') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualRoomScreen(
+            ritualId: ritual.ritualId,
+            invitation: ritual.participantStatus == 'invited',
+          ),
+        ),
+      );
+      ref.invalidate(clinicalRitualAlertsProvider);
+    }
+  }
+
   // ==========================================
   // 1. CLEAN HEADER
   // ==========================================
@@ -430,6 +605,26 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     String wardName,
     StaffProfile? authStaff,
   ) {
+    final syncStatus = ref.watch(syncStatusProvider).asData?.value;
+    final isOffline =
+        syncStatus?.networkAvailable == false ||
+        syncStatus?.state == SyncState.offline;
+    final syncLabel = syncStatus?.networkAvailable == null
+        ? 'Checking connection'
+        : syncStatus?.state == SyncState.syncing
+        ? 'Syncing'
+        : isOffline
+        ? 'Offline'
+        : syncStatus?.state == SyncState.error
+        ? 'Sync issue'
+        : 'Online';
+    final syncColor = syncStatus?.networkAvailable == null
+        ? const Color(0xFF94A3B8)
+        : isOffline
+        ? const Color(0xFFFBBF24)
+        : syncStatus?.state == SyncState.error
+        ? const Color(0xFFF87171)
+        : const Color(0xFF4ADE80);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: const BoxDecoration(
@@ -478,6 +673,36 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Icon(Icons.circle, size: 7, color: syncColor),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        '$syncLabel · Last synced ${_formatSyncTime(syncStatus?.lastSyncedAt)}${(syncStatus?.pendingCount ?? 0) > 0 ? ' · ${syncStatus!.pendingCount} pending' : ''}',
+                        style: TextStyle(color: syncColor, fontSize: 9),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Sync now',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 25,
+                        height: 22,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () =>
+                          unawaited(ref.read(syncEngineProvider).syncAll()),
+                      icon: const Icon(
+                        Icons.sync,
+                        size: 14,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -512,6 +737,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         ],
       ),
     );
+  }
+
+  String _formatSyncTime(DateTime? value) {
+    if (value == null) return 'never';
+    final local = value.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour < 12 ? 'AM' : 'PM';
+    final today = DateTime.now();
+    if (local.year == today.year &&
+        local.month == today.month &&
+        local.day == today.day) {
+      return '$hour:$minute $period';
+    }
+    return '${local.day}/${local.month} $hour:$minute $period';
   }
 
   // ==========================================
@@ -958,7 +1198,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
             child: Text(
               hasAnyPatients
                   ? 'No patients match the selected filter.'
-                  : 'No patients assigned to you for this shift.',
+                  : 'You have no patients',
               style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
             ),
           )
@@ -1299,22 +1539,14 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       child: BottomNavigationBar(
         currentIndex: _activeNavIndex,
         onTap: (index) {
-          setState(() => _activeNavIndex = index);
-          if (index == 1) {
-            // Patients tab
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Displaying active ward patients.')),
-            );
+          if (index == 0 || index == 1) {
+            setState(() => _activeNavIndex = index);
           } else if (index == 2) {
-            Navigator.of(context)
-                .push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const PersonalNotebookScreen(),
-                  ),
-                )
-                .then((_) {
-                  if (mounted) setState(() => _activeNavIndex = 0);
-                });
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PersonalNotebookScreen(),
+              ),
+            );
           } else if (index == 3) {
             // Handoff tab
             Navigator.of(context).push(
@@ -1384,98 +1616,104 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: const BoxDecoration(
-          color: Color(0xFF0F172A),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border(top: BorderSide(color: Color(0xFF1E293B))),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(
-                Icons.dashboard_customize,
-                color: Color(0xFF38BDF8),
-              ),
-              title: const Text(
-                'Ward Management & Nurse Allocation Board',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+      builder: (ctx) => Material(
+        color: const Color(0xFF0F172A),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(
+                  Icons.dashboard_customize,
+                  color: Color(0xFF38BDF8),
                 ),
-              ),
-              subtitle: const Text(
-                'View master whiteboard beds 1–10 and shift roster',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-                color: Color(0xFF94A3B8),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const DigitalWhiteboardScreen(),
+                title: const Text(
+                  'Ward Management & Nurse Allocation Board',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
                   ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.apartment, color: Color(0xFF34D399)),
-              title: const Text(
-                'Switch Active Hospital Ward',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
-              ),
-              subtitle: const Text(
-                'Select another ward with search autofilter',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-                color: Color(0xFF94A3B8),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                showDialog(
-                  context: context,
-                  builder: (_) => const WardSelectionDialog(),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.lock_outline, color: Color(0xFFEF4444)),
-              title: const Text(
-                'Lock Station',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+                subtitle: const Text(
+                  'View master whiteboard beds 1–10 and shift roster',
+                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                 ),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: Color(0xFF94A3B8),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DigitalWhiteboardScreen(),
+                    ),
+                  );
+                },
               ),
-              subtitle: const Text(
-                'Return to Digital ID badge screen',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                ref.read(authControllerProvider.notifier).logout();
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => const DigitalIdLockscreen(),
+              if (ref.watch(authenticatedStaffProvider)?.isChargeNurse == true)
+                ListTile(
+                  leading: const Icon(
+                    Icons.apartment,
+                    color: Color(0xFF34D399),
                   ),
-                  (route) => false,
-                );
-              },
-            ),
-          ],
+                  title: const Text(
+                    'Switch Active Hospital Ward',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Select another ward with search autofilter',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: Color(0xFF94A3B8),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    showDialog(
+                      context: context,
+                      builder: (_) => const WardSelectionDialog(),
+                    );
+                  },
+                ),
+              ListTile(
+                leading: const Icon(
+                  Icons.lock_outline,
+                  color: Color(0xFFEF4444),
+                ),
+                title: const Text(
+                  'Lock Station',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Return to Digital ID badge screen',
+                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  ref.read(authControllerProvider.notifier).logout();
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (_) => const DigitalIdLockscreen(),
+                    ),
+                    (route) => false,
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

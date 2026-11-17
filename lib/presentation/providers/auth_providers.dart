@@ -1,8 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../data/notifications/medical_issue_push_service.dart';
+import '../../data/auth/offline_auth_store.dart';
 import '../../data/auth/staff_auth_service.dart';
+import '../../data/database/database_provider.dart';
 import '../../data/ward_board_service.dart';
 import '../../domain/models/staff_profile.dart';
 import '../../domain/models/hospital_ward.dart';
@@ -92,11 +96,42 @@ final wardStaffListProvider = FutureProvider<List<StaffProfile>>((ref) async {
 
 final patientStaffListProvider =
     FutureProvider.family<List<StaffProfile>, String>((ref, patientId) async {
+      final token = ref.watch(authAccessTokenProvider);
+      final offline = ref.watch(offlineSessionProvider);
+      final date = DateTime.now().toIso8601String().substring(0, 10);
+      final cacheKey = 'patient_staff:$patientId:$date';
+      final db = ref.read(localDatabaseProvider);
+      if (offline || token == null) {
+        final cached = await db.readCachedJson(cacheKey);
+        return (cached?['staff'] as List<dynamic>? ?? const [])
+            .map(
+              (item) =>
+                  StaffProfile.fromJson(Map<String, dynamic>.from(item as Map)),
+            )
+            .toList();
+      }
       final service = WardBoardService(
         getAccessToken: () => ref.read(authAccessTokenProvider),
       );
-      final date = DateTime.now().toIso8601String().substring(0, 10);
-      return service.getStaffForPatient(patientId: patientId, date: date);
+      try {
+        final staff = await service.getStaffForPatient(
+          patientId: patientId,
+          date: date,
+        );
+        await db.cacheJson(cacheKey, {
+          'staff': staff.map((member) => member.toJson()).toList(),
+        });
+        return staff;
+      } catch (_) {
+        final cached = await db.readCachedJson(cacheKey);
+        if (cached == null) rethrow;
+        return (cached['staff'] as List<dynamic>? ?? const [])
+            .map(
+              (item) =>
+                  StaffProfile.fromJson(Map<String, dynamic>.from(item as Map)),
+            )
+            .toList();
+      }
     });
 
 /// Currently authenticated clinical staff member on this device.
@@ -124,6 +159,21 @@ final authAccessTokenProvider =
     NotifierProvider<AuthAccessTokenNotifier, String?>(
       AuthAccessTokenNotifier.new,
     );
+
+class OfflineSessionNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void setOffline(bool value) => state = value;
+}
+
+final offlineSessionProvider = NotifierProvider<OfflineSessionNotifier, bool>(
+  OfflineSessionNotifier.new,
+);
+
+const _sessionCredentialStorage = FlutterSecureStorage();
+const _sessionCredentialKey = 'oravi_authenticated_session_v1';
+const _sessionTokenLifetime = Duration(hours: 8);
 
 class AuthState {
   final bool isLoading;
@@ -159,6 +209,32 @@ class AuthController extends Notifier<AuthState> {
     final service = ref.read(staffAuthServiceProvider);
     final result = await service.verifyPin(identifier, pin);
 
+    if (!result.success && result.networkUnavailable) {
+      try {
+        final offline = await OfflineAuthStore(
+          ref.read(localDatabaseProvider),
+        ).verify(identifier, pin);
+        if (offline != null) {
+          ref.read(authenticatedStaffProvider.notifier).setStaff(offline.staff);
+          final savedSession = await _readSavedSession(offline.staff.staffId);
+          ref.read(authAccessTokenProvider.notifier).setToken(savedSession);
+          ref.read(offlineSessionProvider.notifier).setOffline(true);
+          ref.read(selectedWardProvider.notifier).selectWard(offline.ward);
+          ref
+              .read(selectedShiftTypeProvider.notifier)
+              .select(offline.shiftType);
+          ref
+              .read(wardContextNeedsConfirmationProvider.notifier)
+              .setNeedsConfirmation(false);
+          ref.read(wardContextErrorProvider.notifier).setError(null);
+          state = const AuthState();
+          return true;
+        }
+      } catch (_) {
+        // If local unlock is unavailable, preserve the normal sign-in error.
+      }
+    }
+
     final authenticatedStaff = result.staff;
     final token = result.token;
 
@@ -173,6 +249,14 @@ class AuthController extends Notifier<AuthState> {
       ref
           .read(authAccessTokenProvider.notifier)
           .setToken(!token.startsWith('offline_token_') ? token : null);
+      if (!token.startsWith('offline_token_')) {
+        try {
+          await _saveSessionCredential(authenticatedStaff.staffId, token);
+        } catch (_) {
+          // The online session remains valid if secure persistence is unavailable.
+        }
+      }
+      ref.read(offlineSessionProvider.notifier).setOffline(false);
       if (authenticatedStaff.role != 'dev_admin' &&
           !token.startsWith('offline_token_')) {
         unawaited(
@@ -238,6 +322,19 @@ class AuthController extends Notifier<AuthState> {
             .read(wardContextErrorProvider.notifier)
             .setError('Could not load your ward assignment: $error');
       }
+      try {
+        await OfflineAuthStore(
+          ref.read(localDatabaseProvider),
+        ).rememberSuccessfulOnlineLogin(
+          staff: authenticatedStaff,
+          identifier: identifier,
+          pin: pin,
+          ward: ref.read(selectedWardProvider),
+          shiftType: ref.read(selectedShiftTypeProvider),
+        );
+      } catch (_) {
+        // Online sign-in remains valid if local offline enrollment fails.
+      }
       state = const AuthState(
         isLoading: false,
         errorMessage: null,
@@ -247,8 +344,9 @@ class AuthController extends Notifier<AuthState> {
     } else {
       state = state.copyWith(
         isLoading: false,
-        errorMessage:
-            result.error ?? 'Authentication failed or session was invalid.',
+        errorMessage: result.networkUnavailable
+            ? 'Oravi cannot reach sign-in. If you have signed in on this device recently, enter your PIN to unlock saved offline data.'
+            : result.error ?? 'Authentication failed or session was invalid.',
         failedAttempts: state.failedAttempts + 1,
       );
       return false;
@@ -256,20 +354,11 @@ class AuthController extends Notifier<AuthState> {
   }
 
   void logout() {
-    final token = ref.read(authAccessTokenProvider);
-    if (token != null &&
-        ref.read(authenticatedStaffProvider)?.role != 'dev_admin') {
-      unawaited(
-        ref
-            .read(medicalIssuePushControllerProvider.notifier)
-            .unregister(
-              accessToken: token,
-              deviceId: ref.read(localDeviceIdProvider),
-            ),
-      );
-    }
+    // Keep the device registered for call availability after clinical logout.
     ref.read(authenticatedStaffProvider.notifier).setStaff(null);
     ref.read(authAccessTokenProvider.notifier).setToken(null);
+    unawaited(_sessionCredentialStorage.delete(key: _sessionCredentialKey));
+    ref.read(offlineSessionProvider.notifier).setOffline(false);
     ref.read(selectedWardProvider.notifier).selectWard(_noWard());
     ref
         .read(wardContextNeedsConfirmationProvider.notifier)
@@ -290,6 +379,39 @@ class AuthController extends Notifier<AuthState> {
     department: '',
     description: '',
   );
+}
+
+Future<void> _saveSessionCredential(String staffId, String token) async {
+  await _sessionCredentialStorage.write(
+    key: _sessionCredentialKey,
+    value: jsonEncode({
+      'staff_id': staffId,
+      'token': token,
+      'saved_at': DateTime.now().toUtc().toIso8601String(),
+    }),
+  );
+}
+
+Future<String?> _readSavedSession(String staffId) async {
+  final raw = await _sessionCredentialStorage.read(key: _sessionCredentialKey);
+  if (raw == null) return null;
+  try {
+    final saved = jsonDecode(raw) as Map<String, dynamic>;
+    final savedAt = DateTime.tryParse(saved['saved_at'] as String? ?? '');
+    final token = saved['token'] as String?;
+    final now = DateTime.now().toUtc();
+    if (saved['staff_id'] != staffId ||
+        token == null ||
+        token.isEmpty ||
+        savedAt == null ||
+        now.isBefore(savedAt.toUtc()) ||
+        now.difference(savedAt.toUtc()) > _sessionTokenLifetime) {
+      return null;
+    }
+    return token;
+  } catch (_) {
+    return null;
+  }
 }
 
 final authControllerProvider = NotifierProvider<AuthController, AuthState>(

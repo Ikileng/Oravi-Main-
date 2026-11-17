@@ -35,7 +35,16 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
 
 /// Reactive stream provider for sync state and pending outbox count.
 final syncStatusProvider = StreamProvider<SyncStatus>((ref) {
-  return ref.watch(syncEngineProvider).statusStream;
+  final engine = ref.watch(syncEngineProvider);
+  return Stream<SyncStatus>.multi((controller) {
+    controller.add(engine.currentStatus);
+    final subscription = engine.statusStream.listen(
+      controller.add,
+      onError: controller.addError,
+      onDone: controller.close,
+    );
+    controller.onCancel = subscription.cancel;
+  });
 });
 
 /// Offline-first event-sourced repository backed by SQLite.

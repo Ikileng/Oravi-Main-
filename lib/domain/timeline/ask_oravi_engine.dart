@@ -343,6 +343,31 @@ class AskOraviEngine {
             timestamp: event.clientCreatedAt,
           ),
         );
+      } else if (event is ClinicalRitualApprovedEvent) {
+        final sections = event.summary['sections'];
+        final lines = <String>[];
+        if (sections is Map) {
+          for (final key in ['situation', 'decisions', 'actions', 'owners', 'follow_up', 'unresolved_questions']) {
+            final values = sections[key];
+            if (values is List && values.isNotEmpty) {
+              lines.add('${key.replaceAll('_', ' ')}: ${values.join('; ')}');
+            }
+          }
+        }
+        entries.add(PatientTimelineEntry(
+          id: event.eventId,
+          patientId: patientId,
+          loopId: null,
+          loopTitle: event.title,
+          loopUrgency: LoopUrgency.routine,
+          loopState: LoopState.closed,
+          entryType: TimelineEntryType.clinicalRitual,
+          authorId: event.authorId,
+          authorRole: _inferCadreRole(event.authorId),
+          verbatimText: 'Approved ${event.ritualType} summary: ${lines.join(' | ')}',
+          timestamp: event.clientCreatedAt,
+          metadata: {'ritualId': event.ritualId, 'summary': event.summary},
+        ));
       }
     }
 

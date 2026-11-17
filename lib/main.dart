@@ -14,7 +14,6 @@ import 'data/device_identity.dart';
 import 'data/local_ward_repository.dart';
 import 'data/ward_board_service.dart';
 import 'domain/models/staff_profile.dart';
-import 'domain/models/call_session.dart';
 import 'domain/projections/projections.dart';
 import 'presentation/lockscreen/digital_id_lockscreen.dart';
 import 'presentation/providers/auth_providers.dart';
@@ -27,6 +26,8 @@ import 'presentation/ward_board_screen.dart';
 import 'presentation/admin/dev_admin_dashboard_screen.dart';
 import 'presentation/communications/staff_communications_screen.dart';
 import 'presentation/call_screen.dart';
+import 'presentation/clinical_ritual_room_screen.dart';
+import 'presentation/clinical_ritual_review_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
 
 void main() async {
@@ -95,12 +96,15 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<MedicalIssueAlert>? _openedAlerts;
   StreamSubscription<CallAlert>? _openedCalls;
+  StreamSubscription<RitualAlert>? _openedRituals;
   StreamSubscription<void>? _openedInbox;
   bool _pendingInbox = false;
   MedicalIssueAlert? _pendingAlert;
   CallAlert? _pendingCall;
+  RitualAlert? _pendingRitual;
   bool _openingAlert = false;
   bool _openingCall = false;
+  bool _openingRitual = false;
 
   @override
   void initState() {
@@ -118,7 +122,19 @@ class _OraviAppState extends ConsumerState<OraviApp> {
         .read(medicalIssuePushServiceProvider)
         .openedCalls
         .listen(_queueCall);
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    _openedRituals = ref
+        .read(medicalIssuePushServiceProvider)
+        .openedRituals
+        .listen((alert) {
+          _pendingRitual = alert;
+          if (mounted) setState(() {});
+        });
+    if (!kIsWeb &&
+        const {
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+          TargetPlatform.macOS,
+        }.contains(defaultTargetPlatform)) {
       unawaited(
         ref
             .read(medicalIssuePushServiceProvider)
@@ -134,6 +150,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   void dispose() {
     _openedAlerts?.cancel();
     _openedCalls?.cancel();
+    _openedRituals?.cancel();
     _openedInbox?.cancel();
     super.dispose();
   }
@@ -161,15 +178,59 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   }
 
   void _schedulePendingCall(StaffProfile? staff) {
-    if (staff?.role == 'dev_admin') {
-      _pendingCall = null;
-      return;
-    }
-    if (staff == null || _pendingCall == null || _openingCall) return;
+    if (_pendingCall == null || _openingCall) return;
     _openingCall = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openPendingCall();
     });
+  }
+
+  void _schedulePendingRitual(StaffProfile? staff) {
+    if (staff == null || _pendingRitual == null || _openingRitual) return;
+    if (!staff.isClinical) {
+      _pendingRitual = null;
+      return;
+    }
+    _openingRitual = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPendingRitual());
+  }
+
+  Future<void> _openPendingRitual() async {
+    final alert = _pendingRitual;
+    _pendingRitual = null;
+    try {
+      if (alert == null || !mounted) return;
+      if (alert.review) {
+        await _navigatorKey.currentState?.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                ClinicalRitualReviewScreen(ritualId: alert.ritualId),
+          ),
+        );
+      } else {
+        await _navigatorKey.currentState?.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => ClinicalRitualRoomScreen(
+              ritualId: alert.ritualId,
+              invitation: true,
+            ),
+          ),
+        );
+      }
+      ref.invalidate(clinicalRitualAlertsProvider);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open the clinical ritual (${error.runtimeType}).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _openingRitual = false;
+    }
   }
 
   Future<void> _openPendingCall() async {
@@ -180,8 +241,12 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       return;
     }
     try {
+      final callCredential = await ref
+          .read(medicalIssuePushServiceProvider)
+          .readCallCredential();
       final api = WardBoardService(
         getAccessToken: () => ref.read(authAccessTokenProvider),
+        callCredential: callCredential,
       );
       final details = await api.getCall(alert.callId);
       if (!mounted) return;
@@ -211,14 +276,11 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       }
       final session = await api.acceptCall(alert.callId);
       if (!mounted) return;
-      final durationSeconds = await _navigatorKey.currentState?.push<int>(
+      await _navigatorKey.currentState?.push<int>(
         MaterialPageRoute(
           builder: (_) => CallScreen(session: session, api: api),
         ),
       );
-      if (durationSeconds != null && mounted && session.patientId.isNotEmpty) {
-        await _recordIncomingCallOutcome(session, durationSeconds);
-      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -231,65 +293,6 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       }
     } finally {
       _openingCall = false;
-    }
-  }
-
-  Future<void> _recordIncomingCallOutcome(
-    CallSession session,
-    int durationSeconds,
-  ) async {
-    final noteController = TextEditingController();
-    try {
-      final note = await showDialog<String>(
-        context: _navigatorKey.currentContext ?? context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Call with ${session.callerName}'),
-          content: TextField(
-            controller: noteController,
-            autofocus: true,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Outcome note',
-              hintText: 'Record the agreed action or follow-up',
-            ),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () {
-                final value = noteController.text.trim();
-                if (value.isNotEmpty) Navigator.of(dialogContext).pop(value);
-              },
-              child: const Text('Save outcome'),
-            ),
-          ],
-        ),
-      );
-      if (note == null || !mounted) return;
-      await ref
-          .read(wardControllerProvider.notifier)
-          .logCallOutcome(
-            patientId: session.patientId,
-            loopId: session.loopId,
-            recipientId: session.callerId,
-            recipientRole: session.callerRole,
-            outcomeNote: note,
-            durationSeconds: durationSeconds,
-            callId: session.callId,
-            callStatus: 'completed',
-          );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not save the call outcome (${error.runtimeType}).',
-            ),
-          ),
-        );
-      }
-    } finally {
-      noteController.dispose();
     }
   }
 
@@ -386,6 +389,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     final pushStatus = ref.watch(medicalIssuePushControllerProvider);
     _schedulePendingAlert(authStaff);
     _schedulePendingCall(authStaff);
+    _schedulePendingRitual(authStaff);
     if (_pendingInbox && authStaff != null) {
       _pendingInbox = false;
       if (authStaff.isClinical || authStaff.isSupport) {

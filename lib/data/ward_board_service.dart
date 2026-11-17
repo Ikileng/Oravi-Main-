@@ -17,12 +17,14 @@ class WardBoardService {
     Map<String, dynamic>? payload,
   }) => _request(method, '/api/v1$path', payload: payload);
   final String? Function() getAccessToken;
+  final String? callCredential;
   final List<String> candidateUrls;
   String? _activeBaseUrl;
   final Duration timeout;
 
   WardBoardService({
     required this.getAccessToken,
+    this.callCredential,
     List<String>? candidateUrls,
     this.timeout = const Duration(seconds: 8),
   }) : candidateUrls = candidateUrls ?? OraviApiConfiguration.candidateUrls {
@@ -36,9 +38,13 @@ class WardBoardService {
     String path, {
     Map<String, dynamic>? payload,
     Map<String, String>? extraHeaders,
+    bool allowCallCredential = false,
   }) async {
     final token = getAccessToken();
-    if (token == null || token.isEmpty) {
+    if ((token == null || token.isEmpty) &&
+        (!allowCallCredential ||
+            callCredential == null ||
+            callCredential!.isEmpty)) {
       throw StateError('Sign in to load or update the ward board.');
     }
     final ordered = [...candidateUrls];
@@ -60,7 +66,11 @@ class WardBoardService {
         final request = await client.openUrl(method, uri).timeout(timeout);
         request.headers.set(HttpHeaders.acceptHeader, 'application/json');
         extraHeaders?.forEach(request.headers.set);
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        if (token != null && token.isNotEmpty) {
+          request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        } else if (allowCallCredential) {
+          request.headers.set('X-Oravi-Call-Credential', callCredential!);
+        }
         if (payload != null) {
           request.headers.contentType = ContentType.json;
           request.write(jsonEncode(payload));
@@ -230,16 +240,23 @@ class WardBoardService {
         .toList();
   }
 
-  Future<void> registerFcmInstallation({
+  Future<String> registerFcmInstallation({
     required String token,
     required String deviceId,
     required String platform,
   }) async {
-    await _request(
+    final response = await _request(
       'POST',
       '/api/v1/staff/me/fcm-installation',
       payload: {'token': token, 'device_id': deviceId, 'platform': platform},
     );
+    if (response is! Map<String, dynamic> ||
+        response['call_credential'] is! String) {
+      throw const FormatException(
+        'The server did not return a call availability credential.',
+      );
+    }
+    return response['call_credential'] as String;
   }
 
   Future<void> removeFcmInstallation({required String deviceId}) async {
@@ -295,6 +312,7 @@ class WardBoardService {
     final response = await _request(
       'POST',
       '/api/v1/calls/${Uri.encodeComponent(callId)}/accept',
+      allowCallCredential: true,
     );
     if (response is! Map<String, dynamic>) {
       throw const FormatException(
@@ -308,6 +326,7 @@ class WardBoardService {
     final response = await _request(
       'GET',
       '/api/v1/calls/${Uri.encodeComponent(callId)}',
+      allowCallCredential: true,
     );
     if (response is! Map<String, dynamic>) {
       throw const FormatException('The call service returned an invalid call.');
@@ -316,13 +335,18 @@ class WardBoardService {
   }
 
   Future<void> endCall(String callId) async {
-    await _request('POST', '/api/v1/calls/${Uri.encodeComponent(callId)}/end');
+    await _request(
+      'POST',
+      '/api/v1/calls/${Uri.encodeComponent(callId)}/end',
+      allowCallCredential: true,
+    );
   }
 
   Future<void> declineCall(String callId) async {
     await _request(
       'POST',
       '/api/v1/calls/${Uri.encodeComponent(callId)}/decline',
+      allowCallCredential: true,
     );
   }
 
@@ -330,6 +354,7 @@ class WardBoardService {
     await _request(
       'POST',
       '/api/v1/calls/${Uri.encodeComponent(callId)}/cancel',
+      allowCallCredential: true,
     );
   }
 
@@ -363,33 +388,54 @@ class WardBoardService {
     required List<WhiteboardBedAssignment> assignments,
     required Map<String, dynamic> supportRoster,
     List<Map<String, String>> carryForwardIssues = const [],
+    String? allocationId,
   }) async {
     await _request(
       'POST',
       '/api/v1/allocations/publish',
-      payload: {
-        'allocation_id': 'ALLOC-${const Uuid().v7()}',
-        'ward_id': wardId,
-        'shift_type': shiftType,
-        'date': date,
-        'published_by': staffId,
-        'published_at': DateTime.now().toUtc().toIso8601String(),
-        'support_roster': supportRoster,
-        'bed_assignments': assignments.map((assignment) {
-          return {
-            'bed_number': assignment.bedNumber,
-            'patient_id': assignment.patientId,
-            'patient_initials': assignment.patientInitials,
-            'admission_number': assignment.patientId,
-            'admitting_doctor': assignment.admittingDoctor,
-            'assigned_nurse_id': shiftType == 'day'
-                ? assignment.dayShiftNurseId
-                : assignment.nightShiftNurseId,
-            'status': assignment.status,
-          };
-        }).toList(),
-        'carry_forward_issues': carryForwardIssues,
-      },
+      payload: buildPublishBoardPayload(
+        wardId: wardId,
+        date: date,
+        shiftType: shiftType,
+        staffId: staffId,
+        assignments: assignments,
+        supportRoster: supportRoster,
+        carryForwardIssues: carryForwardIssues,
+        allocationId: allocationId,
+      ),
     );
   }
+
+  Map<String, dynamic> buildPublishBoardPayload({
+    required String wardId,
+    required String date,
+    required String shiftType,
+    required String staffId,
+    required List<WhiteboardBedAssignment> assignments,
+    required Map<String, dynamic> supportRoster,
+    List<Map<String, String>> carryForwardIssues = const [],
+    String? allocationId,
+  }) => {
+    'allocation_id': allocationId ?? 'ALLOC-${const Uuid().v7()}',
+    'ward_id': wardId,
+    'shift_type': shiftType,
+    'date': date,
+    'published_by': staffId,
+    'published_at': DateTime.now().toUtc().toIso8601String(),
+    'support_roster': supportRoster,
+    'bed_assignments': assignments.map((assignment) {
+      return {
+        'bed_number': assignment.bedNumber,
+        'patient_id': assignment.patientId,
+        'patient_initials': assignment.patientInitials,
+        'admission_number': assignment.patientId,
+        'admitting_doctor': assignment.admittingDoctor,
+        'assigned_nurse_id': shiftType == 'day'
+            ? assignment.dayShiftNurseId
+            : assignment.nightShiftNurseId,
+        'status': assignment.status,
+      };
+    }).toList(),
+    'carry_forward_issues': carryForwardIssues,
+  };
 }

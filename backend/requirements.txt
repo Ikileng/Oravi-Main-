@@ -3,3 +3,5 @@ uvicorn[standard]>=0.27,<1
 firebase-admin>=7.5,<8
 livekit-api>=1.2,<2
 python-dotenv>=1,<2
+elevenlabs>=2,<3
+google-cloud-storage>=2.16,<3

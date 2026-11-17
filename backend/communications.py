@@ -138,6 +138,14 @@ def build_router(api):
         with api.communications_store.connection() as conn:
             rows = conn.execute('SELECT * FROM direct_messages WHERE sender_id=? OR recipient_id=? '
                                 'ORDER BY id DESC', (profile.staff_id,profile.staff_id)).fetchall()
+            read = {r['item_id'] for r in conn.execute(
+                'SELECT item_id FROM inbox_reads WHERE staff_id=?', (profile.staff_id,))}
+        unread_by_contact = {}
+        for message in rows:
+            if (message['recipient_id'] == profile.staff_id
+                    and f"message:{message['id']}" not in read):
+                sender_id = message['sender_id']
+                unread_by_contact[sender_id] = unread_by_contact.get(sender_id, 0) + 1
         result, seen = [], set()
         for row in rows:
             other = row['recipient_id'] if row['sender_id'] == profile.staff_id else row['sender_id']
@@ -145,9 +153,11 @@ def build_router(api):
                 continue
             seen.add(other)
             person = member(other)
+            unread_count = unread_by_contact.get(other, 0)
             result.append({'contact': contact(person) if person else
                 {'staff_id': other, 'name': 'Unavailable account', 'role': ''},
-                'last_message': row['body'], 'sent_at': row['sent_at']})
+                'last_message': row['body'], 'sent_at': row['sent_at'],
+                'unread_count': unread_count})
         return result
 
     @router.get('/direct/threads/{other_id}')
@@ -197,15 +207,22 @@ def build_router(api):
         recipient = member(payload.recipient_id)
         if recipient is None or recipient.staff_id == profile.staff_id:
             raise HTTPException(400, 'Recipient is unavailable.')
+        recipient_fids = api.staff_store.get_fcm_fids_for_staff(recipient.staff_id)
+        if not recipient_fids:
+            raise HTTPException(409, 'This clinician has no reachable Oravi device right now.')
         call_id, room = 'CALL-' + str(uuid.uuid4()), 'oravi-call-' + uuid.uuid4().hex
         token = api._livekit_token(profile.staff_id, profile.name, room)
         api.call_store.create(call_id=call_id,room_name=room,patient_id='',loop_id='',
                               caller_id=profile.staff_id,recipient_id=recipient.staff_id)
-        for fid in api.staff_store.get_fcm_fids_for_staff(recipient.staff_id):
+        delivered = 0
+        for fid in recipient_fids:
             try:
-                api.fcm_service.send_call_invitation(fid,call_id=call_id)
+                if api.fcm_service.send_call_invitation(fid,call_id=call_id): delivered += 1
             except Exception:
                 api.logger.warning('Direct call push could not be delivered.')
+        if delivered == 0:
+            api.call_store.mark_cancelled(call_id, profile.staff_id)
+            raise HTTPException(503, 'The clinician could not be notified. They may be offline.')
         return {'call_id':call_id,'patient_id':'','loop_id':'','caller_id':profile.staff_id,
                 'caller_name':profile.name,'recipient_id':recipient.staff_id,'recipient_name':recipient.name,
                 'recipient_role':recipient.role,'room_name':room,'livekit_url':api.os.getenv('LIVEKIT_URL'),

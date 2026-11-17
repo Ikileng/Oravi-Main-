@@ -87,6 +87,16 @@ class StaffStore:
                     FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
                 )"""
             )
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS call_device_credentials (
+                    device_id TEXT PRIMARY KEY,
+                    staff_id TEXT NOT NULL,
+                    credential_hash TEXT NOT NULL UNIQUE,
+                    platform TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (staff_id) REFERENCES staff_users(staff_id)
+                )"""
+            )
             fcm_columns = {
                 row["name"]
                 for row in self.conn.execute(
@@ -274,6 +284,50 @@ class StaffStore:
                 "DELETE FROM fcm_device_tokens WHERE staff_id = ? AND device_id = ?",
                 (staff_id, device_id),
             )
+            self.conn.execute(
+                "DELETE FROM call_device_credentials WHERE staff_id = ? AND device_id = ?",
+                (staff_id, device_id),
+            )
+
+    def issue_call_device_credential(
+        self, staff_id: str, device_id: str, platform: str
+    ) -> str:
+        credential = secrets.token_urlsafe(32)
+        credential_hash = hashlib.sha256(credential.encode("utf-8")).hexdigest()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM call_device_credentials WHERE device_id = ?",
+                (device_id,),
+            )
+            self.conn.execute(
+                """INSERT INTO call_device_credentials
+                   (device_id, staff_id, credential_hash, platform, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (device_id, staff_id, credential_hash, platform, now),
+            )
+        return credential
+
+    def get_staff_for_call_credential(
+        self, credential: str
+    ) -> Optional[StaffProfile]:
+        credential_hash = hashlib.sha256(credential.encode("utf-8")).hexdigest()
+        with self._lock, self.conn:
+            row = self.conn.execute(
+                """SELECT u.staff_id, u.name, u.role, u.ward_id, u.avatar_color,
+                          u.initials, u.is_active
+                   FROM call_device_credentials c
+                   JOIN staff_users u ON u.staff_id = c.staff_id
+                   WHERE c.credential_hash = ? AND u.is_active = 1""",
+                (credential_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return StaffProfile(
+            staff_id=row["staff_id"], name=row["name"], role=row["role"],
+            ward_id=row["ward_id"], avatar_color=row["avatar_color"],
+            initials=row["initials"], is_active=bool(row["is_active"]),
+        )
 
     def remove_fcm_fid(self, fid: str) -> None:
         with self._lock, self.conn:

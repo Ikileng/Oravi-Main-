@@ -11,6 +11,7 @@ enum TimelineEntryType {
   loopClosed,
   closureConfirmed,
   loopReopened,
+  clinicalRitual,
 }
 
 /// Verbatim chronological timeline entry in a patient's Oravi record.
@@ -69,6 +70,8 @@ class PatientTimelineEntry extends Equatable {
         return 'Closure Confirmed';
       case TimelineEntryType.loopReopened:
         return 'Reopened loop';
+      case TimelineEntryType.clinicalRitual:
+        return 'Clinical ritual summary';
     }
   }
 

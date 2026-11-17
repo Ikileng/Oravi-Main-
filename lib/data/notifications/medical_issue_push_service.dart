@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../Services/firebase_options.dart';
 import '../ward_board_service.dart';
@@ -31,14 +32,25 @@ class CallAlert {
   const CallAlert({required this.callId});
 }
 
+class RitualAlert {
+  final String ritualId;
+  final bool review;
+  const RitualAlert({required this.ritualId, this.review = false});
+}
+
 class MedicalIssuePushService {
   static const _channelId = 'medical_issue_alerts';
+  static const _callCredentialKey = 'oravi_call_credential';
+  static const _callCredentialStorage = FlutterSecureStorage();
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   final StreamController<MedicalIssueAlert> _openedAlerts =
       StreamController<MedicalIssueAlert>.broadcast();
   final StreamController<CallAlert> _openedCalls =
       StreamController<CallAlert>.broadcast();
+  final StreamController<RitualAlert> _openedRituals =
+      StreamController<RitualAlert>.broadcast();
+  Stream<RitualAlert> get openedRituals => _openedRituals.stream;
   StreamSubscription<RemoteMessage>? _foregroundMessages;
   StreamSubscription<RemoteMessage>? _openedMessages;
   StreamSubscription<String>? _tokenRefreshSubscription;
@@ -122,13 +134,17 @@ class MedicalIssuePushService {
 
     final api = WardBoardService(getAccessToken: () => accessToken);
     Future<void> registerToken(String token) {
-      final operation = _pendingTokenRegistration.then(
-        (_) => api.registerFcmInstallation(
+      final operation = _pendingTokenRegistration.then((_) async {
+        final callCredential = await api.registerFcmInstallation(
           token: token,
           deviceId: deviceId,
           platform: platform,
-        ),
-      );
+        );
+        await _callCredentialStorage.write(
+          key: _callCredentialKey,
+          value: callCredential,
+        );
+      });
       // Keep later refreshes usable even if one backend request fails.
       _pendingTokenRegistration = operation.then<void>(
         (_) {},
@@ -185,6 +201,7 @@ class MedicalIssuePushService {
     } catch (caught) {
       error ??= caught;
     }
+    await _callCredentialStorage.delete(key: _callCredentialKey);
     if (error != null) {
       throw StateError('Could not fully remove the device token.');
     }
@@ -196,7 +213,12 @@ class MedicalIssuePushService {
     await _openedMessages?.cancel();
     await _openedAlerts.close();
     await _openedCalls.close();
+    await _openedRituals.close();
     await _openedInbox.close();
+  }
+
+  Future<String?> readCallCredential() {
+    return _callCredentialStorage.read(key: _callCredentialKey);
   }
 
   String get _supportedPlatform {
@@ -342,6 +364,19 @@ class MedicalIssuePushService {
       if (data['type'] == 'oravi_call' && data['call_id'] is String) {
         if (!_openedCalls.isClosed) {
           _openedCalls.add(CallAlert(callId: data['call_id'] as String));
+        }
+        return;
+      }
+      if ((data['type'] == 'clinical_ritual' ||
+              data['type'] == 'clinical_ritual_review') &&
+          data['ritual_id'] is String) {
+        if (!_openedRituals.isClosed) {
+          _openedRituals.add(
+            RitualAlert(
+              ritualId: data['ritual_id'] as String,
+              review: data['type'] == 'clinical_ritual_review',
+            ),
+          );
         }
         return;
       }
