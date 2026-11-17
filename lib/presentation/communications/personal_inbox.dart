@@ -8,6 +8,7 @@ import '../providers/ward_providers.dart';
 import '../providers/whiteboard_providers.dart';
 import '../patient_detail_screen.dart';
 import '../call_screen.dart';
+import '../theme/clinical_theme.dart';
 import '../widgets/log_call_outcome_dialog.dart';
 import 'staff_communications_screen.dart';
 
@@ -241,9 +242,16 @@ class ReceivedInbox extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) => ref
       .watch(personalInboxProvider)
       .when(
-        loading: () => const LinearProgressIndicator(),
-        error: (_, _) => const ListTile(
-          title: Text('Could not load received activity. Please retry.'),
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: LinearProgressIndicator(),
+        ),
+        error: (_, _) => _InboxStateCard(
+          icon: Icons.cloud_off_outlined,
+          title: 'Could not load received activity',
+          message: 'Check your connection and pull to refresh.',
+          actionLabel: 'Retry',
+          onAction: () => ref.invalidate(personalInboxProvider),
         ),
         data: (inbox) {
           final items = (inbox['items'] as List).cast<Map<String, dynamic>>()
@@ -256,47 +264,304 @@ class ReceivedInbox extends ConsumerWidget {
                 left['created_at'] as String? ?? '',
               );
             });
+          final unread = inbox['unread_count'] as int? ?? 0;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Received (${inbox['unread_count']} unread)',
-                style: Theme.of(context).textTheme.titleLarge,
+              _InboxSectionHeader(
+                title: 'Received',
+                countLabel: unread == 0 ? null : '$unread unread',
               ),
+              const SizedBox(height: 10),
               if (items.isEmpty)
-                const ListTile(
-                  title: Text('No received messages or calls yet'),
-                ),
-              for (final item in items)
-                ListTile(
-                  leading: Icon(
-                    item['kind'] == 'call'
-                        ? Icons.call_received
-                        : item['kind'] == 'issue'
-                        ? Icons.medical_information_outlined
-                        : Icons.chat_bubble_outline,
-                  ),
-                  title: Text(
-                    item['title'],
-                    style: TextStyle(
-                      fontWeight: item['unread'] == true
-                          ? FontWeight.bold
-                          : FontWeight.normal,
+                const _InboxStateCard(
+                  icon: Icons.mark_chat_read_outlined,
+                  title: 'No received messages or calls yet',
+                  message: 'New clinical updates will appear here.',
+                )
+              else
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.surface,
+                    borderRadius: BorderRadius.circular(
+                      ClinicalTheme.radiusLarge,
                     ),
+                    border: Border.all(color: ClinicalTheme.border),
                   ),
-                  subtitle: Text(
-                    item['body'],
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    children: [
+                      for (var index = 0; index < items.length; index++) ...[
+                        _InboxActivityTile(
+                          item: items[index],
+                          onTap: () => _open(context, ref, items[index]),
+                        ),
+                        if (index != items.length - 1)
+                          const Divider(height: 1, indent: 68),
+                      ],
+                    ],
                   ),
-                  trailing: item['unread'] == true
-                      ? const Icon(Icons.circle, size: 9, color: Colors.blue)
-                      : null,
-                  onTap: () => _open(context, ref, item),
                 ),
-              const Divider(),
             ],
           );
         },
       );
+}
+
+class _InboxSectionHeader extends StatelessWidget {
+  const _InboxSectionHeader({required this.title, this.countLabel});
+  final String title;
+  final String? countLabel;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          title,
+          style: const TextStyle(
+            color: ClinicalTheme.textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      if (countLabel != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: ClinicalTheme.clinicalBlue.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            countLabel!,
+            style: const TextStyle(
+              color: ClinicalTheme.clinicalBlue,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+class _InboxActivityTile extends StatelessWidget {
+  const _InboxActivityTile({required this.item, required this.onTap});
+  final Map<String, dynamic> item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final kind = item['kind'] as String? ?? 'message';
+    final unread = item['unread'] == true;
+    final urgent = item['urgency'] == 'urgent' ||
+        item['urgency'] == 'critical' ||
+        (item['title'] as String? ?? '').toLowerCase().contains('medical issue');
+    final visual = switch (kind) {
+      'call' => (Icons.call_received_rounded, ClinicalTheme.successGreen),
+      'issue' => (Icons.monitor_heart_outlined, ClinicalTheme.urgentAmber),
+      _ => (Icons.chat_bubble_outline_rounded, ClinicalTheme.clinicalBlue),
+    };
+    final contextLabel = [
+      item['patient_label'],
+      item['bed_number'] == null ? null : 'Bed ${item['bed_number']}',
+    ].whereType<Object>().map((value) => '$value').join(' · ');
+
+    return Semantics(
+      button: true,
+      label: '${unread ? 'Unread ' : ''}${item['title'] ?? 'Clinical update'}',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: visual.$2.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(visual.$1, color: visual.$2, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item['title'] as String? ?? 'Clinical update',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontSize: 14,
+                              fontWeight: unread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _relativeInboxTime(item['created_at']),
+                          style: const TextStyle(
+                            color: ClinicalTheme.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (contextLabel.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.shield_outlined,
+                            size: 13,
+                            color: ClinicalTheme.clinicalBlue,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              contextLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: ClinicalTheme.clinicalBlue,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    Text(
+                      item['body'] as String? ?? '',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: ClinicalTheme.textSecondary,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                    if (urgent) ...[
+                      const SizedBox(height: 7),
+                      const _UrgencyLabel(),
+                    ],
+                  ],
+                ),
+              ),
+              if (unread) ...[
+                const SizedBox(width: 8),
+                Container(
+                  width: 9,
+                  height: 9,
+                  margin: const EdgeInsets.only(top: 5),
+                  decoration: const BoxDecoration(
+                    color: ClinicalTheme.clinicalBlue,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UrgencyLabel extends StatelessWidget {
+  const _UrgencyLabel();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: ClinicalTheme.urgentAmber.withValues(alpha: 0.13),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: ClinicalTheme.urgentAmber.withValues(alpha: 0.5),
+      ),
+    ),
+    child: const Text(
+      'NEEDS ATTENTION',
+      style: TextStyle(
+        color: ClinicalTheme.urgentAmber,
+        fontSize: 9,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.4,
+      ),
+    ),
+  );
+}
+
+class _InboxStateCard extends StatelessWidget {
+  const _InboxStateCard({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: ClinicalTheme.surfaceSoft,
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusLarge),
+      border: Border.all(color: ClinicalTheme.border),
+    ),
+    child: Column(
+      children: [
+        Icon(icon, color: ClinicalTheme.textSecondary, size: 28),
+        const SizedBox(height: 9),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: ClinicalTheme.textSecondary,
+            fontSize: 12,
+          ),
+        ),
+        if (onAction != null) ...[
+          const SizedBox(height: 10),
+          TextButton(onPressed: onAction, child: Text(actionLabel!)),
+        ],
+      ],
+    ),
+  );
+}
+
+String _relativeInboxTime(Object? raw) {
+  final parsed = raw is String ? DateTime.tryParse(raw)?.toLocal() : null;
+  if (parsed == null) return '';
+  final difference = DateTime.now().difference(parsed);
+  if (difference.inMinutes < 1) return 'Now';
+  if (difference.inMinutes < 60) return '${difference.inMinutes}m';
+  if (difference.inHours < 24) return '${difference.inHours}h';
+  if (difference.inDays < 7) return '${difference.inDays}d';
+  return '${parsed.day}/${parsed.month}';
 }
