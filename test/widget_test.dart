@@ -361,6 +361,10 @@ void main() {
   testWidgets(
     'Tapping Start Shift Handoff opens HandoffWizardScreen and walks through beds',
     (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await _pumpWardBoard(tester);
 
       // Verify the handoff banner on the current ward board.

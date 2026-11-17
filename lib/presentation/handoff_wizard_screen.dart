@@ -154,7 +154,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
           children: [
             const Text('SHIFT HANDOFF SESSION'),
             Text(
-              '${ward.name} • PRD FR-11 to FR-17',
+              '${ward.name} • Guided nurse-to-nurse transfer',
               style: const TextStyle(
                 fontSize: 11,
                 color: ClinicalTheme.routineTeal,
@@ -229,146 +229,173 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
         availableIncoming.any((staff) => staff.staffId == _incomingNurse)
         ? _incomingNurse
         : null;
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: ClinicalTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: ClinicalTheme.border),
-            ),
-            child: Row(
+
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight - 32),
+          child: IntrinsicHeight(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.swap_horiz,
-                  color: ClinicalTheme.nurseBlue,
-                  size: 32,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.surfaceAccent,
+                    borderRadius: BorderRadius.circular(
+                      ClinicalTheme.radiusMedium,
+                    ),
+                    border: Border.all(
+                      color: ClinicalTheme.clinicalBlue.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'Shift Handover Protocol',
-                        style: TextStyle(
-                          color: ClinicalTheme.textPrimary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
+                    children: [
+                      Icon(
+                        Icons.swap_horiz,
+                        color: ClinicalTheme.nurseBlue,
+                        size: 32,
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Pairs outgoing and incoming nurses to walk the board bed by bed. No patient is left unconfirmed.',
-                        style: TextStyle(
-                          color: ClinicalTheme.textSecondary,
-                          fontSize: 12,
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Shift Handover Protocol',
+                              style: TextStyle(
+                                color: ClinicalTheme.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 17,
+                              ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              'Verify both nurses, then review every assigned patient and transfer all unfinished medical issues.',
+                              style: TextStyle(
+                                color: ClinicalTheme.textSecondary,
+                                fontSize: 14,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(height: 24),
+                const _HandoffSectionLabel(
+                  step: '1',
+                  label: 'Outgoing nurse',
+                  detail: 'Handing over this shift',
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: ClinicalTheme.surface,
+                    borderRadius: BorderRadius.circular(
+                      ClinicalTheme.radiusMedium,
+                    ),
+                    border: Border.all(color: ClinicalTheme.border),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.badge_outlined,
+                        color: ClinicalTheme.nurseBlue,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          currentStaff == null
+                              ? 'Sign in as the outgoing nurse.'
+                              : '${currentStaff.name} · ${currentStaff.staffId}',
+                          style: const TextStyle(
+                            color: ClinicalTheme.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                const _HandoffSectionLabel(
+                  step: '2',
+                  label: 'Incoming nurse',
+                  detail: 'Taking ownership of the shift',
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: incomingValue,
+                  isExpanded: true,
+                  dropdownColor: ClinicalTheme.surface,
+                  decoration: const InputDecoration(
+                    labelText: 'Select incoming nurse',
+                    prefixIcon: Icon(Icons.person_add_alt_1_outlined),
+                  ),
+                  hint: const Text('Choose a nurse'),
+                  items: availableIncoming
+                      .map(
+                        (staff) => DropdownMenuItem(
+                          value: staff.staffId,
+                          child: Text(
+                            '${staff.name} · ${staff.staffId}',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _incomingNurse = value);
+                    }
+                  },
+                ),
+                if (availableIncoming.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'No other ward nurse is available to receive this handoff.',
+                    style: TextStyle(color: ClinicalTheme.urgentAmber),
+                  ),
+                ],
+                const Spacer(),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: ClinicalTheme.nurseBlue,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size.fromHeight(56),
+                    ),
+                    icon: const Icon(Icons.arrow_forward),
+                    label: const Text(
+                      'Begin Bed-by-Bed Walkthrough',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 15),
+                    ),
+                    onPressed:
+                        incomingValue == null ||
+                            currentStaff?.isWardNurse != true
+                        ? null
+                        : _onStartHandoff,
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'OUTGOING NURSE (Handing Over)',
-            style: TextStyle(
-              color: ClinicalTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: ClinicalTheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: ClinicalTheme.border),
-            ),
-            child: Text(
-              currentStaff == null
-                  ? 'Sign in as the outgoing nurse.'
-                  : '${currentStaff.name} · ${currentStaff.staffId}',
-              style: const TextStyle(
-                color: ClinicalTheme.nurseBlue,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'INCOMING NURSE (Taking Over)',
-            style: TextStyle(
-              color: ClinicalTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            initialValue: incomingValue,
-            dropdownColor: ClinicalTheme.surface,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: ClinicalTheme.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            hint: const Text(
-              'Select the incoming nurse',
-              style: TextStyle(color: ClinicalTheme.textSecondary),
-            ),
-            items: availableIncoming
-                .map(
-                  (staff) => DropdownMenuItem(
-                    value: staff.staffId,
-                    child: Text(
-                      '${staff.name} · ${staff.staffId}',
-                      style: const TextStyle(
-                        color: ClinicalTheme.doctorPink,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value != null) setState(() => _incomingNurse = value);
-            },
-          ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: ClinicalTheme.nurseBlue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text(
-                'Begin Bed-by-Bed Walkthrough',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
-              onPressed:
-                  incomingValue == null || currentStaff?.isWardNurse != true
-                  ? null
-                  : _onStartHandoff,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -409,22 +436,25 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
           color: ClinicalTheme.surfaceElevated,
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                runAlignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 4,
                 children: [
                   Text(
                     'Bed ${_currentBedIndex + 1} of $totalBeds: ${patient.bedNumber}',
                     style: const TextStyle(
                       color: ClinicalTheme.textPrimary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
                     ),
                   ),
                   Text(
-                    '${((_currentBedIndex + 1) / totalBeds * 100).toInt()}% Complete',
+                    '${((_currentBedIndex + 1) / totalBeds * 100).toInt()}% complete',
                     style: const TextStyle(
-                      color: ClinicalTheme.textMuted,
-                      fontSize: 12,
+                      color: ClinicalTheme.textSecondary,
+                      fontSize: 13,
                     ),
                   ),
                 ],
@@ -506,13 +536,15 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                           color: ClinicalTheme.routineTeal,
                         ),
                         SizedBox(width: 6),
-                        Text(
-                          'SBAR SUMMARY (Compiled without AI)',
-                          style: TextStyle(
-                            color: ClinicalTheme.routineTeal,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
+                        Expanded(
+                          child: Text(
+                            'SBAR SUMMARY (Compiled without AI)',
+                            style: TextStyle(
+                              color: ClinicalTheme.routineTeal,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
                           ),
                         ),
                       ],
@@ -561,11 +593,13 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                         color: ClinicalTheme.successGreen,
                       ),
                       SizedBox(width: 10),
-                      Text(
-                        'ALL CLEAR: No open items pending on this bed.',
-                        style: TextStyle(
-                          color: ClinicalTheme.successGreen,
-                          fontWeight: FontWeight.bold,
+                      Expanded(
+                        child: Text(
+                          'ALL CLEAR: No open items pending on this bed.',
+                          style: TextStyle(
+                            color: ClinicalTheme.successGreen,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ],
@@ -718,10 +752,10 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
           ),
           child: SizedBox(
             width: double.infinity,
-            height: 48,
             child: openLoops.isEmpty
                 ? FilledButton.icon(
                     style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
                       backgroundColor: ClinicalTheme.successGreen,
                       foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(
@@ -738,6 +772,7 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
                   )
                 : FilledButton.icon(
                     style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
                       backgroundColor: allCriticalAcknowledged
                           ? ClinicalTheme.urgentAmber
                           : Colors.grey[700],
@@ -823,30 +858,38 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   }
 
   Widget _buildSbarRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120,
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: ClinicalTheme.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final content = Text(
+          value,
+          style: const TextStyle(
+            color: ClinicalTheme.textPrimary,
+            fontSize: 13,
+            height: 1.35,
           ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: ClinicalTheme.textPrimary,
-              fontSize: 11.5,
-            ),
+        );
+        final heading = Text(
+          label,
+          style: const TextStyle(
+            color: ClinicalTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
           ),
-        ),
-      ],
+        );
+        if (constraints.maxWidth < 340) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [heading, const SizedBox(height: 3), content],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 112, child: heading),
+            Expanded(child: content),
+          ],
+        );
+      },
     );
   }
 
@@ -856,240 +899,286 @@ class _HandoffWizardScreenState extends ConsumerState<HandoffWizardScreen> {
   Widget _buildSummaryLockView(HandoffSessionProjection? session) {
     final patients = ref.watch(currentNurseShiftPatientsProvider);
     final isLocked = session?.isLocked ?? false;
-
     final totalTransferred = session?.totalLoopsTransferred ?? 0;
     final totalBedsHandedOver = session?.totalBedsHandedOver ?? 0;
     final totalBeds = totalBedsHandedOver + patients.length;
 
-    return Padding(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ClinicalTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isLocked
-                    ? ClinicalTheme.successGreen
-                    : ClinicalTheme.border,
-              ),
-            ),
-            child: Column(
-              children: [
-                Icon(
-                  isLocked ? Icons.lock : Icons.task_alt,
-                  color: isLocked
-                      ? ClinicalTheme.successGreen
-                      : ClinicalTheme.nurseBlue,
-                  size: 44,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  isLocked
-                      ? 'Handoff Locked & Finalized'
-                      : 'Handoff Walkthrough Complete',
-                  style: const TextStyle(
-                    color: ClinicalTheme.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${session?.outgoingNurseId ?? _outgoingNurse} ➔ ${session?.incomingNurseId ?? _incomingNurse}',
-                  style: const TextStyle(
-                    color: ClinicalTheme.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
+      children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: isLocked
+                ? ClinicalTheme.successGreen.withValues(alpha: 0.08)
+                : ClinicalTheme.surfaceAccent,
+            borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+            border: Border.all(
+              color: isLocked
+                  ? ClinicalTheme.successGreen
+                  : ClinicalTheme.clinicalBlue.withValues(alpha: 0.35),
             ),
           ),
-          const SizedBox(height: 16),
-
-          // Statistics Card
-          Row(
+          child: Column(
             children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: ClinicalTheme.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ClinicalTheme.border),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$totalBedsHandedOver / $totalBeds',
-                        style: const TextStyle(
-                          color: ClinicalTheme.textPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Beds Reviewed',
-                        style: TextStyle(
-                          color: ClinicalTheme.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
+              Icon(
+                isLocked ? Icons.lock : Icons.task_alt,
+                color: isLocked
+                    ? ClinicalTheme.successGreen
+                    : ClinicalTheme.nurseBlue,
+                size: 44,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                isLocked
+                    ? 'Handoff Locked & Finalized'
+                    : 'Handoff Walkthrough Complete',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: ClinicalTheme.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(height: 6),
+              Text(
+                '${session?.outgoingNurseId ?? _outgoingNurse} → ${session?.incomingNurseId ?? _incomingNurse}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: ClinicalTheme.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cards = [
+              _HandoffStatCard(
+                value: '$totalBedsHandedOver / $totalBeds',
+                label: 'Beds reviewed',
+                color: ClinicalTheme.clinicalBlue,
+              ),
+              _HandoffStatCard(
+                value: '$totalTransferred',
+                label: 'Medical issues transferred',
+                color: ClinicalTheme.urgentAmber,
+              ),
+            ];
+            if (constraints.maxWidth < 390) {
+              return Column(
+                children: [cards.first, const SizedBox(height: 10), cards.last],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: cards.first),
+                const SizedBox(width: 12),
+                Expanded(child: cards.last),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: ClinicalTheme.urgentAmber.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+            border: Border.all(
+              color: ClinicalTheme.urgentAmber.withValues(alpha: 0.45),
+            ),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                color: ClinicalTheme.urgentAmber,
+                size: 22,
+              ),
+              SizedBox(width: 10),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: ClinicalTheme.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ClinicalTheme.border),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$totalTransferred',
-                        style: const TextStyle(
-                          color: ClinicalTheme.urgentAmber,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Medical Issues Transferred',
-                        style: TextStyle(
-                          color: ClinicalTheme.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+                child: Text(
+                  'Once completed, this handoff record is locked. Any corrections are appended and the original record is preserved.',
+                  style: TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 13,
+                    height: 1.35,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          // PRD FR-16 notice
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.amber.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.amber, size: 20),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'PRD FR-16: A completed handoff record is locked. Corrections are appended, never overwritten.',
-                    style: TextStyle(color: Colors.amber, fontSize: 11.5),
-                  ),
-                ),
-              ],
-            ),
+        ),
+        const SizedBox(height: 28),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
           ),
-          const Spacer(),
-
-          // Secondary Action: 1-Page Printable Sheet (FR-15)
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: ClinicalTheme.border),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              icon: const Icon(
-                Icons.print_outlined,
-                color: ClinicalTheme.textPrimary,
-              ),
-              label: const Text(
-                'View 1-Page Handover Sheet (FR-15)',
-                style: TextStyle(color: ClinicalTheme.textPrimary),
-              ),
-              onPressed: session == null
-                  ? null
-                  : () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              HandoverPrintSheetScreen(session: session),
-                        ),
-                      );
-                    },
-            ),
+          icon: const Icon(Icons.print_outlined),
+          label: const Text('View printable handover sheet'),
+          onPressed: session == null
+              ? null
+              : () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          HandoverPrintSheetScreen(session: session),
+                    ),
+                  );
+                },
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+            backgroundColor: isLocked
+                ? ClinicalTheme.border
+                : ClinicalTheme.successGreen,
+            foregroundColor: Colors.black,
           ),
-          const SizedBox(height: 10),
-
-          // Primary Action: Lock Record
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: isLocked
-                    ? ClinicalTheme.border
-                    : ClinicalTheme.successGreen,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              icon: Icon(isLocked ? Icons.check : Icons.lock_outline),
-              label: Text(
-                isLocked
-                    ? 'Handoff Locked & Completed'
-                    : 'End Shift & Lock Handover',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-              onPressed: isLocked || session == null || patients.isNotEmpty
-                  ? null
-                  : () async {
-                      try {
-                        await ref
-                            .read(wardControllerProvider.notifier)
-                            .completeHandoffSession(
-                              handoffSessionId: session.handoffSessionId,
-                              authorId: _outgoingNurse,
-                              totalBedsHandedOver: totalBedsHandedOver,
-                              totalLoopsTransferred: totalTransferred,
-                            );
-                      } catch (error) {
-                        _showHandoffError(
-                          'Could not save the completed handoff: $error',
+          icon: Icon(isLocked ? Icons.check : Icons.lock_outline),
+          label: Text(
+            isLocked
+                ? 'Handoff Locked & Completed'
+                : 'End Shift & Lock Handover',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 15),
+          ),
+          onPressed: isLocked || session == null || patients.isNotEmpty
+              ? null
+              : () async {
+                  try {
+                    await ref
+                        .read(wardControllerProvider.notifier)
+                        .completeHandoffSession(
+                          handoffSessionId: session.handoffSessionId,
+                          authorId: _outgoingNurse,
+                          totalBedsHandedOver: totalBedsHandedOver,
+                          totalLoopsTransferred: totalTransferred,
                         );
-                        return;
-                      }
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Text(
-                            'Shift handoff locked and signed. Record is immutable.',
-                          ),
-                          backgroundColor: ClinicalTheme.successGreen,
-                        ),
-                      );
-                    },
-            ),
-          ),
-        ],
-      ),
+                  } catch (error) {
+                    _showHandoffError(
+                      'Could not save the completed handoff: $error',
+                    );
+                    return;
+                  }
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Shift handoff locked and signed. Record is immutable.',
+                      ),
+                      backgroundColor: ClinicalTheme.successGreen,
+                    ),
+                  );
+                },
+        ),
+        const SizedBox(height: 12),
+      ],
     );
   }
+}
+
+class _HandoffSectionLabel extends StatelessWidget {
+  const _HandoffSectionLabel({
+    required this.step,
+    required this.label,
+    required this.detail,
+  });
+
+  final String step;
+  final String label;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      CircleAvatar(
+        radius: 13,
+        backgroundColor: ClinicalTheme.clinicalBlue.withValues(alpha: 0.18),
+        child: Text(
+          step,
+          style: const TextStyle(
+            color: ClinicalTheme.clinicalBlue,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      const SizedBox(width: 9),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: ClinicalTheme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              detail,
+              style: const TextStyle(
+                color: ClinicalTheme.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _HandoffStatCard extends StatelessWidget {
+  const _HandoffStatCard({
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: ClinicalTheme.surface,
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+      border: Border.all(color: ClinicalTheme.border),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: ClinicalTheme.textSecondary,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ),
+  );
 }

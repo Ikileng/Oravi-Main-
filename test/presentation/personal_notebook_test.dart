@@ -162,6 +162,49 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('notebook remains usable at 360px with long task content', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = NotebookApi();
+    api.rows['long-task'] = {
+      'id': 'long-task',
+      'body':
+          'Confirm discharge medicines and follow up the outstanding laboratory result before handover',
+      'kind': 'task',
+      'completed': false,
+      'created_at': '2025-01-01T00:00:00Z',
+      'reminder_at': null,
+    };
+    final container = ProviderContainer(
+      overrides: [wardBoardServiceProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    container
+        .read(authenticatedStaffProvider.notifier)
+        .setStaff(staff('N', 'ward_nurse'));
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: PersonalNotebookScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your private clinical workspace'), findsOneWidget);
+    expect(find.text('Mark done'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Add entry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Task details'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('due reminder can be snoozed without completing its task', (
     tester,
   ) async {
