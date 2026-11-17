@@ -197,15 +197,22 @@ def build_router(api):
         recipient = member(payload.recipient_id)
         if recipient is None or recipient.staff_id == profile.staff_id:
             raise HTTPException(400, 'Recipient is unavailable.')
+        recipient_fids = api.staff_store.get_fcm_fids_for_staff(recipient.staff_id)
+        if not recipient_fids:
+            raise HTTPException(409, 'This clinician has no reachable Oravi device right now.')
         call_id, room = 'CALL-' + str(uuid.uuid4()), 'oravi-call-' + uuid.uuid4().hex
         token = api._livekit_token(profile.staff_id, profile.name, room)
         api.call_store.create(call_id=call_id,room_name=room,patient_id='',loop_id='',
                               caller_id=profile.staff_id,recipient_id=recipient.staff_id)
-        for fid in api.staff_store.get_fcm_fids_for_staff(recipient.staff_id):
+        delivered = 0
+        for fid in recipient_fids:
             try:
-                api.fcm_service.send_call_invitation(fid,call_id=call_id)
+                if api.fcm_service.send_call_invitation(fid,call_id=call_id): delivered += 1
             except Exception:
                 api.logger.warning('Direct call push could not be delivered.')
+        if delivered == 0:
+            api.call_store.mark_cancelled(call_id, profile.staff_id)
+            raise HTTPException(503, 'The clinician could not be notified. They may be offline.')
         return {'call_id':call_id,'patient_id':'','loop_id':'','caller_id':profile.staff_id,
                 'caller_name':profile.name,'recipient_id':recipient.staff_id,'recipient_name':recipient.name,
                 'recipient_role':recipient.role,'room_name':room,'livekit_url':api.os.getenv('LIVEKIT_URL'),

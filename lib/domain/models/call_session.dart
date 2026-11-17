@@ -12,6 +12,7 @@ class CallSession {
   final String liveKitUrl;
   final String token;
   final bool isIncoming;
+  final String status;
 
   const CallSession({
     required this.callId,
@@ -27,6 +28,7 @@ class CallSession {
     required this.liveKitUrl,
     required this.token,
     this.isIncoming = false,
+    this.status = 'ringing',
   });
 
   factory CallSession.fromMap(Map<String, dynamic> map) {
@@ -45,6 +47,7 @@ class CallSession {
       liveKitUrl: map['livekit_url'] as String,
       token: map['token'] as String,
       isIncoming: map['is_incoming'] as bool? ?? false,
+      status: map['status'] as String? ?? 'ringing',
     );
   }
 }

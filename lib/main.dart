@@ -26,6 +26,7 @@ import 'presentation/ward_board_screen.dart';
 import 'presentation/admin/dev_admin_dashboard_screen.dart';
 import 'presentation/communications/staff_communications_screen.dart';
 import 'presentation/call_screen.dart';
+import 'presentation/clinical_ritual_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
 
 void main() async {
@@ -94,12 +95,15 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<MedicalIssueAlert>? _openedAlerts;
   StreamSubscription<CallAlert>? _openedCalls;
+  StreamSubscription<RitualAlert>? _openedRituals;
   StreamSubscription<void>? _openedInbox;
   bool _pendingInbox = false;
   MedicalIssueAlert? _pendingAlert;
   CallAlert? _pendingCall;
+  RitualAlert? _pendingRitual;
   bool _openingAlert = false;
   bool _openingCall = false;
+  bool _openingRitual = false;
 
   @override
   void initState() {
@@ -117,7 +121,19 @@ class _OraviAppState extends ConsumerState<OraviApp> {
         .read(medicalIssuePushServiceProvider)
         .openedCalls
         .listen(_queueCall);
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    _openedRituals = ref
+        .read(medicalIssuePushServiceProvider)
+        .openedRituals
+        .listen((alert) {
+          _pendingRitual = alert;
+          if (mounted) setState(() {});
+        });
+    if (!kIsWeb &&
+        const {
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+          TargetPlatform.macOS,
+        }.contains(defaultTargetPlatform)) {
       unawaited(
         ref
             .read(medicalIssuePushServiceProvider)
@@ -133,6 +149,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   void dispose() {
     _openedAlerts?.cancel();
     _openedCalls?.cancel();
+    _openedRituals?.cancel();
     _openedInbox?.cancel();
     super.dispose();
   }
@@ -165,6 +182,44 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openPendingCall();
     });
+  }
+
+  void _schedulePendingRitual(StaffProfile? staff) {
+    if (staff == null || _pendingRitual == null || _openingRitual) return;
+    if (!staff.isClinical) {
+      _pendingRitual = null;
+      return;
+    }
+    _openingRitual = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPendingRitual());
+  }
+
+  Future<void> _openPendingRitual() async {
+    final alert = _pendingRitual;
+    _pendingRitual = null;
+    try {
+      if (alert == null || !mounted) return;
+      await _navigatorKey.currentState?.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ClinicalRitualRoomScreen(
+            ritualId: alert.ritualId,
+            invitation: !alert.review,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open the clinical ritual (${error.runtimeType}).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _openingRitual = false;
+    }
   }
 
   Future<void> _openPendingCall() async {
@@ -323,6 +378,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     final pushStatus = ref.watch(medicalIssuePushControllerProvider);
     _schedulePendingAlert(authStaff);
     _schedulePendingCall(authStaff);
+    _schedulePendingRitual(authStaff);
     if (_pendingInbox && authStaff != null) {
       _pendingInbox = false;
       if (authStaff.isClinical || authStaff.isSupport) {

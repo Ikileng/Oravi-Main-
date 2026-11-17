@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import '../data/clinical_ritual_service.dart';
 import '../data/ward_board_service.dart';
@@ -131,12 +133,68 @@ class _ClinicalRitualReviewScreenState
     }
   }
 
+  Future<void> _print() async {
+    try {
+      final ritual = _ritual;
+      if (ritual == null ||
+          ritual.status != 'approved' ||
+          ritual.summary == null) {
+        return;
+      }
+      final document = pw.Document();
+      final sections = ritual.summary!['sections'] is Map
+          ? Map<String, dynamic>.from(ritual.summary!['sections'] as Map)
+          : <String, dynamic>{};
+      document.addPage(
+        pw.MultiPage(
+          build: (_) => [
+            pw.Text(
+              ritual.title,
+              style: pw.TextStyle(fontSize: 19, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              'Clinical ${ritual.ritualType} | Patient ${ritual.patientId ?? ''}',
+            ),
+            pw.SizedBox(height: 18),
+            for (final entry in _sections.entries) ...[
+              pw.Text(
+                entry.value,
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 5),
+              for (final item in (sections[entry.key] as List? ?? const []))
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(left: 8, bottom: 3),
+                  child: pw.Text('- $item'),
+                ),
+              pw.SizedBox(height: 10),
+            ],
+          ],
+        ),
+      );
+      await Printing.layoutPdf(onLayout: (_) async => document.save());
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the print preview.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final ritual = _ritual;
+    final canManage =
+        ritual?.creatorId == ref.read(authenticatedStaffProvider)?.staffId;
+    final editable = ritual?.status == 'draft_ready' && canManage;
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(title: const Text('Clinical Ritual review')),
@@ -180,7 +238,9 @@ class _ClinicalRitualReviewScreenState
                     style: const TextStyle(color: ClinicalTheme.textSecondary),
                   ),
                 ],
-                if (ritual.summary == null)
+                if (ritual.summary == null &&
+                    ritual.transcript != null &&
+                    canManage)
                   Padding(
                     padding: const EdgeInsets.only(top: 24),
                     child: FilledButton.icon(
@@ -189,12 +249,30 @@ class _ClinicalRitualReviewScreenState
                       label: const Text('Generate draft summary'),
                     ),
                   )
+                else if (ritual.summary == null && !canManage)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 24),
+                    child: Text(
+                      'The initiator is preparing the review summary.',
+                    ),
+                  )
+                else if (ritual.summary == null)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 24),
+                    child: Text(
+                      'No transcript is available. If recording was declined, this ritual has no audio summary.',
+                    ),
+                  )
                 else ...[
                   const SizedBox(height: 20),
-                  const Text(
-                    'AI draft — review before approval',
+                  Text(
+                    ritual.status == 'approved'
+                        ? 'Approved summary'
+                        : 'AI draft — review before approval',
                     style: TextStyle(
-                      color: ClinicalTheme.urgentAmber,
+                      color: ritual.status == 'approved'
+                          ? ClinicalTheme.routineTeal
+                          : ClinicalTheme.urgentAmber,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -203,6 +281,7 @@ class _ClinicalRitualReviewScreenState
                       padding: const EdgeInsets.only(top: 12),
                       child: TextField(
                         controller: _sectionControllers[entry.key],
+                        readOnly: !editable,
                         minLines: 1,
                         maxLines: 5,
                         style: const TextStyle(
@@ -221,11 +300,20 @@ class _ClinicalRitualReviewScreenState
                     ),
                   ),
                   const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: _saving ? null : _approve,
-                    icon: const Icon(Icons.verified),
-                    label: const Text('Approve and save to record'),
-                  ),
+                  if (canManage)
+                    FilledButton.icon(
+                      onPressed: editable && !_saving ? _approve : null,
+                      icon: const Icon(Icons.verified),
+                      label: const Text(
+                        'Save approved summary to patient record',
+                      ),
+                    ),
+                  if (ritual.status == 'approved')
+                    OutlinedButton.icon(
+                      onPressed: _print,
+                      icon: const Icon(Icons.print),
+                      label: const Text('Print approved summary'),
+                    ),
                 ],
               ],
             ),

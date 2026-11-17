@@ -11,10 +11,12 @@ class ClinicalRitualService {
     required String title,
     String? patientId,
     String? scheduledFor,
+    List<String> participantIds = const [],
   }) async {
     final payload = <String, dynamic>{
       'ritual_type': ritualType,
       'title': title,
+      'participant_ids': participantIds,
     };
     if (patientId != null) payload['patient_id'] = patientId;
     if (scheduledFor != null) payload['scheduled_for'] = scheduledFor;
@@ -24,6 +26,32 @@ class ClinicalRitualService {
       payload: payload,
     );
     return ClinicalRitual.fromMap(_map(response));
+  }
+
+  Future<List<Map<String, dynamic>>> searchStaff(
+    String patientId,
+    String query,
+  ) async {
+    final response = await api.communicationRequest(
+      'GET',
+      '/rituals/staff-search?patient_id=${Uri.encodeQueryComponent(patientId)}&q=${Uri.encodeQueryComponent(query)}',
+    );
+    if (response is! List) {
+      throw const FormatException('Invalid staff search response.');
+    }
+    return response.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> addParticipant(String ritualId, String staffId) async {
+    await api.communicationRequest(
+      'POST',
+      '/rituals/$ritualId/participants',
+      payload: {'staff_id': staffId},
+    );
+  }
+
+  Future<void> acceptInvitation(String ritualId) async {
+    await api.communicationRequest('POST', '/rituals/$ritualId/accept');
   }
 
   Future<ClinicalRitual> get(String ritualId) async {
@@ -37,7 +65,9 @@ class ClinicalRitualService {
   Future<List<ClinicalRitual>> list() async {
     final response = await api.communicationRequest('GET', '/rituals');
     if (response is! List) {
-      throw const FormatException('The ritual service returned an invalid list.');
+      throw const FormatException(
+        'The ritual service returned an invalid list.',
+      );
     }
     return response
         .map((item) => ClinicalRitual.fromMap(item as Map<String, dynamic>))
@@ -52,30 +82,22 @@ class ClinicalRitualService {
     return ClinicalRitualRoomSession.fromMap(_map(response));
   }
 
-  Future<ClinicalRitual> startRecording(String ritualId) async {
+  Future<ClinicalRitual> startRecording(
+    String ritualId, {
+    required bool consent,
+  }) async {
     final response = await api.communicationRequest(
       'POST',
       '/rituals/$ritualId/recording/start',
+      payload: {'consent': consent},
     );
     return ClinicalRitual.fromMap(_map(response));
   }
 
-  Future<ClinicalRitual> stopRecording(String ritualId) async {
+  Future<ClinicalRitual> end(String ritualId) async {
     final response = await api.communicationRequest(
       'POST',
       '/rituals/$ritualId/recording/stop',
-    );
-    return ClinicalRitual.fromMap(_map(response));
-  }
-
-  Future<ClinicalRitual> saveTranscript(
-    String ritualId,
-    String transcript,
-  ) async {
-    final response = await api.communicationRequest(
-      'POST',
-      '/rituals/$ritualId/transcript',
-      payload: {'transcript': transcript},
     );
     return ClinicalRitual.fromMap(_map(response));
   }

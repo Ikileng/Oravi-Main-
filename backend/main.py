@@ -1048,6 +1048,7 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
         except Exception as error:
             logger.error("Call invitation delivery failed (%s).", type(error).__name__)
     if delivered == 0:
+        call_store.mark_cancelled(call_id, profile.staff_id)
         raise HTTPException(status_code=503, detail="The clinician could not be notified.")
     recipient = staff_store.get_active_staff_by_ids([recipient_id])[0]
     return {"call_id": call_id, "patient_id": patient_id, "loop_id": loop_id, "caller_id": profile.staff_id, "caller_name": profile.name, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "room_name": room_name, "livekit_url": livekit_url, "token": caller_token, "status": "ringing"}

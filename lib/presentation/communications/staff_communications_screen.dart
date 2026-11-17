@@ -45,9 +45,16 @@ Future<void> startStaffCall(
     ref.invalidate(staffInboxProvider);
   } catch (error) {
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Could not start call: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.toString().contains('reachable Oravi device') ||
+                    error.toString().contains('could not be notified')
+                ? 'This clinician is offline or has no reachable Oravi device right now.'
+                : 'Could not start the call. Check your connection and try again.',
+          ),
+        ),
+      );
     }
   }
 }

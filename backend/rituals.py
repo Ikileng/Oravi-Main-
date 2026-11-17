@@ -14,7 +14,7 @@ from .models import CanonicalEvent, StaffProfile
 
 
 RITUAL_TYPES = {"brief", "huddle", "debrief"}
-RITUAL_STATUSES = {"requested", "in_progress", "draft_ready", "approved"}
+RITUAL_STATUSES = {"requested", "in_progress", "draft_ready", "approved", "ended"}
 
 
 def dispatch_due_notifications(api) -> None:
@@ -59,14 +59,19 @@ class RitualCreateRequest(BaseModel):
 
     ritual_type: str
     title: str = Field(min_length=3, max_length=200)
-    patient_id: Optional[str] = Field(default=None, max_length=120)
-    scheduled_for: Optional[str] = None
+    patient_id: str = Field(min_length=1, max_length=120)
+    participant_ids: list[str] = Field(default_factory=list, max_length=50)
+    scheduled_for: Optional[datetime] = None
 
 
-class TranscriptRequest(BaseModel):
+class RitualParticipantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    staff_id: str = Field(min_length=1, max_length=120)
 
-    transcript: str = Field(min_length=1, max_length=200000)
+
+class RecordingConsentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: bool
 
 
 class RitualDraftRequest(BaseModel):
@@ -100,7 +105,9 @@ class ClinicalRitualStore:
                     room_name TEXT,
                     egress_id TEXT,
                     recording_status TEXT,
-                    recording_location TEXT
+                    recording_location TEXT,
+                    recording_consent_by TEXT,
+                    recording_consent_at TEXT
                 )
                 """
             )
@@ -115,11 +122,21 @@ class ClinicalRitualStore:
                 )
                 """
             )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS clinical_ritual_participants (
+                    ritual_id TEXT NOT NULL, staff_id TEXT NOT NULL,
+                    source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'invited',
+                    invited_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    PRIMARY KEY (ritual_id, staff_id))"""
+            )
             for column, definition in (
                 ("room_name", "TEXT"),
                 ("egress_id", "TEXT"),
                 ("recording_status", "TEXT"),
                 ("recording_location", "TEXT"),
+                ("recording_consent_by", "TEXT"),
+                ("recording_consent_at", "TEXT"),
             ):
                 try:
                     conn.execute(
@@ -168,13 +185,46 @@ class ClinicalRitualStore:
                     request.title.strip(),
                     request.patient_id,
                     creator_id,
-                    request.scheduled_for,
+                    request.scheduled_for.astimezone(timezone.utc).isoformat() if request.scheduled_for else None,
                     now,
                     now,
                     room_name,
                 ),
             )
         return self.get(ritual_id)
+
+    def add_participant(self, ritual_id: str, staff_id: str, source: str, invited_by: str) -> bool:
+        with self.connection() as conn:
+            return conn.execute(
+                """INSERT OR IGNORE INTO clinical_ritual_participants
+                   (ritual_id,staff_id,source,status,invited_by,created_at)
+                   VALUES (?,?,?,'invited',?,?)""",
+                (ritual_id, staff_id, source, invited_by, datetime.now(timezone.utc).isoformat()),
+            ).rowcount == 1
+
+    def participant(self, ritual_id: str, staff_id: str) -> Optional[dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM clinical_ritual_participants WHERE ritual_id=? AND staff_id=?",
+                (ritual_id, staff_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def participants(self, ritual_id: str) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM clinical_ritual_participants WHERE ritual_id=? ORDER BY created_at",
+                (ritual_id,),
+            ).fetchall()]
+
+    def accept_participant(self, ritual_id: str, staff_id: str) -> bool:
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """UPDATE clinical_ritual_participants SET status='accepted',accepted_at=?
+                   WHERE ritual_id=? AND staff_id=? AND status='invited'""",
+                (datetime.now(timezone.utc).isoformat(), ritual_id, staff_id),
+            )
+        return cursor.rowcount == 1
 
     def set_recording_started(
         self, ritual_id: str, egress_id: str, room_name: str
@@ -208,11 +258,12 @@ class ClinicalRitualStore:
             conn.execute(
                 """
                 UPDATE clinical_rituals
-                SET recording_status = ?, recording_location = COALESCE(?, recording_location),
+                SET recording_status = ?, status = CASE WHEN ?='declined' THEN 'in_progress' ELSE status END,
+                    recording_location = COALESCE(?, recording_location),
                     updated_at = ?
                 WHERE ritual_id = ?
                 """,
-                (status, location, now, ritual_id),
+                (status, status, location, now, ritual_id),
             )
         return self.get(ritual_id)
 
@@ -277,6 +328,19 @@ class ClinicalRitualStore:
             )
         return self.get(ritual_id)
 
+    def end_without_recording(self, ritual_id: str) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.connection() as conn:
+            conn.execute("UPDATE clinical_rituals SET status='ended', updated_at=? WHERE ritual_id=?", (now, ritual_id))
+        return self.get(ritual_id)
+
+    def record_consent(self, ritual_id: str, staff_id: str, consent: bool) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE clinical_rituals SET recording_consent_by=?,recording_consent_at=?,recording_status=? WHERE ritual_id=?",
+                (staff_id, datetime.now(timezone.utc).isoformat(), "consented" if consent else "declined", ritual_id),
+            )
+
     def save_draft(
         self, ritual_id: str, summary: dict[str, Any], editor_id: Optional[str] = None
     ) -> dict[str, Any]:
@@ -327,6 +391,53 @@ def build_router(api):
             raise HTTPException(status_code=404, detail="Clinical Ritual not found.")
         return ritual
 
+    def authorized(ritual: dict[str, Any], profile: StaffProfile, *, require_acceptance: bool = False) -> None:
+        if ritual["creator_id"] == profile.staff_id:
+            return
+        is_care_team = bool(ritual["patient_id"]) and profile.staff_id in api._authorized_patient_staff_ids(
+            ritual["patient_id"], date.today().isoformat()
+        )
+        participant = api.ritual_store.participant(ritual["ritual_id"], profile.staff_id)
+        if not is_care_team and participant is None:
+            raise HTTPException(status_code=404, detail="Clinical Ritual not found.")
+        if require_acceptance and not is_care_team and participant["status"] != "accepted":
+            raise HTTPException(status_code=403, detail="Accept the invitation before joining.")
+
+    def protect_unaccepted_invitation(ritual: dict[str, Any], profile: StaffProfile) -> dict[str, Any]:
+        participant = api.ritual_store.participant(ritual["ritual_id"], profile.staff_id)
+        in_team = bool(ritual["patient_id"]) and profile.staff_id in api._authorized_patient_staff_ids(ritual["patient_id"], date.today().isoformat())
+        if participant and participant["status"] != "accepted" and not in_team:
+            ritual["transcript"] = None
+            ritual["summary"] = None
+            ritual["recording_location"] = None
+            ritual["egress_id"] = None
+        return ritual
+
+    def queue_invitation(api, ritual: dict[str, Any], staff_id: str, scheduled_for: datetime) -> None:
+        api.ritual_store.queue_notifications(
+            ritual["ritual_id"], [staff_id], scheduled_for.astimezone(timezone.utc).isoformat()
+        )
+
+    def ensure_scheduled_time_reached(ritual: dict[str, Any]) -> None:
+        scheduled = ritual.get("scheduled_for")
+        if scheduled and datetime.fromisoformat(scheduled).astimezone(timezone.utc) > datetime.now(timezone.utc):
+            raise HTTPException(status_code=409, detail="This ritual has not reached its scheduled start time.")
+
+    @router.get("/staff-search")
+    def staff_search(q: str = "", patient_id: str = "", profile: StaffProfile = Depends(clinical_staff)):
+        if not patient_id or not api._staff_can_access_patient(profile, patient_id, date.today().isoformat()):
+            raise HTTPException(status_code=403, detail="You do not have access to this patient.")
+        from .staff_roles import CLINICAL_ROLES
+        team_ids = api._authorized_patient_staff_ids(patient_id, date.today().isoformat())
+        query = q.strip().casefold()
+        return [
+            {"staff_id": person.staff_id, "name": person.name, "role": person.role,
+             "care_team": person.staff_id in team_ids}
+            for person in api.staff_store.list_staff()
+            if person.is_active and person.role in CLINICAL_ROLES
+            and (not query or query in f"{person.name} {person.staff_id}".casefold())
+        ]
+
     @router.post("")
     def create_ritual(
         request: RitualCreateRequest,
@@ -334,26 +445,46 @@ def build_router(api):
     ):
         if request.ritual_type not in RITUAL_TYPES:
             raise HTTPException(status_code=400, detail="Invalid Clinical Ritual type.")
-        ritual = api.ritual_store.create(request, profile.staff_id)
-        if request.patient_id:
-            recipient_ids = api._authorized_patient_staff_ids(
-                request.patient_id, date.today().isoformat()
-            ) - {profile.staff_id}
-            scheduled_for = request.scheduled_for or datetime.now(
-                timezone.utc
-            ).isoformat()
-            api.ritual_store.queue_notifications(
-                ritual["ritual_id"], sorted(recipient_ids), scheduled_for
-            )
-            if request.scheduled_for is None:
-                dispatch_due_notifications(api)
+        if not api._staff_can_access_patient(profile, request.patient_id, date.today().isoformat()):
+            raise HTTPException(status_code=403, detail="You do not have access to this patient.")
+        if request.ritual_type == "huddle" and request.scheduled_for is not None:
+            raise HTTPException(status_code=400, detail="Huddles start immediately.")
+        scheduled = request.scheduled_for
+        if scheduled is not None:
+            if scheduled.tzinfo is None:
+                raise HTTPException(status_code=400, detail="Scheduled time must include a timezone.")
+            scheduled = scheduled.astimezone(timezone.utc)
+            if scheduled <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
+        normalized = request.model_copy(update={"title": request.title.strip(), "scheduled_for": scheduled})
+        if len(normalized.title) < 3:
+            raise HTTPException(status_code=422, detail="Title must contain at least three characters.")
+        team_ids = api._authorized_patient_staff_ids(request.patient_id, date.today().isoformat())
+        selected_ids = (set(request.participant_ids) | team_ids) - {profile.staff_id}
+        active_clinicians = {p.staff_id for p in api.staff_store.list_staff() if p.is_active and p.role in {"ward_nurse", "charge_nurse", "doctor_on_call"}}
+        if not selected_ids <= active_clinicians:
+            raise HTTPException(status_code=400, detail="One or more ritual participants are unavailable.")
+        ritual = api.ritual_store.create(normalized, profile.staff_id)
+        moment = scheduled or datetime.now(timezone.utc)
+        for staff_id in sorted(selected_ids):
+            source = "care_team" if staff_id in team_ids else "added"
+            api.ritual_store.add_participant(ritual["ritual_id"], staff_id, source, profile.staff_id)
+            queue_invitation(api, ritual, staff_id, moment)
+        if scheduled is None:
+            dispatch_due_notifications(api)
+        ritual["participants"] = api.ritual_store.participants(ritual["ritual_id"])
         return ritual
 
     @router.get("/{ritual_id}")
     def read_ritual(
         ritual_id: str, profile: StaffProfile = Depends(clinical_staff)
     ):
-        return get_ritual(ritual_id)
+        ritual = get_ritual(ritual_id)
+        authorized(ritual, profile)
+        ritual["participants"] = api.ritual_store.participants(ritual_id)
+        current = api.ritual_store.participant(ritual_id, profile.staff_id)
+        ritual["participant_status"] = current["status"] if current else None
+        return protect_unaccepted_invitation(ritual, profile)
 
     @router.get("")
     def list_rituals(profile: StaffProfile = Depends(clinical_staff)):
@@ -364,31 +495,57 @@ def build_router(api):
         visible = []
         for row in rows:
             ritual = api.ritual_store._row(row)
+            ritual["participants"] = api.ritual_store.participants(ritual["ritual_id"])
             if ritual["creator_id"] == profile.staff_id:
                 visible.append(ritual)
                 continue
             patient_id = ritual["patient_id"]
-            if patient_id and profile.staff_id in api._authorized_patient_staff_ids(
-                patient_id, date.today().isoformat()
-            ):
-                visible.append(ritual)
+            if (patient_id and profile.staff_id in api._authorized_patient_staff_ids(patient_id, date.today().isoformat())) or api.ritual_store.participant(ritual["ritual_id"], profile.staff_id):
+                current = api.ritual_store.participant(ritual["ritual_id"], profile.staff_id)
+                ritual["participant_status"] = current["status"] if current else None
+                visible.append(protect_unaccepted_invitation(ritual, profile))
         return visible
 
-    @router.post("/{ritual_id}/transcript")
-    def save_transcript(
-        ritual_id: str,
-        request: TranscriptRequest,
-        profile: StaffProfile = Depends(clinical_staff),
-    ):
+    @router.post("/{ritual_id}/participants")
+    def add_ritual_participant(ritual_id: str, request: RitualParticipantRequest, profile: StaffProfile = Depends(clinical_staff)):
+        ritual = get_ritual(ritual_id)
+        if ritual["creator_id"] != profile.staff_id or ritual["status"] in {"approved", "ended"}:
+            raise HTTPException(status_code=403, detail="Only the initiator can invite participants during an active ritual.")
+        person = next((p for p in api.staff_store.list_staff() if p.staff_id == request.staff_id and p.is_active and p.role in {"ward_nurse", "charge_nurse", "doctor_on_call"}), None)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Clinician not found.")
+        if not api.ritual_store.add_participant(ritual_id, person.staff_id, "added", profile.staff_id):
+            raise HTTPException(status_code=409, detail="This clinician has already been invited.")
+        moment = datetime.now(timezone.utc) if ritual["status"] == "in_progress" else datetime.fromisoformat(ritual["scheduled_for"]) if ritual.get("scheduled_for") else datetime.now(timezone.utc)
+        queue_invitation(api, ritual, person.staff_id, moment)
+        if moment <= datetime.now(timezone.utc):
+            dispatch_due_notifications(api)
+        return {"success": True, "participant": api.ritual_store.participant(ritual_id, person.staff_id)}
+
+    @router.post("/{ritual_id}/accept")
+    def accept_invitation(ritual_id: str, profile: StaffProfile = Depends(clinical_staff)):
         get_ritual(ritual_id)
-        return api.ritual_store.save_transcript(ritual_id, request.transcript)
+        if not api.ritual_store.accept_participant(ritual_id, profile.staff_id):
+            participant = api.ritual_store.participant(ritual_id, profile.staff_id)
+            if participant is None or participant["status"] != "accepted":
+                raise HTTPException(status_code=403, detail="No active invitation was found.")
+        return {"success": True}
 
     @router.post("/{ritual_id}/recording/start")
     async def start_recording(
         ritual_id: str,
+        request: RecordingConsentRequest,
         profile: StaffProfile = Depends(clinical_staff),
     ):
         ritual = get_ritual(ritual_id)
+        authorized(ritual, profile, require_acceptance=True)
+        ensure_scheduled_time_reached(ritual)
+        if ritual["creator_id"] != profile.staff_id:
+            raise HTTPException(status_code=403, detail="Only the initiator can authorize recording.")
+        api.ritual_store.record_consent(ritual_id, profile.staff_id, request.consent)
+        if not request.consent:
+            api.ritual_store.set_recording_status(ritual_id, "declined")
+            return api.ritual_store.get(ritual_id)
         if ritual["recording_status"] in {"recording", "processing"}:
             raise HTTPException(status_code=409, detail="A recording is already active.")
         try:
@@ -408,6 +565,8 @@ def build_router(api):
         profile: StaffProfile = Depends(clinical_staff),
     ):
         ritual = get_ritual(ritual_id)
+        authorized(ritual, profile, require_acceptance=True)
+        ensure_scheduled_time_reached(ritual)
         return {
             "room_name": ritual["room_name"],
             "livekit_url": os.getenv("LIVEKIT_URL"),
@@ -422,15 +581,18 @@ def build_router(api):
         profile: StaffProfile = Depends(clinical_staff),
     ):
         ritual = get_ritual(ritual_id)
-        if ritual["recording_status"] != "recording" or not ritual["egress_id"]:
-            return ritual
-        try:
-            await api.livekit_egress_service.stop_room_recording(
-                ritual["egress_id"]
-            )
-        except RuntimeError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        return api.ritual_store.set_recording_status(ritual_id, "processing")
+        authorized(ritual, profile, require_acceptance=True)
+        if ritual["creator_id"] != profile.staff_id:
+            raise HTTPException(status_code=403, detail="Only the initiator can end the ritual.")
+        if ritual["recording_status"] == "recording" and ritual["egress_id"]:
+            try:
+                await api.livekit_egress_service.stop_room_recording(ritual["egress_id"])
+            except RuntimeError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            api.ritual_store.set_recording_status(ritual_id, "processing")
+        else:
+            api.ritual_store.end_without_recording(ritual_id)
+        return api.ritual_store.get(ritual_id)
 
     @router.post("/webhooks/livekit")
     async def livekit_webhook(
@@ -452,6 +614,8 @@ def build_router(api):
         ritual = api.ritual_store.find_by_room_name(event.egress_info.room_name)
         if ritual is None:
             raise HTTPException(status_code=404, detail="Ritual recording room not found.")
+        if ritual["status"] in {"draft_ready", "approved"}:
+            return {"accepted": True, "ritual_id": ritual["ritual_id"], "status": ritual["status"]}
         if event.egress_info.status != livekit_api.EGRESS_COMPLETE:
             api.ritual_store.set_recording_status(
                 ritual["ritual_id"], "failed"
@@ -485,13 +649,30 @@ def build_router(api):
             ritual["ritual_id"], transcription["text"]
         )
         api.ritual_store.set_recording_status(ritual["ritual_id"], "transcribed")
-        return {"accepted": True, "ritual_id": saved["ritual_id"]}
+        try:
+            summary = api.llm_service.summarize_ritual(
+                ritual_type=ritual["ritual_type"], title=ritual["title"], transcript=transcription["text"]
+            )
+        except Exception as error:
+            api.logger.error("Clinical Ritual summary generation failed (%s).", type(error).__name__)
+            raise HTTPException(status_code=503, detail="Transcript saved; summary generation can be retried from Home.") from error
+        draft = api.ritual_store.save_draft(ritual["ritual_id"], summary)
+        for fid in api.staff_store.get_fcm_fids_for_staff(ritual["creator_id"]):
+            try:
+                if not api.fcm_service.send_clinical_ritual_review_alert(fid, ritual_id=ritual["ritual_id"], title=ritual["title"]):
+                    api.staff_store.remove_fcm_fid(fid)
+            except Exception as error:
+                api.logger.error("Clinical Ritual review alert failed (%s).", type(error).__name__)
+        return {"accepted": True, "ritual_id": saved["ritual_id"], "status": draft["status"]}
 
     @router.post("/{ritual_id}/draft")
     def generate_draft(
         ritual_id: str, profile: StaffProfile = Depends(clinical_staff)
     ):
         ritual = get_ritual(ritual_id)
+        authorized(ritual, profile)
+        if ritual["creator_id"] != profile.staff_id:
+            raise HTTPException(status_code=403, detail="Only the initiator can prepare the review draft.")
         if not ritual["transcript"]:
             raise HTTPException(status_code=409, detail="A transcript is required.")
         summary = api.llm_service.summarize_ritual(
@@ -508,6 +689,9 @@ def build_router(api):
         profile: StaffProfile = Depends(clinical_staff),
     ):
         ritual = get_ritual(ritual_id)
+        authorized(ritual, profile)
+        if ritual["creator_id"] != profile.staff_id:
+            raise HTTPException(status_code=403, detail="Only the initiator can edit the review draft.")
         if ritual["status"] != "draft_ready":
             raise HTTPException(status_code=409, detail="No editable draft is ready.")
         return api.ritual_store.save_draft(
@@ -521,25 +705,38 @@ def build_router(api):
         profile: StaffProfile = Depends(clinical_staff),
     ):
         ritual = get_ritual(ritual_id)
-        approved = api.ritual_store.approve(
-            ritual_id, request.summary, profile.staff_id
-        )
+        authorized(ritual, profile)
+        if ritual["creator_id"] != profile.staff_id:
+            raise HTTPException(status_code=403, detail="Only the initiator can approve the summary.")
+        if ritual["status"] == "approved":
+            return ritual
+        if ritual["status"] != "draft_ready":
+            raise HTTPException(status_code=409, detail="Only a ready draft can be approved.")
+        now = datetime.now(timezone.utc).isoformat()
         event = CanonicalEvent(
             event_id=str(uuid.uuid4()),
             patient_id=ritual["patient_id"] or "",
             type="ClinicalRitualApproved",
             author_id=profile.staff_id,
             device_id=f"RITUAL-{ritual_id}",
-            client_created_at=approved["approved_at"],
+            client_created_at=now,
             payload={
                 "ritual_id": ritual_id,
                 "ritual_type": ritual["ritual_type"],
                 "title": ritual["title"],
-                "summary": approved["summary"],
-                "transcript_retained": bool(approved["transcript"]),
+                "summary": request.summary,
+                "transcript_retained": bool(ritual["transcript"]),
             },
         )
-        api.store.append_events([event])
-        return approved
+        def approve_in_event_transaction(conn):
+            cursor = conn.execute(
+                """UPDATE clinical_rituals SET summary_json=?,status='approved',approved_by=?,
+                   approved_at=?,updated_at=?,version=version+1 WHERE ritual_id=? AND status='draft_ready'""",
+                (json.dumps(request.summary), profile.staff_id, now, now, ritual_id),
+            )
+            if cursor.rowcount != 1:
+                raise HTTPException(status_code=409, detail="Only a ready draft can be approved.")
+        api.store.append_events([event], transaction_action=approve_in_event_transaction)
+        return api.ritual_store.get(ritual_id)
 
     return router

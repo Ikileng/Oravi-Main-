@@ -494,24 +494,40 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     );
   }
 
-  Future<void> _openRitual(
-    BuildContext context,
-    ClinicalRitual ritual,
-  ) async {
+  Future<void> _openRitual(BuildContext context, ClinicalRitual ritual) async {
+    final scheduledFor = DateTime.tryParse(ritual.scheduledFor ?? '');
+    if (scheduledFor != null && scheduledFor.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This ritual is scheduled for ${scheduledFor.toLocal()}',
+          ),
+        ),
+      );
+      return;
+    }
+    if (ritual.status == 'draft_ready' ||
+        ritual.status == 'approved' ||
+        ritual.recordingStatus == 'transcribed') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
+        ),
+      );
+      return;
+    }
     if (ritual.status == 'requested' ||
+        ritual.status == 'in_progress' ||
         ritual.recordingStatus == 'not_started') {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ClinicalRitualRoomScreen(ritualId: ritual.ritualId),
+          builder: (_) => ClinicalRitualRoomScreen(
+            ritualId: ritual.ritualId,
+            invitation: ritual.participantStatus == 'invited',
+          ),
         ),
       );
     }
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
-      ),
-    );
   }
 
   // ==========================================
