@@ -138,6 +138,14 @@ def build_router(api):
         with api.communications_store.connection() as conn:
             rows = conn.execute('SELECT * FROM direct_messages WHERE sender_id=? OR recipient_id=? '
                                 'ORDER BY id DESC', (profile.staff_id,profile.staff_id)).fetchall()
+            read = {r['item_id'] for r in conn.execute(
+                'SELECT item_id FROM inbox_reads WHERE staff_id=?', (profile.staff_id,))}
+        unread_by_contact = {}
+        for message in rows:
+            if (message['recipient_id'] == profile.staff_id
+                    and f"message:{message['id']}" not in read):
+                sender_id = message['sender_id']
+                unread_by_contact[sender_id] = unread_by_contact.get(sender_id, 0) + 1
         result, seen = [], set()
         for row in rows:
             other = row['recipient_id'] if row['sender_id'] == profile.staff_id else row['sender_id']
@@ -145,9 +153,11 @@ def build_router(api):
                 continue
             seen.add(other)
             person = member(other)
+            unread_count = unread_by_contact.get(other, 0)
             result.append({'contact': contact(person) if person else
                 {'staff_id': other, 'name': 'Unavailable account', 'role': ''},
-                'last_message': row['body'], 'sent_at': row['sent_at']})
+                'last_message': row['body'], 'sent_at': row['sent_at'],
+                'unread_count': unread_count})
         return result
 
     @router.get('/direct/threads/{other_id}')

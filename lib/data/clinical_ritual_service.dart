@@ -74,6 +74,16 @@ class ClinicalRitualService {
         .toList();
   }
 
+  Future<List<ClinicalRitual>> activeAlerts() async {
+    final response = await api.communicationRequest('GET', '/rituals/alerts');
+    if (response is! List) {
+      throw const FormatException('The ritual alerts response was invalid.');
+    }
+    return response
+        .map((item) => ClinicalRitual.fromMap(item as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<ClinicalRitualRoomSession> getRoomSession(String ritualId) async {
     final response = await api.communicationRequest(
       'POST',

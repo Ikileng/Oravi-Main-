@@ -103,7 +103,8 @@ class _DigitalWhiteboardScreenState
                     children: [
                       if (currentWard.wardId.isEmpty)
                         _buildNoWardMessage()
-                      else if (ref.watch(wardContextNeedsConfirmationProvider))
+                      else if (hasWriteAccess &&
+                          ref.watch(wardContextNeedsConfirmationProvider))
                         _buildWardConfirmation(currentWard)
                       else if (boardState.isLoading)
                         const Center(child: CircularProgressIndicator())
@@ -230,12 +231,13 @@ class _DigitalWhiteboardScreenState
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            Icons.keyboard_arrow_down,
-                            size: 16,
-                            color: Color(0xFF94A3B8),
-                          ),
+                          if (hasWriteAccess) const SizedBox(width: 4),
+                          if (hasWriteAccess)
+                            const Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 16,
+                              color: Color(0xFF94A3B8),
+                            ),
                         ],
                       ),
                     ),

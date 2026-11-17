@@ -28,6 +28,11 @@ class SyncAckItem:
     hash: str
 
 @dataclass
+class SyncRejectedItem:
+    event_id: str
+    reason: str
+
+@dataclass
 class SyncPushRequest:
     device_id: str
     events: List[CanonicalEvent]
@@ -37,6 +42,7 @@ class SyncPushResponse:
     status: str
     acknowledged_count: int
     acks: List[SyncAckItem]
+    rejected: List[SyncRejectedItem] = field(default_factory=list)
 
 @dataclass
 class SyncPullResponse:

@@ -297,7 +297,7 @@ class TestBackendHttpIntegration(unittest.TestCase):
             "event_id": "integration-unauthorized-patient-event",
             "patient_id": "PATIENT-TEST-2",
         }
-        status_code, _ = self._request(
+        status_code, rejected = self._request(
             "POST",
             "/api/v1/sync/push",
             payload={
@@ -306,7 +306,12 @@ class TestBackendHttpIntegration(unittest.TestCase):
             },
             token=nurse_token,
         )
-        self.assertEqual(status_code, 403)
+        self.assertEqual(status_code, 200)
+        self.assertEqual(rejected["status"], "partial")
+        self.assertEqual(
+            rejected["rejected"][0]["event_id"],
+            "integration-unauthorized-patient-event",
+        )
 
         status_code, incoming_login = self._request(
             "POST",
@@ -457,13 +462,18 @@ class TestBackendHttpIntegration(unittest.TestCase):
             "loop_id": handoff_loop_id,
             "payload": {"content": "This must be rejected after handoff."},
         }
-        status_code, _ = self._request(
+        status_code, rejected = self._request(
             "POST",
             "/api/v1/sync/push",
             payload={"device_id": "PHONE-INTEGRATION", "events": [outgoing_followup]},
             token=nurse_token,
         )
-        self.assertEqual(status_code, 403)
+        self.assertEqual(status_code, 200)
+        self.assertEqual(rejected["status"], "partial")
+        self.assertEqual(
+            rejected["rejected"][0]["event_id"],
+            "integration-outgoing-after-acceptance",
+        )
 
         followup = {
             **admission,
@@ -896,7 +906,7 @@ class TestBackendHttpIntegration(unittest.TestCase):
             "patient_id": "PATIENT-TEST-2",
             "loop_id": "ISSUE-UNRELATED",
         }
-        status_code, _ = self._request(
+        status_code, rejected = self._request(
             "POST",
             "/api/v1/sync/push",
             payload={
@@ -905,7 +915,12 @@ class TestBackendHttpIntegration(unittest.TestCase):
             },
             token=owner_token,
         )
-        self.assertEqual(status_code, 403)
+        self.assertEqual(status_code, 200)
+        self.assertEqual(rejected["status"], "partial")
+        self.assertEqual(
+            rejected["rejected"][0]["event_id"],
+            "integration-carry-unrelated",
+        )
 
 
 if __name__ == "__main__":

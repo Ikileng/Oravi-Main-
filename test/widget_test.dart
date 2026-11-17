@@ -93,7 +93,10 @@ class _TestWardBoardService extends WardBoardService {
   }) async {}
 }
 
-Future<void> _pumpWardBoard(WidgetTester tester) async {
+Future<ProviderContainer> _pumpWardBoard(
+  WidgetTester tester, {
+  bool emptyPatients = false,
+}) async {
   final database = OraviLocalDatabase(NativeDatabase.memory());
   final repository = LocalWardRepository(database: database);
   await repository.initialize();
@@ -101,10 +104,24 @@ Future<void> _pumpWardBoard(WidgetTester tester) async {
   addTearDown(database.close);
   final container = ProviderContainer(
     overrides: [
+      if (emptyPatients)
+        personallyAssignedPatientIdsProvider.overrideWithValue(<String>{}),
       localDatabaseProvider.overrideWithValue(database),
       localWardRepositoryProvider.overrideWithValue(repository),
       localDeviceIdProvider.overrideWithValue('DEVICE-test-install'),
       wardBoardServiceProvider.overrideWithValue(_TestWardBoardService()),
+      patientStaffListProvider('PAT-4B-01').overrideWith(
+        (ref) async => const [
+          StaffProfile(
+            staffId: SeededWardData.testNurseId,
+            name: 'Nurse A',
+            role: 'ward_nurse',
+            wardId: '',
+            avatarColor: '#059669',
+            initials: 'NA',
+          ),
+        ],
+      ),
       staffAuthServiceProvider.overrideWithValue(
         StaffAuthService(
           mockVerifyPinHandler: (staffId, pin) async => AuthResult(
@@ -153,7 +170,7 @@ Future<void> _pumpWardBoard(WidgetTester tester) async {
     (await container.read(wardBoardProvider.future)).assignments,
     hasLength(5),
   );
-  addTearDown(container.dispose);
+  if (!emptyPatients) addTearDown(container.dispose);
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -161,9 +178,37 @@ Future<void> _pumpWardBoard(WidgetTester tester) async {
       child: const OraviApp(home: WardBoardScreen()),
     ),
   );
+  return container;
 }
 
 void main() {
+  testWidgets(
+    'Home and Patients have distinct empty states and real navigation',
+    (tester) async {
+      final container = await _pumpWardBoard(tester, emptyPatients: true);
+      await tester.pump();
+      expect(find.text('Nothing on your Home page yet'), findsOneWidget);
+      expect(find.text('You have no patients'), findsNothing);
+      await tester.tap(find.text('Patients').last);
+      await tester.pump();
+      expect(find.text('You have no patients'), findsOneWidget);
+      expect(find.text('Nothing on your Home page yet'), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+      await tester.tap(find.text('Home').last);
+      await tester.pump();
+      expect(find.text('Nothing on your Home page yet'), findsOneWidget);
+      expect(find.text('You have no patients'), findsNothing);
+      await tester.tap(find.text('More').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Switch Active Hospital Ward'), findsNothing);
+      Navigator.of(tester.element(find.text('Lock Station'))).pop();
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+      await tester.pump();
+    },
+  );
+
   testWidgets('Oravi Ward Board loads beds and displays patient identifiers', (
     WidgetTester tester,
   ) async {
@@ -190,9 +235,11 @@ void main() {
   testWidgets('Tapping a bed row opens PatientDetailScreen with loops', (
     WidgetTester tester,
   ) async {
-    await _pumpWardBoard(tester);
+    final container = await _pumpWardBoard(tester);
 
     // Open Bed 1 using the visible patient identity.
+    await tester.tap(find.text('Patients').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('01'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open issue thread (1)'));
@@ -211,6 +258,30 @@ void main() {
       find.textContaining('SpO2 stable at 94% on 2L nasal prongs'),
       findsOneWidget,
     );
+
+    await tester.ensureVisible(find.text('Reply').first);
+    await tester.tap(find.text('Reply').first);
+    await tester.pumpAndSettle();
+    final replyField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.hintText == 'Add note or update...',
+    );
+    expect(tester.widget<TextField>(replyField).controller!.text, '@Nurse A: ');
+    // Repeated taps must not duplicate the mention or its recipient.
+    await tester.tap(find.text('Reply').first);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(replyField).controller!.text, '@Nurse A: ');
+    await tester.ensureVisible(find.byIcon(Icons.send));
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    final reply = container
+        .read(patientLoopsProvider('PAT-4B-01'))
+        .expand((loop) => loop.messages)
+        .singleWhere((message) => message.content == '@Nurse A:');
+    expect(reply.mentionedStaffIds, [SeededWardData.testNurseId]);
+    await tester.pumpWidget(const SizedBox.shrink());
+    container.invalidate(syncEngineProvider);
   });
 
   testWidgets(

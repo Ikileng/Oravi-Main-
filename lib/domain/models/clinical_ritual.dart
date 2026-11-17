@@ -9,6 +9,7 @@ class ClinicalRitual {
   final String? recordingStatus;
   final String? scheduledFor;
   final String? participantStatus;
+  final String? alertType;
   final List<Map<String, dynamic>> participants;
   final String? egressId;
   final String? transcript;
@@ -25,6 +26,7 @@ class ClinicalRitual {
     required this.recordingStatus,
     required this.scheduledFor,
     required this.participantStatus,
+    this.alertType,
     required this.participants,
     required this.egressId,
     required this.transcript,
@@ -43,6 +45,7 @@ class ClinicalRitual {
       recordingStatus: map['recording_status'] as String?,
       scheduledFor: map['scheduled_for'] as String?,
       participantStatus: map['participant_status'] as String?,
+      alertType: map['alert_type'] as String?,
       participants: (map['participants'] as List? ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),

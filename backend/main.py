@@ -24,7 +24,7 @@ from datetime import date
 from typing import List, Optional
 from fastapi import FastAPI, Query, HTTPException, Header, Depends, status
 from .models import (
-    CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
+    CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, SyncRejectedItem, AskRequest, AskResponse,
     StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile,
     HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse, WardConfigurationRequest
 )
@@ -709,8 +709,16 @@ def publish_allocation(allocation: ShiftAllocationModel, profile: StaffProfile =
                 carry_forward_owners.items()
             ):
                 owner = staff_store.get_active_staff_by_ids([owner_id])[0]
+                # A board publish can be retried after a client loses the response.
+                # Stable IDs make carry-forward events idempotent across that retry.
+                carry_forward_event_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"oravi:allocation:{allocation.allocation_id}:carry-forward:{patient_id}:{loop_id}",
+                    )
+                )
                 event = CanonicalEvent(
-                    event_id=str(uuid.uuid4()),
+                    event_id=carry_forward_event_id,
                     patient_id=patient_id,
                     type="LoopOwnerChanged",
                     author_id=profile.staff_id,
@@ -1174,6 +1182,8 @@ def delete_staff_account(staff_id: str, admin: StaffProfile = Depends(require_de
 
 @app.post("/api/v1/sync/push", response_model=SyncPushResponse)
 def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_staff)):
+    accepted_events = []
+    rejected_events = []
     for event in request.events:
         access_date = event.client_created_at[:10]
         handoff_session_id = event.payload.get("handoff_session_id")
@@ -1260,21 +1270,30 @@ def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_
                 )
             )
         if event.author_id != profile.staff_id or not authorized:
-            raise HTTPException(
-                status_code=403,
-                detail="Events must belong to your account and an assigned patient.",
+            rejected_events.append(
+                SyncRejectedItem(
+                    event_id=event.event_id,
+                    reason=(
+                        "Event author does not match the signed-in account."
+                        if event.author_id != profile.staff_id
+                        else "The patient was not assigned to this account for the event date."
+                    ),
+                )
             )
+            continue
         if event.type == 'MessagePosted':
             event.payload['author_role'] = profile.role
-    _validate_patient_issue_events(request.events)
-    notifications = _notification_recipients_for_events(request.events)
+        accepted_events.append(event)
+    _validate_patient_issue_events(accepted_events)
+    notifications = _notification_recipients_for_events(accepted_events)
     acks = store.append_events(
-        request.events, notification_staff_ids_by_event=notifications
+        accepted_events, notification_staff_ids_by_event=notifications
     )
     return SyncPushResponse(
-        status="success",
+        status="partial" if rejected_events else "success",
         acknowledged_count=len(acks),
         acks=acks,
+        rejected=rejected_events,
     )
 
 @app.get("/api/v1/sync/pull", response_model=SyncPullResponse)

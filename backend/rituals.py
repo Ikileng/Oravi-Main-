@@ -258,12 +258,15 @@ class ClinicalRitualStore:
             conn.execute(
                 """
                 UPDATE clinical_rituals
-                SET recording_status = ?, status = CASE WHEN ?='declined' THEN 'in_progress' ELSE status END,
+                SET recording_status = ?, status = CASE
+                    WHEN ? IN ('processing','failed','transcribed') THEN 'ended'
+                    WHEN ?='declined' THEN 'in_progress'
+                    ELSE status END,
                     recording_location = COALESCE(?, recording_location),
                     updated_at = ?
                 WHERE ritual_id = ?
                 """,
-                (status, status, location, now, ritual_id),
+                (status, status, status, location, now, ritual_id),
             )
         return self.get(ritual_id)
 
@@ -320,7 +323,7 @@ class ClinicalRitualStore:
             conn.execute(
                 """
                 UPDATE clinical_rituals
-                SET transcript = ?, status = 'in_progress', updated_at = ?,
+                SET transcript = ?, status = 'ended', updated_at = ?,
                     version = version + 1
                 WHERE ritual_id = ?
                 """,
@@ -475,17 +478,6 @@ def build_router(api):
         ritual["participants"] = api.ritual_store.participants(ritual["ritual_id"])
         return ritual
 
-    @router.get("/{ritual_id}")
-    def read_ritual(
-        ritual_id: str, profile: StaffProfile = Depends(clinical_staff)
-    ):
-        ritual = get_ritual(ritual_id)
-        authorized(ritual, profile)
-        ritual["participants"] = api.ritual_store.participants(ritual_id)
-        current = api.ritual_store.participant(ritual_id, profile.staff_id)
-        ritual["participant_status"] = current["status"] if current else None
-        return protect_unaccepted_invitation(ritual, profile)
-
     @router.get("")
     def list_rituals(profile: StaffProfile = Depends(clinical_staff)):
         with api.ritual_store.connection() as conn:
@@ -505,6 +497,60 @@ def build_router(api):
                 ritual["participant_status"] = current["status"] if current else None
                 visible.append(protect_unaccepted_invitation(ritual, profile))
         return visible
+
+    @router.get("/alerts")
+    def ritual_alerts(profile: StaffProfile = Depends(clinical_staff)):
+        """Return only rituals that still need attention on the Home screen."""
+        with api.ritual_store.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM clinical_rituals "
+                "WHERE status IN ('requested','in_progress','draft_ready','ended') "
+                "ORDER BY updated_at DESC LIMIT 100"
+            ).fetchall()
+
+        alerts = []
+        for row in rows:
+            ritual = api.ritual_store._row(row)
+            is_creator = ritual["creator_id"] == profile.staff_id
+            participant = api.ritual_store.participant(
+                ritual["ritual_id"], profile.staff_id
+            )
+            if is_creator:
+                # A ready draft (or a transcribed recording whose summary
+                # generation can be retried) is a fresh review task.
+                is_review_task = ritual["status"] == "draft_ready" or (
+                    ritual["status"] == "ended"
+                    and ritual.get("recording_status") == "transcribed"
+                )
+                if ritual["status"] not in {"requested", "in_progress"} and not is_review_task:
+                    continue
+                alert_type = "review" if is_review_task else "active"
+            elif participant is not None:
+                if ritual["status"] not in {"requested", "in_progress"}:
+                    continue
+                if participant["status"] not in {"invited", "accepted"}:
+                    continue
+                alert_type = "invitation" if participant["status"] == "invited" else "active"
+            else:
+                # Care-team visibility alone is not an invitation or alert.
+                continue
+
+            ritual["participants"] = api.ritual_store.participants(ritual["ritual_id"])
+            ritual["participant_status"] = participant["status"] if participant else None
+            ritual["alert_type"] = alert_type
+            alerts.append(protect_unaccepted_invitation(ritual, profile))
+        return alerts
+
+    @router.get("/{ritual_id}")
+    def read_ritual(
+        ritual_id: str, profile: StaffProfile = Depends(clinical_staff)
+    ):
+        ritual = get_ritual(ritual_id)
+        authorized(ritual, profile)
+        ritual["participants"] = api.ritual_store.participants(ritual_id)
+        current = api.ritual_store.participant(ritual_id, profile.staff_id)
+        ritual["participant_status"] = current["status"] if current else None
+        return protect_unaccepted_invitation(ritual, profile)
 
     @router.post("/{ritual_id}/participants")
     def add_ritual_participant(ritual_id: str, request: RitualParticipantRequest, profile: StaffProfile = Depends(clinical_staff)):

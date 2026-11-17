@@ -168,16 +168,19 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     }
   }
 
-  void _anchorMessageToAuthor(String loopId, String authorName) {
+  void _anchorMessageToAuthor(
+    String loopId,
+    String authorId,
+    String displayName,
+  ) {
     _tabController.animateTo(0);
     final controller = _getReplyController(loopId);
-    final displayName = ClinicalTheme.formatAuthorDisplayName(authorName);
     final mention = '@$displayName: ';
     if (!controller.text.startsWith(mention)) {
       controller.text = '$mention${controller.text}';
     }
     if (widget.issueOnlyLoopIds == null) {
-      _replyMentions.putIfAbsent(loopId, () => {}).add(authorName);
+      _replyMentions.putIfAbsent(loopId, () => {}).add(authorId);
     }
     controller.selection = TextSelection.fromPosition(
       TextPosition(offset: controller.text.length),
@@ -740,7 +743,12 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                       AskOraviView(
                         patient: widget.patient,
                         onAnchorMessage: (loopId, author) {
-                          _anchorMessageToAuthor(loopId, author);
+                          _anchorMessageToAuthor(
+                            loopId,
+                            author,
+                            authorNames[author] ??
+                                ClinicalTheme.formatAuthorDisplayName(author),
+                          );
                         },
                       ),
                     ]
@@ -1084,6 +1092,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                                 onTap: () => _anchorMessageToAuthor(
                                   loop.loopId,
                                   msg.authorId,
+                                  authorName,
                                 ),
                                 child: const Padding(
                                   padding: EdgeInsets.symmetric(

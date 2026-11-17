@@ -26,7 +26,8 @@ import 'presentation/ward_board_screen.dart';
 import 'presentation/admin/dev_admin_dashboard_screen.dart';
 import 'presentation/communications/staff_communications_screen.dart';
 import 'presentation/call_screen.dart';
-import 'presentation/clinical_ritual_screen.dart';
+import 'presentation/clinical_ritual_room_screen.dart';
+import 'presentation/clinical_ritual_review_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
 
 void main() async {
@@ -199,14 +200,24 @@ class _OraviAppState extends ConsumerState<OraviApp> {
     _pendingRitual = null;
     try {
       if (alert == null || !mounted) return;
-      await _navigatorKey.currentState?.push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => ClinicalRitualRoomScreen(
-            ritualId: alert.ritualId,
-            invitation: !alert.review,
+      if (alert.review) {
+        await _navigatorKey.currentState?.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                ClinicalRitualReviewScreen(ritualId: alert.ritualId),
           ),
-        ),
-      );
+        );
+      } else {
+        await _navigatorKey.currentState?.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => ClinicalRitualRoomScreen(
+              ritualId: alert.ritualId,
+              invitation: true,
+            ),
+          ),
+        );
+      }
+      ref.invalidate(clinicalRitualAlertsProvider);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
