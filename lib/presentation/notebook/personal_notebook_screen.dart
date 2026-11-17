@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../providers/auth_providers.dart';
 import '../providers/whiteboard_providers.dart';
+import '../theme/clinical_theme.dart';
 
 class PersonalEntry {
   final String id, body, kind;
@@ -130,48 +131,94 @@ class _NotebookReminderBannerState
     final due =
         entries
             .where(
-              (e) =>
-                  !e.completed &&
-                  e.reminderAt != null &&
-                  !e.reminderAt!.isAfter(DateTime.now()),
+              (entry) =>
+                  !entry.completed &&
+                  entry.reminderAt != null &&
+                  !entry.reminderAt!.isAfter(DateTime.now()),
             )
             .toList()
           ..sort((a, b) => a.reminderAt!.compareTo(b.reminderAt!));
     if (due.isEmpty) return const SizedBox.shrink();
     final entry = due.first;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'A gentle reminder',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            Text(entry.body, maxLines: 3, overflow: TextOverflow.ellipsis),
-            Text('Planned for ${entryDate(context, entry.reminderAt!)}'),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _respond(
-                          entry,
-                          entry.kind == 'task' ? 'done' : 'dismiss',
-                        ),
-                  child: Text(
-                    entry.kind == 'task' ? 'Mark done' : 'Dismiss reminder',
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Card(
+        color: ClinicalTheme.urgentAmber.withValues(alpha: 0.09),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+          side: BorderSide(
+            color: ClinicalTheme.urgentAmber.withValues(alpha: 0.6),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.notifications_active_outlined,
+                    color: ClinicalTheme.urgentAmber,
                   ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'A gentle reminder',
+                      style: TextStyle(
+                        color: ClinicalTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                entry.body,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15, height: 1.35),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Planned for ${entryDate(context, entry.reminderAt!)}',
+                style: const TextStyle(
+                  color: ClinicalTheme.textSecondary,
+                  fontSize: 13,
                 ),
-                TextButton(
-                  onPressed: _busy ? null : () => _respond(entry, 'snooze'),
-                  child: const Text('Snooze 15 min'),
-                ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: _busy
+                        ? null
+                        : () => _respond(
+                            entry,
+                            entry.kind == 'task' ? 'done' : 'dismiss',
+                          ),
+                    icon: Icon(
+                      entry.kind == 'task'
+                          ? Icons.check
+                          : Icons.notifications_off_outlined,
+                    ),
+                    label: Text(
+                      entry.kind == 'task' ? 'Mark done' : 'Dismiss reminder',
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _respond(entry, 'snooze'),
+                    icon: const Icon(Icons.snooze),
+                    label: const Text('Snooze 15 min'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -265,6 +312,16 @@ class _PersonalNotebookScreenState
       );
     }
     final notebook = ref.watch(personalNotebookProvider);
+    final entries = notebook.asData?.value ?? const <PersonalEntry>[];
+    final pendingCount = entries
+        .where((entry) => entry.kind == 'task' && !entry.completed)
+        .length;
+    final noteCount = entries.where((entry) => entry.kind == 'note').length;
+    final completedCount = entries
+        .where((entry) => entry.kind == 'task' && entry.completed)
+        .length;
+    final filterCounts = [pendingCount, noteCount, completedCount];
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('My notebook'),
@@ -281,132 +338,375 @@ class _PersonalNotebookScreenState
         icon: const Icon(Icons.add),
         label: const Text('Add entry'),
       ),
-      body: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text(
-              'Your personal notes and tasks. Reminders are optional.',
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (var i = 0; i < 3; i++)
-                ChoiceChip(
-                  label: Text(['Pending', 'Notes', 'Completed'][i]),
-                  selected: _filter == i,
-                  onSelected: (_) => setState(() => _filter = i),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: ClinicalTheme.surfaceAccent,
+                  borderRadius: BorderRadius.circular(
+                    ClinicalTheme.radiusMedium,
+                  ),
+                  border: Border.all(
+                    color: ClinicalTheme.clinicalBlue.withValues(alpha: 0.35),
+                  ),
                 ),
-            ],
-          ),
-          const NotebookReminderBanner(),
-          Expanded(
-            child: notebook.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, _) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Cannot load your notebook. Check your connection.',
-                    ),
-                    TextButton(
-                      onPressed: () => ref.invalidate(personalNotebookProvider),
-                      child: const Text('Retry'),
+                    Icon(Icons.lock_outline, color: ClinicalTheme.clinicalBlue),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Your private clinical workspace',
+                            style: TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Keep personal tasks and notes together. Reminders are optional and stay with your account.',
+                            style: TextStyle(
+                              color: ClinicalTheme.textSecondary,
+                              fontSize: 14,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-              data: (entries) {
-                final visible = entries
-                    .where(
-                      (e) => _filter == 1
-                          ? e.kind == 'note'
-                          : e.kind == 'task' && e.completed == (_filter == 2),
-                    )
-                    .toList();
-                if (visible.isEmpty) {
-                  return Center(
-                    child: Text(
-                      [
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  for (var i = 0; i < 3; i++) ...[
+                    ChoiceChip(
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(['Pending', 'Notes', 'Completed'][i]),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _filter == i
+                                  ? ClinicalTheme.clinicalBlue.withValues(
+                                      alpha: 0.18,
+                                    )
+                                  : ClinicalTheme.surfaceElevated,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text('${filterCounts[i]}'),
+                          ),
+                        ],
+                      ),
+                      selected: _filter == i,
+                      onSelected: (_) => setState(() => _filter = i),
+                    ),
+                    if (i < 2) const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const NotebookReminderBanner(),
+            Expanded(
+              child: notebook.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (_, _) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.cloud_off_outlined,
+                          color: ClinicalTheme.textSecondary,
+                          size: 36,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Cannot load your notebook. Check your connection.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonal(
+                          onPressed: () =>
+                              ref.invalidate(personalNotebookProvider),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                data: (entries) {
+                  final visible = entries
+                      .where(
+                        (entry) => _filter == 1
+                            ? entry.kind == 'note'
+                            : entry.kind == 'task' &&
+                                  entry.completed == (_filter == 2),
+                      )
+                      .toList();
+                  if (visible.isEmpty) {
+                    return _NotebookEmptyState(
+                      icon: [
+                        Icons.task_alt,
+                        Icons.sticky_note_2_outlined,
+                        Icons.history,
+                      ][_filter],
+                      title: [
                         'No pending tasks.',
                         'No notes yet.',
                         'No completed tasks yet.',
                       ][_filter],
-                    ),
-                  );
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                  itemCount: visible.length,
-                  itemBuilder: (context, index) {
-                    final e = visible[index];
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              e.body,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 8),
-                            Text('Added ${entryDate(context, e.createdAt)}'),
-                            if (e.completedAt != null)
-                              Text(
-                                'Completed ${entryDate(context, e.completedAt!)}',
-                              ),
-                            if (e.reminderAt != null)
-                              Text(
-                                'Reminder ${entryDate(context, e.reminderAt!)}',
-                              ),
-                            Wrap(
-                              children: [
-                                if (e.kind == 'task')
-                                  TextButton.icon(
-                                    onPressed: _saving.contains(e.id)
-                                        ? null
-                                        : () => _save(e, {
-                                            ...e.payload,
-                                            'completed': !e.completed,
-                                            'reminder_at': null,
-                                          }),
-                                    icon: Icon(
-                                      e.completed ? Icons.undo : Icons.check,
+                      message: [
+                        'Add a task for anything you need to follow up during this shift.',
+                        'Capture a private note you want to remember later.',
+                        'Completed tasks will remain here as your personal history.',
+                      ][_filter],
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+                    itemCount: visible.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final entry = visible[index];
+                      final isTask = entry.kind == 'task';
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color:
+                                          (entry.completed
+                                                  ? ClinicalTheme.successGreen
+                                                  : isTask
+                                                  ? ClinicalTheme.clinicalBlue
+                                                  : ClinicalTheme
+                                                        .inChargePurple)
+                                              .withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
-                                    label: Text(
-                                      e.completed ? 'Reopen' : 'Mark done',
+                                    child: Icon(
+                                      entry.completed
+                                          ? Icons.check
+                                          : isTask
+                                          ? Icons.checklist
+                                          : Icons.sticky_note_2_outlined,
+                                      color: entry.completed
+                                          ? ClinicalTheme.successGreen
+                                          : isTask
+                                          ? ClinicalTheme.clinicalBlue
+                                          : ClinicalTheme.inChargePurple,
                                     ),
                                   ),
-                                TextButton(
-                                  onPressed: _saving.contains(e.id)
-                                      ? null
-                                      : () => _edit(e),
-                                  child: const Text('Edit'),
-                                ),
-                                TextButton(
-                                  onPressed: _saving.contains(e.id)
-                                      ? null
-                                      : () => _delete(e),
-                                  child: const Text('Delete'),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          entry.body,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                height: 1.35,
+                                                decoration: entry.completed
+                                                    ? TextDecoration.lineThrough
+                                                    : null,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Added ${entryDate(context, entry.createdAt)}',
+                                          style: const TextStyle(
+                                            color: ClinicalTheme.textSecondary,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (entry.completedAt != null ||
+                                  entry.reminderAt != null) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    if (entry.completedAt != null)
+                                      _EntryMetaChip(
+                                        icon: Icons.task_alt,
+                                        label:
+                                            'Completed ${entryDate(context, entry.completedAt!)}',
+                                        color: ClinicalTheme.successGreen,
+                                      ),
+                                    if (entry.reminderAt != null)
+                                      _EntryMetaChip(
+                                        icon: Icons.notifications_none,
+                                        label:
+                                            'Reminder ${entryDate(context, entry.reminderAt!)}',
+                                        color: ClinicalTheme.urgentAmber,
+                                      ),
+                                  ],
                                 ),
                               ],
-                            ),
-                          ],
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: [
+                                  if (isTask)
+                                    FilledButton.tonalIcon(
+                                      onPressed: _saving.contains(entry.id)
+                                          ? null
+                                          : () => _save(entry, {
+                                              ...entry.payload,
+                                              'completed': !entry.completed,
+                                              'reminder_at': null,
+                                            }),
+                                      icon: Icon(
+                                        entry.completed
+                                            ? Icons.undo
+                                            : Icons.check,
+                                      ),
+                                      label: Text(
+                                        entry.completed
+                                            ? 'Reopen'
+                                            : 'Mark done',
+                                      ),
+                                    ),
+                                  TextButton.icon(
+                                    onPressed: _saving.contains(entry.id)
+                                        ? null
+                                        : () => _edit(entry),
+                                    icon: const Icon(Icons.edit_outlined),
+                                    label: const Text('Edit'),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: _saving.contains(entry.id)
+                                        ? null
+                                        : () => _delete(entry),
+                                    icon: const Icon(Icons.delete_outline),
+                                    label: const Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NotebookEmptyState extends StatelessWidget {
+  const _NotebookEmptyState({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 42, color: ClinicalTheme.textMuted),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: ClinicalTheme.textSecondary,
+              height: 1.4,
             ),
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
+
+class _EntryMetaChip extends StatelessWidget {
+  const _EntryMetaChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusLarge),
+      border: Border.all(color: color.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(fontSize: 12)),
+      ],
+    ),
+  );
 }
 
 class _EntryEditor extends ConsumerStatefulWidget {
@@ -513,6 +813,7 @@ class _EntryEditorState extends ConsumerState<_EntryEditor> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
     child: AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       title: Text(widget.entry == null ? 'Add to my notebook' : 'Edit entry'),
       content: SizedBox(
         width: 420,
@@ -534,14 +835,20 @@ class _EntryEditorState extends ConsumerState<_EntryEditor> {
                     ),
                 ],
               ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _body,
                 enabled: !_saving,
                 minLines: 3,
                 maxLines: 8,
                 maxLength: 4000,
-                decoration: const InputDecoration(
-                  hintText: 'What would you like to remember?',
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: _kind == 'task' ? 'Task details' : 'Note',
+                  hintText: _kind == 'task'
+                      ? 'What needs to be followed up?'
+                      : 'What would you like to remember?',
+                  alignLabelWithHint: true,
                 ),
               ),
               if (widget.entry?.completed != true) ...[
