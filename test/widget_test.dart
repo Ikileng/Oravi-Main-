@@ -183,6 +183,33 @@ Future<ProviderContainer> _pumpWardBoard(
 }
 
 void main() {
+  testWidgets('Home prioritizes the highest assigned clinical issue', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final container = await _pumpWardBoard(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Needs attention'), findsOneWidget);
+    expect(find.text('Maintain SpO2 > 92% on nasal cannula'), findsOneWidget);
+    expect(find.text('At a glance'), findsOneWidget);
+    expect(find.text('Shift workflow'), findsOneWidget);
+
+    // Patient Detail has a separate responsive-refinement phase.
+    tester.view.physicalSize = const Size(800, 600);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('View issue'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Bed 1 — J.K.'), findsOneWidget);
+    expect(find.text('Maintain SpO2 > 92% on nasal cannula'), findsWidgets);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    container.dispose();
+  });
+
   testWidgets(
     'Home and Patients have distinct empty states and real navigation',
     (tester) async {
