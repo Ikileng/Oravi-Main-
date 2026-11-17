@@ -10,6 +10,8 @@ import 'providers/ward_providers.dart';
 import 'providers/whiteboard_providers.dart';
 import 'theme/clinical_theme.dart';
 import 'call_screen.dart';
+import '../data/clinical_ritual_service.dart';
+import 'clinical_ritual_room_screen.dart';
 import 'communications/personal_inbox.dart';
 import 'widgets/close_loop_dialog.dart';
 import 'widgets/create_loop_dialog.dart';
@@ -166,16 +168,19 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     }
   }
 
-  void _anchorMessageToAuthor(String loopId, String authorName) {
+  void _anchorMessageToAuthor(
+    String loopId,
+    String authorId,
+    String displayName,
+  ) {
     _tabController.animateTo(0);
     final controller = _getReplyController(loopId);
-    final displayName = ClinicalTheme.formatAuthorDisplayName(authorName);
     final mention = '@$displayName: ';
     if (!controller.text.startsWith(mention)) {
       controller.text = '$mention${controller.text}';
     }
     if (widget.issueOnlyLoopIds == null) {
-      _replyMentions.putIfAbsent(loopId, () => {}).add(authorName);
+      _replyMentions.putIfAbsent(loopId, () => {}).add(authorId);
     }
     controller.selection = TextSelection.fromPosition(
       TextPosition(offset: controller.text.length),
@@ -291,9 +296,280 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not start the call (${error.runtimeType}).'),
+          content: Text(
+            error.toString().contains('registered Oravi device') ||
+                    error.toString().contains('could not be notified')
+                ? 'This clinician is offline or has no reachable Oravi device right now.'
+                : 'Could not start the call. Check your connection and try again.',
+          ),
         ),
       );
+    }
+  }
+
+  Future<void> _requestClinicalRitual() async {
+    final titleController = TextEditingController();
+    final api = WardBoardService(
+      getAccessToken: () => ref.read(authAccessTokenProvider),
+    );
+    final ritualService = ClinicalRitualService(api);
+    var ritualType = 'huddle';
+    var scheduled = false;
+    DateTime? scheduledFor;
+    var staffQuery = '';
+    var staffFuture = ritualService.searchStaff(widget.patient.patientId, '');
+    List<Map<String, dynamic>> careTeamMembers = [];
+    final addedStaffIds = <String>{};
+    try {
+      final request = await showDialog<(String, String, DateTime?, List<String>)>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Request Clinical Ritual'),
+            content: SizedBox(
+              width: 460,
+              height: 480,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Title is required'),
+                    ),
+                    TextField(
+                      controller: titleController,
+                      onChanged: (_) => setDialogState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: 'Title *',
+                        hintText: 'e.g. Bed 12 post-op bleeding',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: ritualType,
+                      decoration: const InputDecoration(
+                        labelText: 'Ritual type',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'brief', child: Text('Brief')),
+                        DropdownMenuItem(
+                          value: 'huddle',
+                          child: Text('Huddle'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'debrief',
+                          child: Text('Debrief'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() {
+                            ritualType = value;
+                            if (value == 'huddle') scheduled = false;
+                          });
+                        }
+                      },
+                    ),
+                    if (ritualType != 'huddle') ...[
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Schedule for later'),
+                        value: scheduled,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            scheduled = value;
+                            if (!value) scheduledFor = null;
+                          });
+                        },
+                      ),
+                      if (scheduled)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            scheduledFor == null
+                                ? 'Choose date and time'
+                                : _formatTimestamp(scheduledFor!),
+                          ),
+                          leading: const Icon(Icons.calendar_today),
+                          onTap: () async {
+                            final date = await showDatePicker(
+                              context: dialogContext,
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(
+                                const Duration(days: 365),
+                              ),
+                              initialDate: scheduledFor ?? DateTime.now(),
+                            );
+                            if (date == null || !dialogContext.mounted) return;
+                            final time = await showTimePicker(
+                              context: dialogContext,
+                              initialTime: scheduledFor == null
+                                  ? TimeOfDay.now()
+                                  : TimeOfDay.fromDateTime(scheduledFor!),
+                            );
+                            if (time == null) return;
+                            setDialogState(() {
+                              scheduledFor = DateTime(
+                                date.year,
+                                date.month,
+                                date.day,
+                                time.hour,
+                                time.minute,
+                              );
+                            });
+                          },
+                        ),
+                    ],
+                    const SizedBox(height: 12),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Care team',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: staffFuture,
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        final people = snapshot.data!;
+                        if (staffQuery.isEmpty) {
+                          careTeamMembers = people
+                              .where((p) => p['care_team'] == true)
+                              .toList();
+                        }
+                        final careTeam = careTeamMembers;
+                        final others = people
+                            .where(
+                              (p) =>
+                                  p['care_team'] != true &&
+                                  (staffQuery.isEmpty ||
+                                      '${p['name']} ${p['staff_id']}'
+                                          .toString()
+                                          .toLowerCase()
+                                          .contains(staffQuery.toLowerCase())),
+                            )
+                            .toList();
+                        return Column(
+                          children: [
+                            if (careTeam.isEmpty)
+                              const ListTile(
+                                title: Text(
+                                  'No other clinicians currently have access to this patient.',
+                                ),
+                              ),
+                            for (final person in careTeam)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.verified_user_outlined,
+                                ),
+                                title: Text(person['name'] as String),
+                                subtitle: Text(person['role'] as String),
+                                trailing: const Text('Care team'),
+                              ),
+                            const Divider(),
+                            TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Add another clinician',
+                                prefixIcon: Icon(Icons.search),
+                              ),
+                              onChanged: (value) => setDialogState(() {
+                                staffQuery = value;
+                                staffFuture = ritualService.searchStaff(
+                                  widget.patient.patientId,
+                                  value,
+                                );
+                              }),
+                            ),
+                            for (final person in others)
+                              CheckboxListTile(
+                                dense: true,
+                                value: addedStaffIds.contains(
+                                  person['staff_id'],
+                                ),
+                                title: Text(person['name'] as String),
+                                subtitle: Text(person['role'] as String),
+                                onChanged: (value) => setDialogState(() {
+                                  if (value == true) {
+                                    addedStaffIds.add(
+                                      person['staff_id'] as String,
+                                    );
+                                  } else {
+                                    addedStaffIds.remove(person['staff_id']);
+                                  }
+                                }),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  if (title.length >= 3 &&
+                      (!scheduled ||
+                          (scheduledFor != null &&
+                              scheduledFor!.isAfter(DateTime.now())))) {
+                    Navigator.pop(dialogContext, (
+                      ritualType,
+                      title,
+                      scheduledFor,
+                      addedStaffIds.toList(),
+                    ));
+                  }
+                },
+                child: Text(scheduled ? 'Schedule' : 'Create'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (request == null || !mounted) return;
+      final ritual = await ritualService.create(
+        ritualType: request.$1,
+        title: request.$2,
+        patientId: widget.patient.patientId,
+        scheduledFor: request.$3?.toUtc().toIso8601String(),
+        participantIds: request.$4,
+      );
+      if (!mounted) return;
+      if (request.$3 != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clinical Ritual scheduled.')),
+        );
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualRoomScreen(ritualId: ritual.ritualId),
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The ritual is available on Home. The transcript and review summary will appear there when ready.',
+          ),
+        ),
+      );
+    } finally {
+      titleController.dispose();
     }
   }
 
@@ -422,6 +698,14 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
               ),
           ],
         ),
+        actions: [
+          if (widget.issueOnlyLoopIds == null)
+            IconButton(
+              tooltip: 'Request Clinical Ritual',
+              icon: const Icon(Icons.groups_2_outlined),
+              onPressed: _requestClinicalRitual,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -459,7 +743,12 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                       AskOraviView(
                         patient: widget.patient,
                         onAnchorMessage: (loopId, author) {
-                          _anchorMessageToAuthor(loopId, author);
+                          _anchorMessageToAuthor(
+                            loopId,
+                            author,
+                            authorNames[author] ??
+                                ClinicalTheme.formatAuthorDisplayName(author),
+                          );
                         },
                       ),
                     ]
@@ -803,6 +1092,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                                 onTap: () => _anchorMessageToAuthor(
                                   loop.loopId,
                                   msg.authorId,
+                                  authorName,
                                 ),
                                 child: const Padding(
                                   padding: EdgeInsets.symmetric(

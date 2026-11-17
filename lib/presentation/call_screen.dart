@@ -28,10 +28,12 @@ class _CallScreenState extends State<CallScreen> {
   bool _connecting = true;
   bool _muted = false;
   int _durationSeconds = 0;
+  late String _callStatus;
 
   @override
   void initState() {
     super.initState();
+    _callStatus = widget.session.status;
     _room = Room(
       roomOptions: const RoomOptions(adaptiveStream: false, dynacast: false),
     );
@@ -47,6 +49,11 @@ class _CallScreenState extends State<CallScreen> {
     _checkingStatus = true;
     try {
       final call = await widget.api.getCall(widget.session.callId);
+      final status = call['status'] as String? ?? _callStatus;
+      if (mounted && status != _callStatus) {
+        setState(() => _callStatus = status);
+        if (status == 'answered') _startDurationClock();
+      }
       if (mounted &&
           const {
             'ended',
@@ -70,14 +77,8 @@ class _CallScreenState extends State<CallScreen> {
       if (!mounted) return;
       setState(() {
         _connecting = false;
-        _connectedAt = DateTime.now();
       });
-      _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted || _connectedAt == null) return;
-        setState(() {
-          _durationSeconds = DateTime.now().difference(_connectedAt!).inSeconds;
-        });
-      });
+      if (_callStatus == 'answered') _startDurationClock();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -85,6 +86,15 @@ class _CallScreenState extends State<CallScreen> {
         _error = 'Could not connect the call (${error.runtimeType}).';
       });
     }
+  }
+
+  void _startDurationClock() {
+    if (_connectedAt != null) return;
+    _connectedAt = DateTime.now();
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _connectedAt == null) return;
+      setState(() => _durationSeconds = DateTime.now().difference(_connectedAt!).inSeconds);
+    });
   }
 
   Future<void> _end() async {
@@ -98,7 +108,7 @@ class _CallScreenState extends State<CallScreen> {
     } catch (_) {
       // The local call is already ended. The event/outcome remains recoverable.
     }
-    if (mounted) Navigator.of(context).pop(_durationSeconds);
+    if (mounted) Navigator.of(context).pop(_callStatus == 'answered' ? _durationSeconds : null);
   }
 
   @override
@@ -142,6 +152,8 @@ class _CallScreenState extends State<CallScreen> {
                 _error ??
                     (_connecting
                         ? 'Connecting securely…'
+                        : _callStatus == 'ringing'
+                        ? 'Calling • waiting for the clinician to answer. If they are offline or do not answer, this call will be marked missed.'
                         : 'Connected • ${_durationSeconds}s'),
                 style: TextStyle(
                   color: _error == null

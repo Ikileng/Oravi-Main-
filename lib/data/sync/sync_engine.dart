@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:equatable/equatable.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../api_configuration.dart';
 import '../database/database.dart';
 
@@ -12,12 +13,14 @@ class SyncStatus extends Equatable {
   final int pendingCount;
   final DateTime? lastSyncedAt;
   final String? lastError;
+  final bool? networkAvailable;
 
   const SyncStatus({
     this.state = SyncState.idle,
     this.pendingCount = 0,
     this.lastSyncedAt,
     this.lastError,
+    this.networkAvailable,
   });
 
   SyncStatus copyWith({
@@ -25,17 +28,25 @@ class SyncStatus extends Equatable {
     int? pendingCount,
     DateTime? lastSyncedAt,
     String? lastError,
+    bool? networkAvailable,
   }) {
     return SyncStatus(
       state: state ?? this.state,
       pendingCount: pendingCount ?? this.pendingCount,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
       lastError: lastError,
+      networkAvailable: networkAvailable ?? this.networkAvailable,
     );
   }
 
   @override
-  List<Object?> get props => [state, pendingCount, lastSyncedAt, lastError];
+  List<Object?> get props => [
+    state,
+    pendingCount,
+    lastSyncedAt,
+    lastError,
+    networkAvailable,
+  ];
 }
 
 class SyncResult {
@@ -80,7 +91,9 @@ class SyncEngine {
 
   SyncStatus _currentStatus = const SyncStatus();
   Timer? _periodicTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isSyncing = false;
+  bool? _hasNetwork;
 
   SyncEngine(
     this._db, {
@@ -135,7 +148,46 @@ class SyncEngine {
   /// Starts the periodic background sync loop (every 10 seconds by default).
   void startPeriodicSync({Duration interval = const Duration(seconds: 10)}) {
     _periodicTimer?.cancel();
+    unawaited(_restoreLastSyncTime());
+    unawaited(_startConnectivityMonitoring());
     _periodicTimer = Timer.periodic(interval, (_) => syncAll());
+  }
+
+  Future<void> _restoreLastSyncTime() async {
+    try {
+      final lastSyncedAt = await _db.getLastSuccessfulSyncAt();
+      if (lastSyncedAt == null || _statusController.isClosed) return;
+      _updateStatus(_currentStatus.copyWith(lastSyncedAt: lastSyncedAt));
+    } catch (_) {
+      // The regular sync loop remains available if a checkpoint cannot load.
+    }
+  }
+
+  Future<void> _startConnectivityMonitoring() async {
+    try {
+      final connectivity = Connectivity();
+      _connectivitySubscription = connectivity.onConnectivityChanged.listen(
+        _handleConnectivityChange,
+      );
+      _handleConnectivityChange(await connectivity.checkConnectivity());
+    } catch (_) {
+      // Periodic sync remains the fallback if the platform monitor is unavailable.
+    }
+  }
+
+  void _handleConnectivityChange(List<ConnectivityResult> results) {
+    final available = results.any(
+      (result) => result != ConnectivityResult.none,
+    );
+    final wasAvailable = _hasNetwork;
+    _hasNetwork = available;
+    _updateStatus(
+      _currentStatus.copyWith(
+        networkAvailable: available,
+        state: !available && !_isSyncing ? SyncState.offline : null,
+      ),
+    );
+    if (available && wasAvailable != true) unawaited(syncAll());
   }
 
   void stopPeriodicSync() {
@@ -210,8 +262,21 @@ class SyncEngine {
       }
 
       final acks = (data['acks'] as List<dynamic>?) ?? [];
+      final rejected = (data['rejected'] as List<dynamic>?) ?? [];
       final serverSeqMap = <String, int>{};
       final pendingIds = eventIds.toSet();
+      final rejectedIds = <String>{};
+      for (final item in rejected) {
+        final id = item['event_id'] as String;
+        final reason =
+            item['reason'] as String? ?? 'The server rejected this event.';
+        if (!pendingIds.contains(id) || !rejectedIds.add(id)) {
+          throw const FormatException(
+            'Sync response contains an invalid rejection.',
+          );
+        }
+        await _db.markOutboxRejected([id], reason);
+      }
       for (final ack in acks) {
         final id = ack['event_id'] as String;
         final seq = ack['server_seq'] as int;
@@ -227,7 +292,11 @@ class SyncEngine {
 
       await _db.markOutboxAcknowledged(serverSeqMap);
       final notAcknowledged = eventIds
-          .where((eventId) => !serverSeqMap.containsKey(eventId))
+          .where(
+            (eventId) =>
+                !serverSeqMap.containsKey(eventId) &&
+                !rejectedIds.contains(eventId),
+          )
           .toList();
       if (notAcknowledged.isNotEmpty) {
         await _db.markOutboxFailed(
@@ -241,6 +310,97 @@ class SyncEngine {
       rethrow;
     }
   }
+
+  /// Replays queued, explicitly supported API operations after reconnecting.
+  Future<int> pushQueuedApiOperations() async {
+    final accessToken = getAccessToken?.call();
+    if (accessToken == null || accessToken.isEmpty) return 0;
+    await _db.resetStaleApiOperations();
+    final pending = await _db.getPendingApiOperations();
+    var pushed = 0;
+    String? blockedError;
+    for (final operation in pending) {
+      if (operation.method != 'POST' ||
+          operation.path != '/api/v1/allocations/publish') {
+        final error =
+            'This queued operation is not supported for automatic sync.';
+        await _db.markApiOperationFailed(
+          operation.operationId,
+          error,
+          blocked: true,
+        );
+        blockedError ??= error;
+        continue;
+      }
+      await _db.markApiOperationInFlight(operation.operationId);
+      try {
+        await _executeWithFallback((base) async {
+          final client = HttpClient()
+            ..connectionTimeout = const Duration(seconds: 2);
+          try {
+            final cleanBase = base.endsWith('/')
+                ? base.substring(0, base.length - 1)
+                : base;
+            final request = await client
+                .postUrl(Uri.parse('$cleanBase${operation.path}'))
+                .timeout(timeout);
+            request.headers.contentType = ContentType.json;
+            request.headers.set(
+              HttpHeaders.authorizationHeader,
+              'Bearer $accessToken',
+            );
+            request.headers.set('Idempotency-Key', operation.operationId);
+            request.write(jsonEncode(operation.payload));
+            final response = await request.close().timeout(timeout);
+            final body = await response.transform(utf8.decoder).join();
+            if (response.statusCode >= 200 && response.statusCode < 300) {
+              return body;
+            }
+            if (response.statusCode == 401) {
+              await _db.markApiOperationFailed(
+                operation.operationId,
+                'The saved Oravi session expired. Sign in while online to resume sync.',
+                blocked: false,
+              );
+              throw const _AuthenticationRequiredException();
+            }
+            if (response.statusCode >= 400 && response.statusCode < 500) {
+              await _db.markApiOperationFailed(
+                operation.operationId,
+                'The server rejected this saved change (HTTP ${response.statusCode}). $body',
+                blocked: true,
+              );
+              throw _BlockedOperationException(
+                'Saved change needs review (HTTP ${response.statusCode}).',
+              );
+            }
+            throw HttpException('Server returned HTTP ${response.statusCode}.');
+          } finally {
+            client.close();
+          }
+        });
+        await _db.markApiOperationSynced(operation.operationId);
+        pushed++;
+      } on _BlockedOperationException catch (error) {
+        blockedError ??= error.message;
+      } on _AuthenticationRequiredException {
+        rethrow;
+      } catch (error) {
+        await _db.markApiOperationFailed(
+          operation.operationId,
+          error.toString(),
+          blocked: false,
+        );
+        rethrow;
+      }
+    }
+    if (blockedError != null) throw StateError(blockedError);
+    return pushed;
+  }
+
+  Future<int> _totalPendingCount() async =>
+      (await _db.getPendingOutboxEvents()).length +
+      await _db.getPendingApiOperationCount();
 
   /// Pulls new events created by other ward devices since highest serverSeq stored.
   Future<int> pullEvents({String? wardIdOverride}) async {
@@ -277,6 +437,8 @@ class SyncEngine {
           if (response.statusCode == 200) {
             final body = await response.transform(utf8.decoder).join();
             return jsonDecode(body) as Map<String, dynamic>;
+          } else if (response.statusCode == 401) {
+            throw const _AuthenticationRequiredException();
           } else {
             throw Exception(
               'Server rejected sync pull: HTTP ${response.statusCode}',
@@ -301,11 +463,11 @@ class SyncEngine {
     if (mockPushHandler == null &&
         mockPullHandler == null &&
         getAccessToken?.call() == null) {
-      final pending = await _db.getPendingOutboxEvents();
+      final pending = await _totalPendingCount();
       _updateStatus(
         _currentStatus.copyWith(
           state: SyncState.offline,
-          pendingCount: pending.length,
+          pendingCount: pending,
           lastError: 'Sign in to synchronize pending changes.',
         ),
       );
@@ -321,11 +483,11 @@ class SyncEngine {
     }
 
     _isSyncing = true;
-    final initialPending = await _db.getPendingOutboxEvents();
+    final initialPending = await _totalPendingCount();
     _updateStatus(
       _currentStatus.copyWith(
         state: SyncState.syncing,
-        pendingCount: initialPending.length,
+        pendingCount: initialPending,
       ),
     );
 
@@ -334,17 +496,20 @@ class SyncEngine {
 
     try {
       pushed = await pushOutbox();
+      final pushedOperations = await pushQueuedApiOperations();
       pulled = await pullEvents(wardIdOverride: wardIdOverride);
-      if (pulled > 0) {
+      if (pulled > 0 || pushedOperations > 0) {
         await onRemoteEventsReceived?.call();
       }
 
-      final remainingPending = await _db.getPendingOutboxEvents();
+      final remainingPending = await _totalPendingCount();
+      final syncedAt = DateTime.now();
+      await _db.saveLastSuccessfulSyncAt(syncedAt);
       _updateStatus(
         _currentStatus.copyWith(
           state: SyncState.idle,
-          pendingCount: remainingPending.length,
-          lastSyncedAt: DateTime.now(),
+          pendingCount: remainingPending,
+          lastSyncedAt: syncedAt,
           lastError: null,
         ),
       );
@@ -355,7 +520,7 @@ class SyncEngine {
         success: true,
       );
     } catch (e) {
-      final remainingPending = await _db.getPendingOutboxEvents();
+      final remainingPending = await _totalPendingCount();
       final isOffline =
           e.toString().contains('SocketException') ||
           e.toString().contains('TimeoutException') ||
@@ -364,7 +529,7 @@ class SyncEngine {
       _updateStatus(
         _currentStatus.copyWith(
           state: isOffline ? SyncState.offline : SyncState.error,
-          pendingCount: remainingPending.length,
+          pendingCount: remainingPending,
           lastError: e.toString(),
         ),
       );
@@ -395,6 +560,23 @@ class SyncEngine {
 
   void dispose() {
     _periodicTimer?.cancel();
+    _connectivitySubscription?.cancel();
     _statusController.close();
   }
+}
+
+class _BlockedOperationException implements Exception {
+  final String message;
+  const _BlockedOperationException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class _AuthenticationRequiredException implements Exception {
+  const _AuthenticationRequiredException();
+
+  @override
+  String toString() =>
+      'The saved Oravi session expired. Sign in while online to resume sync.';
 }

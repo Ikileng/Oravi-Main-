@@ -22,7 +22,9 @@ class _WardSelectionDialogState extends ConsumerState<WardSelectionDialog> {
   @override
   void initState() {
     super.initState();
-    _wardsFuture = ref.read(wardBoardServiceProvider).getWards();
+    _wardsFuture = ref.read(authenticatedStaffProvider)?.isChargeNurse == true
+        ? ref.read(wardBoardServiceProvider).getWards()
+        : Future.value(const <HospitalWard>[]);
   }
 
   @override
@@ -35,6 +37,22 @@ class _WardSelectionDialogState extends ConsumerState<WardSelectionDialog> {
   Widget build(BuildContext context) {
     final currentWard = ref.watch(selectedWardProvider);
     final staff = ref.watch(authenticatedStaffProvider);
+
+    if (staff?.isChargeNurse != true) {
+      return AlertDialog(
+        title: const Text('Ward assigned by the central board'),
+        content: const Text(
+          'Your ward follows your clinical assignment. '
+          'Contact the Charge Nurse to arrange a ward transfer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      );
+    }
 
     return AlertDialog(
       backgroundColor: ClinicalTheme.surface,
@@ -183,14 +201,22 @@ class _WardSelectionDialogState extends ConsumerState<WardSelectionDialog> {
                                 size: 20,
                               )
                             : null,
-                        onTap:
-                            staff?.role == 'charge_nurse' &&
-                                staff!.wardId.isEmpty
+                        onTap: staff?.isChargeNurse == true
                             ? () async {
                                 try {
                                   await ref
                                       .read(wardBoardServiceProvider)
                                       .setPreferredWard(ward.wardId);
+                                  if (!mounted ||
+                                      ref
+                                              .read(authenticatedStaffProvider)
+                                              ?.staffId !=
+                                          staff?.staffId ||
+                                      ref
+                                              .read(authenticatedStaffProvider)
+                                              ?.isChargeNurse !=
+                                          true)
+                                    return;
                                   ref
                                       .read(selectedWardProvider.notifier)
                                       .selectWard(ward);

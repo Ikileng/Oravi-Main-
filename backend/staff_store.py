@@ -297,8 +297,8 @@ class StaffStore:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._lock, self.conn:
             self.conn.execute(
-                "DELETE FROM call_device_credentials WHERE device_id = ? OR staff_id = ?",
-                (device_id, staff_id),
+                "DELETE FROM call_device_credentials WHERE device_id = ?",
+                (device_id,),
             )
             self.conn.execute(
                 """INSERT INTO call_device_credentials

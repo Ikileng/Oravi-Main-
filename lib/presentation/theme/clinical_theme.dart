@@ -10,7 +10,16 @@ class ClinicalTheme {
   static const Color background = Color(0xFF0F172A); // Slate 900
   static const Color surface = Color(0xFF1E293B);    // Slate 800
   static const Color surfaceElevated = Color(0xFF334155); // Slate 700
-  static const Color border = Color(0xFF475569);     // Slate 600
+  static const Color border = Color(0xFF475569); // Slate 600
+  static const Color canvas = Color(0xFF070C18);
+  static const Color surfaceSoft = Color(0xFF10192E);
+  static const Color surfaceAccent = Color(0xFF123047);
+  static const Color clinicalBlue = Color(0xFF38BDF8);
+
+  static const double radiusSmall = 8;
+  static const double radiusMedium = 12;
+  static const double radiusLarge = 16;
+  static const double minimumTapTarget = 48;
 
   static const Color textPrimary = Color(0xFFF8FAFC);
   static const Color textSecondary = Color(0xFF94A3B8);
@@ -117,34 +126,100 @@ class ClinicalTheme {
   }
 
   static ThemeData get darkTheme {
+    final scheme = const ColorScheme.dark(
+      primary: routineTeal,
+      secondary: urgentAmber,
+      surface: surface,
+      error: criticalRed,
+      onPrimary: Colors.white,
+      onSurface: textPrimary,
+    );
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(radiusMedium),
+      borderSide: const BorderSide(color: border),
+    );
+
     return ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
       scaffoldBackgroundColor: background,
       primaryColor: routineTeal,
-      colorScheme: const ColorScheme.dark(
-        primary: routineTeal,
-        secondary: urgentAmber,
-        surface: surface,
-        error: criticalRed,
-      ),
+      colorScheme: scheme,
+      visualDensity: VisualDensity.standard,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
       appBarTheme: const AppBarTheme(
         backgroundColor: surface,
+        foregroundColor: textPrimary,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: textPrimary,
           fontSize: 18,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
         ),
       ),
       cardTheme: CardThemeData(
         color: surface,
-        elevation: 2,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusMedium),
           side: const BorderSide(color: border, width: 0.8),
         ),
+      ),
+      dividerTheme: const DividerThemeData(color: border, thickness: 0.8),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: surfaceSoft,
+        hintStyle: const TextStyle(color: textMuted, fontSize: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        border: inputBorder,
+        enabledBorder: inputBorder,
+        focusedBorder: inputBorder.copyWith(
+          borderSide: const BorderSide(color: clinicalBlue, width: 1.5),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: surfaceSoft,
+        selectedColor: clinicalBlue.withValues(alpha: 0.18),
+        side: const BorderSide(color: border),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ClinicalTheme.radiusLarge),
+        ),
+        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, minimumTapTarget),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusMedium),
+          ),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(minimumTapTarget, minimumTapTarget),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        minTileHeight: 64,
+        iconColor: textSecondary,
+        textColor: textPrimary,
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: surfaceElevated,
+        contentTextStyle: TextStyle(color: textPrimary),
       ),
     );
   }

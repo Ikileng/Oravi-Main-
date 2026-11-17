@@ -5,6 +5,11 @@ from .communications import CommunicationsStore, build_router
 from .inbox import build_inbox_router
 from .notebook import NotebookStore, build_notebook_router
 from .ward_transfers import build_transfer_router
+from .rituals import (
+    ClinicalRitualStore,
+    build_router as build_ritual_router,
+    dispatch_due_notifications,
+)
 import logging
 import os
 from pathlib import Path
@@ -19,7 +24,7 @@ from datetime import date
 from typing import List, Optional
 from fastapi import FastAPI, Query, HTTPException, Header, Depends, status
 from .models import (
-    CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, AskRequest, AskResponse,
+    CanonicalEvent, SyncPushRequest, SyncPushResponse, SyncPullResponse, SyncRejectedItem, AskRequest, AskResponse,
     StaffLoginRequest, StaffLoginResponse, CreateStaffRequest, StaffListResponse, StaffProfile,
     HospitalWardModel, ShiftAllocationModel, AllocationConflictCheckResponse, WardConfigurationRequest
 )
@@ -28,6 +33,8 @@ from .call_store import CallStore
 from .staff_store import StaffStore
 from .ward_store import WardStore
 from .services.llm_service import LLMService
+from .services.elevenlabs_service import ElevenLabsTranscriptionService
+from .services.livekit_egress_service import LiveKitEgressService
 from .services.fcm_service import FcmService
 from .services.medical_issue_validation import (
     carried_forward_owner_id,
@@ -49,10 +56,13 @@ store = EventStore(db_path=database_path)
 staff_store = StaffStore(db_path=database_path)
 ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
+transcription_service = ElevenLabsTranscriptionService()
+livekit_egress_service = LiveKitEgressService()
 fcm_service = FcmService()
 call_store = CallStore(db_path=database_path)
 communications_store = CommunicationsStore(database_path)
 notebook_store = NotebookStore(database_path)
+ritual_store = ClinicalRitualStore(database_path)
 logger = logging.getLogger(__name__)
 
 
@@ -389,6 +399,7 @@ async def _medical_issue_notification_worker() -> None:
     while True:
         try:
             await asyncio.to_thread(_dispatch_due_medical_issue_notifications)
+            await asyncio.to_thread(dispatch_due_notifications, sys.modules[__name__])
             await asyncio.to_thread(call_store.cleanup)
         except Exception as error:
             logger.error(
@@ -698,8 +709,16 @@ def publish_allocation(allocation: ShiftAllocationModel, profile: StaffProfile =
                 carry_forward_owners.items()
             ):
                 owner = staff_store.get_active_staff_by_ids([owner_id])[0]
+                # A board publish can be retried after a client loses the response.
+                # Stable IDs make carry-forward events idempotent across that retry.
+                carry_forward_event_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"oravi:allocation:{allocation.allocation_id}:carry-forward:{patient_id}:{loop_id}",
+                    )
+                )
                 event = CanonicalEvent(
-                    event_id=str(uuid.uuid4()),
+                    event_id=carry_forward_event_id,
                     patient_id=patient_id,
                     type="LoopOwnerChanged",
                     author_id=profile.staff_id,
@@ -1037,6 +1056,7 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
         except Exception as error:
             logger.error("Call invitation delivery failed (%s).", type(error).__name__)
     if delivered == 0:
+        call_store.mark_cancelled(call_id, profile.staff_id)
         raise HTTPException(status_code=503, detail="The clinician could not be notified.")
     recipient = staff_store.get_active_staff_by_ids([recipient_id])[0]
     return {"call_id": call_id, "patient_id": patient_id, "loop_id": loop_id, "caller_id": profile.staff_id, "caller_name": profile.name, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "room_name": room_name, "livekit_url": livekit_url, "token": caller_token, "status": "ringing"}
@@ -1162,6 +1182,8 @@ def delete_staff_account(staff_id: str, admin: StaffProfile = Depends(require_de
 
 @app.post("/api/v1/sync/push", response_model=SyncPushResponse)
 def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_staff)):
+    accepted_events = []
+    rejected_events = []
     for event in request.events:
         access_date = event.client_created_at[:10]
         handoff_session_id = event.payload.get("handoff_session_id")
@@ -1248,21 +1270,30 @@ def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_
                 )
             )
         if event.author_id != profile.staff_id or not authorized:
-            raise HTTPException(
-                status_code=403,
-                detail="Events must belong to your account and an assigned patient.",
+            rejected_events.append(
+                SyncRejectedItem(
+                    event_id=event.event_id,
+                    reason=(
+                        "Event author does not match the signed-in account."
+                        if event.author_id != profile.staff_id
+                        else "The patient was not assigned to this account for the event date."
+                    ),
+                )
             )
+            continue
         if event.type == 'MessagePosted':
             event.payload['author_role'] = profile.role
-    _validate_patient_issue_events(request.events)
-    notifications = _notification_recipients_for_events(request.events)
+        accepted_events.append(event)
+    _validate_patient_issue_events(accepted_events)
+    notifications = _notification_recipients_for_events(accepted_events)
     acks = store.append_events(
-        request.events, notification_staff_ids_by_event=notifications
+        accepted_events, notification_staff_ids_by_event=notifications
     )
     return SyncPushResponse(
-        status="success",
+        status="partial" if rejected_events else "success",
         acknowledged_count=len(acks),
         acks=acks,
+        rejected=rejected_events,
     )
 
 @app.get("/api/v1/sync/pull", response_model=SyncPullResponse)
@@ -1346,3 +1377,4 @@ app.include_router(build_router(sys.modules[__name__]))
 app.include_router(build_inbox_router(sys.modules[__name__]))
 app.include_router(build_notebook_router(sys.modules[__name__]))
 app.include_router(build_transfer_router(sys.modules[__name__]))
+app.include_router(build_ritual_router(sys.modules[__name__]))

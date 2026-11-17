@@ -1,7 +1,11 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'admin/dev_admin_dashboard_screen.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
 import 'communications/staff_communications_screen.dart';
@@ -9,7 +13,9 @@ import 'communications/personal_inbox.dart';
 import 'notebook/personal_notebook_screen.dart';
 import 'whiteboard/ward_transfer_screen.dart';
 import '../domain/projections/projections.dart';
+import '../domain/models/clinical_ritual.dart';
 import '../data/database/database_provider.dart';
+import '../data/sync/sync_engine.dart';
 import 'handoff_wizard_screen.dart';
 import 'lockscreen/digital_id_lockscreen.dart';
 import 'patient_detail_screen.dart';
@@ -22,6 +28,21 @@ import 'providers/dashboard_issue_summary.dart';
 import 'whiteboard/digital_whiteboard_screen.dart';
 import 'widgets/ward_search_sheet.dart';
 import 'widgets/ward_selection_dialog.dart';
+import '../data/clinical_ritual_service.dart';
+import '../data/ward_board_service.dart';
+import 'clinical_ritual_room_screen.dart';
+import 'clinical_ritual_review_screen.dart';
+
+final clinicalRitualAlertsProvider =
+    FutureProvider.autoDispose<List<ClinicalRitual>>((ref) async {
+      final token = ref.watch(authAccessTokenProvider);
+      if (token == null) return const [];
+      return ClinicalRitualService(
+        WardBoardService(
+          getAccessToken: () => ref.read(authAccessTokenProvider),
+        ),
+      ).activeAlerts();
+    });
 
 /// Pixel-perfect implementation of the Nurse Dashboard designed to eliminate clutter:
 /// - Clean Header with hospital name, sync status, notifications, and profile avatar.
@@ -80,6 +101,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   @override
   Widget build(BuildContext context) {
     final authStaff = ref.watch(authenticatedStaffProvider);
+    final offlineSession = ref.watch(offlineSessionProvider);
     if (authStaff?.role == 'dev_admin') {
       return const DevAdminDashboardScreen();
     }
@@ -133,63 +155,93 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       return true;
     }).toList();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF070C18),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top Clean Header
-            _buildCleanHeader(context, currentWard.name, authStaff),
+    final homeIssues =
+        <({PatientStateProjection patient, LoopStateProjection issue})>[
+          for (final patient in myPatients)
+            for (final issue in ref.watch(
+              patientLoopsProvider(patient.patientId),
+            ))
+              if (issue.isOpen) (patient: patient, issue: issue),
+        ]..sort((left, right) {
+          final urgencyOrder = _urgencyRank(
+            right.issue.urgency,
+          ).compareTo(_urgencyRank(left.issue.urgency));
+          if (urgencyOrder != 0) return urgencyOrder;
+          return right.issue.updatedAt.compareTo(left.issue.updatedAt);
+        });
+    final pendingPersonalTasks = ref.watch(pendingPersonalTasksProvider);
 
-            // Scrollable Dashboard Body
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14.0,
-                  vertical: 8.0,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        icon: const InboxBadge(),
-                        label: const Text('Messages & calls'),
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => const StaffCommunicationsScreen(),
-                          ),
+    final wardDestination = SafeArea(
+      child: Column(
+        children: [
+          _buildCleanHeader(context, currentWard.name, authStaff),
+          if (offlineSession) _buildOfflineSessionBanner(),
+          Expanded(
+            child: SingleChildScrollView(
+              key: PageStorageKey('clinician-tab-$_activeNavIndex'),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14.0,
+                vertical: 8.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_activeNavIndex == 0) ...[
+                    _buildGreetingSection(nurseName, currentWard.name),
+                    const SizedBox(height: 18),
+                    _buildNeedsAttention(homeIssues),
+                    const SizedBox(height: 18),
+                  ] else
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'My Patients',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    _buildGreetingSection(nurseName),
-                    const NotebookReminderBanner(),
-                    const WardTransferNotice(),
-                    const SizedBox(height: 14),
-                    if (authStaff != null)
-                      _buildCarriedForwardIssues(carriedIssuesState),
-                    if (currentWard.wardId.isEmpty)
-                      _buildNoWardPanel(authStaff)
-                    else if (ref.watch(wardContextNeedsConfirmationProvider))
-                      _buildWardConfirmationPanel(currentWard.name)
-                    else if (boardState.isLoading)
-                      const Center(child: CircularProgressIndicator())
-                    else if (boardState.hasError)
-                      _buildBoardLoadError(boardState.error)
-                    else ...[
+                  if (currentWard.wardId.isEmpty) ...[
+                    if (_activeNavIndex == 0) _buildHomeEmptyState(),
+                    _buildNoWardPanel(authStaff),
+                  ] else if (authStaff?.isChargeNurse == true &&
+                      ref.watch(wardContextNeedsConfirmationProvider))
+                    _buildWardConfirmationPanel(currentWard.name)
+                  else if (boardState.isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (boardState.hasError)
+                    _buildBoardLoadError(boardState.error)
+                  else ...[
+                    if (_activeNavIndex == 0 && totalPatients == 0)
+                      _buildHomeEmptyState(),
+                    if (_activeNavIndex == 0) ...[
                       _buildAtAGlanceCards(
                         totalPatients,
                         summary.openIssues,
-                        summary.closedIssues,
+                        pendingPersonalTasks,
                       ),
-                      const SizedBox(height: 14),
-                      _buildFilterRow(
-                        totalPatients,
-                        summary.pendingPatients.length,
-                        summary.completedPatients.length,
+                      const SizedBox(height: 20),
+                      _sectionHeading(
+                        'Shift workflow',
+                        'Prepare, coordinate, and hand over safely',
                       ),
+                      const SizedBox(height: 10),
+                      _buildShiftHandoffBanner(context),
+                      const SizedBox(height: 8),
+                      const WardTransferNotice(),
+                      const SizedBox(height: 18),
+                      _buildClinicalRitualNotifications(context),
+                      const NotebookReminderBanner(),
+                      _buildCarriedForwardIssues(carriedIssuesState),
+                    ] else if (_activeNavIndex == 1) ...[
+                      if (totalPatients > 0)
+                        _buildFilterRow(
+                          totalPatients,
+                          summary.pendingPatients.length,
+                          summary.completedPatients.length,
+                        ),
                       const SizedBox(height: 14),
                       _buildPatientListSection(
                         filteredPatients,
@@ -197,21 +249,46 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                         hasAnyPatients: myPatients.isNotEmpty,
                       ),
                       const SizedBox(height: 18),
-                      _buildShiftHandoffBanner(context),
-                      const SizedBox(height: 20),
                     ],
+                    const SizedBox(height: 20),
                   ],
-                ),
+                ],
               ),
             ),
-
-            // 5-Tab Bottom Navigation Bar
-            _buildBottomNavigation(context),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF070C18),
+      body: switch (_activeNavIndex) {
+        2 => const StaffCommunicationsScreen(),
+        3 => const PersonalNotebookScreen(),
+        4 => _buildMoreDestination(context, authStaff),
+        _ => wardDestination,
+      },
+      bottomNavigationBar: _buildBottomNavigation(context),
+    );
   }
+
+  Widget _buildOfflineSessionBanner() => Container(
+    width: double.infinity,
+    color: const Color(0xFF78350F),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    child: const Row(
+      children: [
+        Icon(Icons.cloud_off, color: Color(0xFFFDE68A), size: 19),
+        SizedBox(width: 9),
+        Expanded(
+          child: Text(
+            'Offline access · showing saved data. Calls, rituals, and server actions need a connection.',
+            style: TextStyle(color: Color(0xFFFFFBEB), fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _buildCarriedForwardIssues(
     AsyncValue<List<Map<String, dynamic>>> state,
@@ -229,6 +306,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         ),
       );
     }
+
     final issues = (state.asData?.value ?? const [])
         .where((issue) => issue['is_open'] == true)
         .toList();
@@ -252,7 +330,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                 leading: const Icon(Icons.assignment_late_outlined),
                 title: Text(issue['title'] as String? ?? 'Medical Issue'),
                 subtitle: Text(
-                  'Patient ${issue['patient_id']} · ${issue['urgency']} urgency · issue thread access only',
+                  'Assigned issue · ${issue['urgency']} urgency · issue thread access only',
                 ),
                 onTap: () => _openCarriedForwardIssue(issue),
               ),
@@ -263,6 +341,8 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   }
 
   Future<void> _openCarriedForwardIssue(Map<String, dynamic> issue) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     try {
       final patientId = issue['patient_id'] as String;
       final loopId = issue['loop_id'] as String;
@@ -277,6 +357,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
           'This Medical Issue is no longer assigned to your account.',
         );
       }
+
       final rawEvents = carriedIssue['events'];
       if (rawEvents is! List) {
         throw const FormatException(
@@ -305,7 +386,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         );
       }
       if (!mounted) return;
-      Navigator.of(context).push(
+      navigator.push(
         MaterialPageRoute(
           builder: (_) => PatientDetailScreen(
             patient: PatientStateProjection(
@@ -325,16 +406,29 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Could not open the assigned issue: $error')),
       );
     }
   }
 
+  Widget _buildHomeEmptyState() => _contextPanel(
+    title: 'Nothing on your Home page yet',
+    message:
+        'Your patient overview will appear here when patients are assigned. '
+        'Reminders and team updates appear above when available.',
+    action: TextButton(
+      onPressed: () => setState(() => _activeNavIndex = 1),
+      child: const Text('View my patients'),
+    ),
+  );
+
   Widget _buildNoWardPanel(StaffProfile? staff) {
     final isChargeNurse = staff?.isChargeNurse ?? false;
     return _contextPanel(
-      title: staff?.isDoctorOnCall == true
+      title: _activeNavIndex == 1
+          ? 'You have no patients'
+          : staff?.isDoctorOnCall == true
           ? 'No patients assigned to you'
           : 'No ward assigned for this shift',
       message: isChargeNurse
@@ -422,6 +516,104 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     );
   }
 
+  Widget _buildClinicalRitualNotifications(BuildContext context) {
+    return ref
+        .watch(clinicalRitualAlertsProvider)
+        .when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
+          data: (alerts) {
+            if (alerts.isEmpty) return const SizedBox.shrink();
+            final rituals = alerts.take(3).toList();
+            return Card(
+              color: const Color(0xFF123047),
+              child: Column(
+                children: [
+                  const ListTile(
+                    leading: Icon(
+                      Icons.groups_2_outlined,
+                      color: Color(0xFF67E8F9),
+                    ),
+                    title: Text(
+                      'Clinical Rituals',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Invitations, active rituals, and summaries to review',
+                      style: TextStyle(color: Color(0xFFBAE6FD)),
+                    ),
+                  ),
+                  ...rituals.map(
+                    (ritual) => ListTile(
+                      dense: true,
+                      title: Text(
+                        ritual.title,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        ritual.alertType == 'review'
+                            ? 'Summary ready for your review'
+                            : ritual.alertType == 'invitation'
+                            ? 'Invitation to join · ${ritual.ritualType.toUpperCase()}'
+                            : '${ritual.ritualType.toUpperCase()} · ${ritual.status}',
+                        style: const TextStyle(color: Color(0xFFBAE6FD)),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: Color(0xFFBAE6FD),
+                      ),
+                      onTap: () => _openRitual(context, ritual),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+  }
+
+  Future<void> _openRitual(BuildContext context, ClinicalRitual ritual) async {
+    final scheduledFor = DateTime.tryParse(ritual.scheduledFor ?? '');
+    if (scheduledFor != null && scheduledFor.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This ritual is scheduled for ${scheduledFor.toLocal()}',
+          ),
+        ),
+      );
+      return;
+    }
+    if (ritual.alertType == 'review' ||
+        ritual.status == 'draft_ready' ||
+        ritual.status == 'approved' ||
+        ritual.recordingStatus == 'transcribed') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
+        ),
+      );
+      ref.invalidate(clinicalRitualAlertsProvider);
+      return;
+    }
+    if (ritual.status == 'requested' ||
+        ritual.status == 'in_progress' ||
+        ritual.recordingStatus == 'not_started') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClinicalRitualRoomScreen(
+            ritualId: ritual.ritualId,
+            invitation: ritual.participantStatus == 'invited',
+          ),
+        ),
+      );
+      ref.invalidate(clinicalRitualAlertsProvider);
+    }
+  }
+
   // ==========================================
   // 1. CLEAN HEADER
   // ==========================================
@@ -430,6 +622,26 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     String wardName,
     StaffProfile? authStaff,
   ) {
+    final syncStatus = ref.watch(syncStatusProvider).asData?.value;
+    final isOffline =
+        syncStatus?.networkAvailable == false ||
+        syncStatus?.state == SyncState.offline;
+    final syncLabel = syncStatus?.networkAvailable == null
+        ? 'Checking connection'
+        : syncStatus?.state == SyncState.syncing
+        ? 'Syncing'
+        : isOffline
+        ? 'Offline'
+        : syncStatus?.state == SyncState.error
+        ? 'Sync issue'
+        : 'Online';
+    final syncColor = syncStatus?.networkAvailable == null
+        ? const Color(0xFF94A3B8)
+        : isOffline
+        ? const Color(0xFFFBBF24)
+        : syncStatus?.state == SyncState.error
+        ? const Color(0xFFF87171)
+        : const Color(0xFF4ADE80);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: const BoxDecoration(
@@ -478,9 +690,41 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Icon(Icons.circle, size: 7, color: syncColor),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        '$syncLabel · Last synced ${_formatSyncTime(syncStatus?.lastSyncedAt)}${(syncStatus?.pendingCount ?? 0) > 0 ? ' · ${syncStatus!.pendingCount} pending' : ''}',
+                        style: TextStyle(color: syncColor, fontSize: 9),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Sync now',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () =>
+                          unawaited(ref.read(syncEngineProvider).syncAll()),
+                      icon: const Icon(
+                        Icons.sync,
+                        size: 17,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
+
+          IconButton(
+            tooltip: 'Open inbox',
+            onPressed: () => setState(() => _activeNavIndex = 2),
+            icon: const InboxBadge(),
+          ),
+          const SizedBox(width: 2),
 
           // Profile Avatar with Quick Lock Station
           InkWell(
@@ -514,10 +758,31 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     );
   }
 
+  String _formatSyncTime(DateTime? value) {
+    if (value == null) return 'never';
+    final local = value.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour < 12 ? 'AM' : 'PM';
+    final today = DateTime.now();
+    if (local.year == today.year &&
+        local.month == today.month &&
+        local.day == today.day) {
+      return '$hour:$minute $period';
+    }
+    return '${local.day}/${local.month} $hour:$minute $period';
+  }
+
   // ==========================================
   // 2. GREETING & SHIFT SECTION
   // ==========================================
-  Widget _buildGreetingSection(String nurseName) {
+  int _urgencyRank(LoopUrgency urgency) => switch (urgency) {
+    LoopUrgency.critical => 3,
+    LoopUrgency.urgent => 2,
+    LoopUrgency.routine => 1,
+  };
+
+  Widget _buildGreetingSection(String nurseName, String wardName) {
     final now = DateTime.now();
     final shift = ref.watch(selectedShiftTypeProvider);
     final hasWard = ref.watch(selectedWardProvider).wardId.isNotEmpty;
@@ -525,271 +790,453 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${clinicalGreeting(now)}, $nurseName',
+          MaterialLocalizations.of(context).formatFullDate(now).toUpperCase(),
           style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: Color(0xFF64748B),
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.9,
           ),
         ),
-        const SizedBox(height: 3),
-        const Text(
-          "You've got this. Here's your shift overview.",
-          style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+        const SizedBox(height: 5),
+        Text(
+          '${clinicalGreeting(now)}, $nurseName',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 22,
+            height: 1.15,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: -0.4,
+          ),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            // Date Pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10192E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF101D33),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF1D3552)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  shift == 'night'
+                      ? Icons.nights_stay_outlined
+                      : Icons.medical_services_outlined,
+                  color: const Color(0xFF38BDF8),
+                  size: 20,
+                ),
               ),
-              child: Row(
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ON SHIFT',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${clinicalShiftLabel(shift, hasWard: hasWard)} · ${wardName.isEmpty ? 'Ward not selected' : wardName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.calendar_month_outlined,
-                    size: 13,
-                    color: Color(0xFF38BDF8),
-                  ),
-                  SizedBox(width: 6),
+                  Icon(Icons.circle, size: 7, color: Color(0xFF4ADE80)),
+                  SizedBox(width: 5),
                   Text(
-                    MaterialLocalizations.of(context).formatFullDate(now),
+                    'Active',
                     style: TextStyle(
+                      color: Color(0xFF86EFAC),
                       fontSize: 11,
-                      color: Color(0xFFCBD5E1),
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNeedsAttention(
+    List<({PatientStateProjection patient, LoopStateProjection issue})> items,
+  ) {
+    final top = items.firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Needs attention',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-
-            // Shift Pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10192E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1E2C48), width: 0.8),
+            if (items.length > 1)
+              TextButton(
+                onPressed: () => setState(() {
+                  _activeNavIndex = 1;
+                  _activeFilterIndex = 1;
+                }),
+                child: Text('View all (${items.length})'),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    shift == 'night'
-                        ? Icons.nights_stay_outlined
-                        : Icons.wb_sunny_outlined,
-                    size: 13,
-                    color: Color(0xFFFBBF24),
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    clinicalShiftLabel(shift, hasWard: hasWard),
+          ],
+        ),
+        const SizedBox(height: 9),
+        if (top == null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D2122),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFF10B981).withValues(alpha: 0.35),
+              ),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: Color(0xFF34D399)),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'No open clinical issues need your attention.',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFCBD5E1),
+                      color: Color(0xFFD1FAE5),
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                ),
+              ],
+            ),
+          )
+        else
+          _attentionCard(top.patient, top.issue),
+      ],
+    );
+  }
+
+  Widget _attentionCard(
+    PatientStateProjection patient,
+    LoopStateProjection issue,
+  ) {
+    final critical = issue.urgency == LoopUrgency.critical;
+    final accent = critical
+        ? const Color(0xFFEF4444)
+        : issue.urgency == LoopUrgency.urgent
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF38BDF8);
+    final label = critical
+        ? 'CRITICAL'
+        : issue.urgency == LoopUrgency.urgent
+        ? 'URGENT'
+        : 'OPEN';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: critical ? const Color(0xFF231318) : const Color(0xFF211C14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PatientDetailScreen(
+                patient: patient,
+                initialExpandedLoopId: issue.loopId,
+              ),
+            ),
+          ),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(
+                        critical
+                            ? Icons.warning_amber_rounded
+                            : Icons.monitor_heart_outlined,
+                        color: accent,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${patient.bedNumber} · ${patient.patientInitials}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            patient.shortAdmittingNote,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.13),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  issue.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.25,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (issue.description.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    issue.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
                 ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${issue.currentOwnerRole.replaceAll('_', ' ')} · Updated ${_relativeTime(issue.updatedAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'View issue',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Icon(Icons.chevron_right, color: accent, size: 18),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _relativeTime(DateTime value) {
+    final difference = DateTime.now().difference(value.toLocal());
+    if (difference.inMinutes < 1) return 'now';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
+  }
+
+  Widget _sectionHeading(String title, String subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        subtitle,
+        style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+      ),
+    ],
+  );
+
+  Widget _buildAtAGlanceCards(
+    int patientCount,
+    int openIssues,
+    int pendingTasks,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _sectionHeading('At a glance', 'Your current clinical workload'),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.people_outline_rounded,
+              value: patientCount,
+              label: 'Patients',
+              color: const Color(0xFF38BDF8),
+              onTap: () => setState(() => _activeNavIndex = 1),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.error_outline_rounded,
+              value: openIssues,
+              label: 'Open issues',
+              color: const Color(0xFFF59E0B),
+              onTap: () => setState(() {
+                _activeNavIndex = 1;
+                _activeFilterIndex = 1;
+              }),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryCard(
+              icon: Icons.checklist_rounded,
+              value: pendingTasks,
+              label: 'Tasks',
+              color: const Color(0xFF34D399),
+              onTap: () => setState(() => _activeNavIndex = 3),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _summaryCard({
+    required IconData icon,
+    required int value,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) => Material(
+    color: const Color(0xFF10192E),
+    borderRadius: BorderRadius.circular(13),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      child: Container(
+        height: 96,
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 19),
+            const Spacer(),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 21,
+                height: 1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
         ),
-      ],
-    );
-  }
-
-  // ==========================================
-  // 3. AT A GLANCE KPI CARDS
-  // ==========================================
-  Widget _buildAtAGlanceCards(
-    int patientCount,
-    int pendingTasks,
-    int completedToday,
-  ) {
-    return Row(
-      children: [
-        // My Patients
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0E1A33),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFF1E3A8A).withValues(alpha: 0.6),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.people,
-                      size: 16,
-                      color: Color(0xFF38BDF8),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$patientCount',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'My Patients',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF38BDF8),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFF38BDF8),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Pending Tasks
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF191E2A),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFFEAB308).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: Color(0xFFF59E0B),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$pendingTasks',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'Open issues',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFFF59E0B),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFFF59E0B),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Completed Today
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D2122),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFF10B981).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      size: 16,
-                      color: Color(0xFF10B981),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$completedToday',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Row(
-                  children: [
-                    Text(
-                      'Closed issues',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF34D399),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 12,
-                      color: Color(0xFF34D399),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+      ),
+    ),
+  );
 
   // ==========================================
   // 4. FILTER PILLS & SEARCH / FILTER ROW
@@ -958,7 +1405,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
             child: Text(
               hasAnyPatients
                   ? 'No patients match the selected filter.'
-                  : 'No patients assigned to you for this shift.',
+                  : 'You have no patients',
               style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
             ),
           )
@@ -1291,195 +1738,168 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   // ==========================================
   Widget _buildBottomNavigation(BuildContext context) {
     final pendingTasks = ref.watch(pendingPersonalTasksProvider);
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF0B1224),
-        border: Border(top: BorderSide(color: Color(0xFF16233B), width: 1)),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _activeNavIndex,
-        onTap: (index) {
-          setState(() => _activeNavIndex = index);
-          if (index == 1) {
-            // Patients tab
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Displaying active ward patients.')),
-            );
-          } else if (index == 2) {
-            Navigator.of(context)
-                .push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const PersonalNotebookScreen(),
-                  ),
-                )
-                .then((_) {
-                  if (mounted) setState(() => _activeNavIndex = 0);
-                });
-          } else if (index == 3) {
-            // Handoff tab
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HandoffWizardScreen()),
-            );
-          } else if (index == 4) {
-            // More tab (Access Central Whiteboard & Ward Switcher)
-            _showMoreMenu(context);
-          }
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        selectedItemColor: const Color(0xFF38BDF8),
-        unselectedItemColor: const Color(0xFF64748B),
-        selectedFontSize: 10,
-        unselectedFontSize: 10,
-        items: [
-          const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.people_outline),
-            label: 'Patients',
+    final inbox = ref.watch(personalInboxProvider);
+    final unread = inbox.asData?.value['unread_count'] as int? ?? 0;
+
+    return NavigationBar(
+      selectedIndex: _activeNavIndex,
+      onDestinationSelected: (index) => setState(() => _activeNavIndex = index),
+      backgroundColor: const Color(0xFF0B1224),
+      indicatorColor: const Color(0xFF123047),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      destinations: [
+        const NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Home',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.people_outline),
+          selectedIcon: Icon(Icons.people_rounded),
+          label: 'Patients',
+        ),
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread > 99 ? '99+' : '$unread'),
+            child: const Icon(Icons.chat_bubble_outline_rounded),
           ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.assignment_outlined),
-                if (pendingTasks > 0)
-                  Positioned(
-                    top: -2,
-                    right: -4,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$pendingTasks',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            label: 'Tasks',
+          selectedIcon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread > 99 ? '99+' : '$unread'),
+            child: const Icon(Icons.chat_bubble_rounded),
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.swap_horiz),
-            label: 'Handoff',
+          label: 'Inbox',
+        ),
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: pendingTasks > 0,
+            label: Text(pendingTasks > 99 ? '99+' : '$pendingTasks'),
+            child: const Icon(Icons.checklist_outlined),
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.more_horiz),
-            label: 'More',
+          selectedIcon: Badge(
+            isLabelVisible: pendingTasks > 0,
+            label: Text(pendingTasks > 99 ? '99+' : '$pendingTasks'),
+            child: const Icon(Icons.checklist_rounded),
           ),
-        ],
-      ),
+          label: 'Tasks',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.grid_view_outlined),
+          selectedIcon: Icon(Icons.grid_view_rounded),
+          label: 'More',
+        ),
+      ],
     );
   }
 
-  void _showMoreMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: const BoxDecoration(
-          color: Color(0xFF0F172A),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border(top: BorderSide(color: Color(0xFF1E293B))),
+  Widget _buildMoreDestination(BuildContext context, StaffProfile? staff) =>
+      Scaffold(
+        backgroundColor: const Color(0xFF070C18),
+        appBar: AppBar(
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('More'),
+              Text(
+                'Ward tools and account',
+                style: TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        body: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            ListTile(
-              leading: const Icon(
-                Icons.dashboard_customize,
-                color: Color(0xFF38BDF8),
-              ),
-              title: const Text(
-                'Ward Management & Nurse Allocation Board',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+            _moreSectionLabel('Clinical workflows'),
+            _moreDestinationTile(
+              icon: Icons.swap_horiz_rounded,
+              color: const Color(0xFF38BDF8),
+              title: 'Shift handoff',
+              subtitle: 'Review outstanding work and hand over safely',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const HandoffWizardScreen(),
                 ),
               ),
-              subtitle: const Text(
-                'View master whiteboard beds 1–10 and shift roster',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-                color: Color(0xFF94A3B8),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const DigitalWhiteboardScreen(),
-                  ),
-                );
-              },
             ),
-            ListTile(
-              leading: const Icon(Icons.apartment, color: Color(0xFF34D399)),
-              title: const Text(
-                'Switch Active Hospital Ward',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+            _moreDestinationTile(
+              icon: Icons.dashboard_customize_outlined,
+              color: const Color(0xFFA78BFA),
+              title: 'Ward Management & Nurse Allocation Board',
+              subtitle: 'Beds, assignments, and shift roster',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DigitalWhiteboardScreen(),
                 ),
               ),
-              subtitle: const Text(
-                'Select another ward with search autofilter',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-                color: Color(0xFF94A3B8),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                showDialog(
+            ),
+            if (staff?.isChargeNurse == true)
+              _moreDestinationTile(
+                icon: Icons.apartment_rounded,
+                color: const Color(0xFF34D399),
+                title: 'Switch Active Hospital Ward',
+                subtitle: 'Choose another ward you coordinate',
+                onTap: () => showDialog<void>(
                   context: context,
                   builder: (_) => const WardSelectionDialog(),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.lock_outline, color: Color(0xFFEF4444)),
-              title: const Text(
-                'Lock Station',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
               ),
-              subtitle: const Text(
-                'Return to Digital ID badge screen',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                ref.read(authControllerProvider.notifier).logout();
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => const DigitalIdLockscreen(),
-                  ),
-                  (route) => false,
-                );
-              },
+            const SizedBox(height: 22),
+            _moreSectionLabel('Account and security'),
+            _moreDestinationTile(
+              icon: Icons.lock_outline_rounded,
+              color: const Color(0xFFF87171),
+              title: 'Lock Station',
+              subtitle: 'Secure Oravi and return to Digital ID',
+              onTap: () => _showLockDialog(context, ref, staff),
             ),
           ],
         ),
+      );
+
+  Widget _moreSectionLabel(String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+    child: Text(
+      label.toUpperCase(),
+      style: const TextStyle(
+        color: Color(0xFF64748B),
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.8,
       ),
-    );
-  }
+    ),
+  );
+
+  Widget _moreDestinationTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) => Card(
+    margin: const EdgeInsets.only(bottom: 10),
+    child: ListTile(
+      onTap: onTap,
+      minTileHeight: 74,
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 21),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+    ),
+  );
 
   void _showLockDialog(
     BuildContext context,

@@ -165,12 +165,16 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
       await m.createAll();
+      await customStatement(
+        'CREATE TABLE local_sync_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+      );
+      await _createOfflineTables();
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) {
@@ -178,6 +182,12 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
         await m.createTable(localWhiteboardAssignments);
         await m.createTable(localSupportRosters);
       }
+      if (from < 3) {
+        await customStatement(
+          'CREATE TABLE IF NOT EXISTS local_sync_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+        );
+      }
+      if (from < 4) await _createOfflineTables();
     },
   );
 
@@ -431,6 +441,23 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
     );
   }
 
+  /// Permanently removes rejected events from the retry queue while retaining
+  /// their local event history for diagnostics.
+  Future<void> markOutboxRejected(List<String> eventIds, String error) {
+    if (eventIds.isEmpty) return Future<void>.value();
+    final placeholders = List.filled(eventIds.length, '?').join(', ');
+    return customUpdate(
+      'UPDATE outbox SET status = ?, error_message = ?, last_attempt_at = ? WHERE event_id IN ($placeholders)',
+      variables: [
+        Variable.withString('rejected'),
+        Variable.withString(error),
+        Variable.withDateTime(DateTime.now()),
+        ...eventIds.map(Variable.withString),
+      ],
+      updates: {outbox},
+    );
+  }
+
   /// Returns the highest server sequence stored in the local SQLite database.
   /// Ignores any legacy epoch-millisecond mock sequences (>= 1,000,000,000).
   Future<int> getHighestServerSeq() async {
@@ -609,6 +636,192 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
   Future<void> saveSupportRoster(LocalSupportRostersCompanion roster) {
     return into(localSupportRosters).insertOnConflictUpdate(roster);
   }
+
+  Future<DateTime?> getLastSuccessfulSyncAt() async {
+    final row = await customSelect(
+      'SELECT value FROM local_sync_metadata WHERE key = ?',
+      variables: [Variable.withString('last_successful_sync_at')],
+    ).getSingleOrNull();
+    return row == null
+        ? null
+        : DateTime.tryParse(row.read<String>('value'))?.toLocal();
+  }
+
+  Future<void> saveLastSuccessfulSyncAt(DateTime value) async {
+    await customStatement(
+      'INSERT INTO local_sync_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      ['last_successful_sync_at', value.toUtc().toIso8601String()],
+    );
+  }
+
+  Future<void> _createOfflineTables() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_data_cache (
+        cache_key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS queued_api_operations (
+        operation_id TEXT PRIMARY KEY,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+      )
+    ''');
+  }
+
+  Future<void> cacheJson(String key, Map<String, dynamic> value) async {
+    await customStatement(
+      'INSERT INTO local_data_cache (cache_key, payload_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(cache_key) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at',
+      [key, jsonEncode(value), DateTime.now().toUtc().toIso8601String()],
+    );
+  }
+
+  Future<Map<String, dynamic>?> readCachedJson(String key) async {
+    final row = await customSelect(
+      'SELECT payload_json FROM local_data_cache WHERE cache_key = ?',
+      variables: [Variable.withString(key)],
+    ).getSingleOrNull();
+    if (row == null) return null;
+    final decoded = jsonDecode(row.read<String>('payload_json'));
+    return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
+  Future<DateTime?> getCachedAt(String key) async {
+    final row = await customSelect(
+      'SELECT updated_at FROM local_data_cache WHERE cache_key = ?',
+      variables: [Variable.withString(key)],
+    ).getSingleOrNull();
+    return row == null
+        ? null
+        : DateTime.tryParse(row.read<String>('updated_at'))?.toLocal();
+  }
+
+  Future<void> saveLocalValue(String key, String value) async {
+    await customStatement(
+      'INSERT INTO local_sync_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      [key, value],
+    );
+  }
+
+  Future<String?> readLocalValue(String key) async {
+    final row = await customSelect(
+      'SELECT value FROM local_sync_metadata WHERE key = ?',
+      variables: [Variable.withString(key)],
+    ).getSingleOrNull();
+    return row?.read<String>('value');
+  }
+
+  Future<void> deleteLocalValue(String key) async {
+    await customStatement('DELETE FROM local_sync_metadata WHERE key = ?', [
+      key,
+    ]);
+  }
+
+  Future<void> enqueueApiOperation({
+    required String operationId,
+    required String method,
+    required String path,
+    required Map<String, dynamic> payload,
+  }) async {
+    await customStatement(
+      'INSERT INTO queued_api_operations (operation_id, method, path, payload_json, status, created_at, attempts, last_error) VALUES (?, ?, ?, ?, ?, ?, 0, NULL) ON CONFLICT(operation_id) DO UPDATE SET method = excluded.method, path = excluded.path, payload_json = excluded.payload_json, status = excluded.status, created_at = excluded.created_at, attempts = 0, last_error = NULL',
+      [
+        operationId,
+        method,
+        path,
+        jsonEncode(payload),
+        'pending',
+        DateTime.now().toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<List<QueuedApiOperation>> getPendingApiOperations({
+    int limit = 20,
+  }) async {
+    final rows = await customSelect(
+      "SELECT operation_id, method, path, payload_json FROM queued_api_operations WHERE status IN ('pending', 'failed') ORDER BY created_at LIMIT ?",
+      variables: [Variable.withInt(limit)],
+    ).get();
+    return rows
+        .map(
+          (row) => QueuedApiOperation(
+            operationId: row.read<String>('operation_id'),
+            method: row.read<String>('method'),
+            path: row.read<String>('path'),
+            payload: Map<String, dynamic>.from(
+              jsonDecode(row.read<String>('payload_json')) as Map,
+            ),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> getPendingApiOperationCount() async {
+    final row = await customSelect(
+      "SELECT COUNT(*) AS count FROM queued_api_operations WHERE status != 'synced'",
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Future<void> markApiOperationInFlight(String operationId) async {
+    await customStatement(
+      "UPDATE queued_api_operations SET status = 'in_flight', attempts = attempts + 1 WHERE operation_id = ?",
+      [operationId],
+    );
+  }
+
+  Future<void> markApiOperationSynced(String operationId) async {
+    await customStatement(
+      "UPDATE queued_api_operations SET status = 'synced', last_error = NULL WHERE operation_id = ?",
+      [operationId],
+    );
+  }
+
+  Future<void> markApiOperationFailed(
+    String operationId,
+    String error, {
+    required bool blocked,
+  }) async {
+    await customStatement(
+      "UPDATE queued_api_operations SET status = ?, last_error = ? WHERE operation_id = ?",
+      [blocked ? 'blocked' : 'failed', error, operationId],
+    );
+  }
+
+  Future<void> resetStaleApiOperations({
+    Duration staleAfter = const Duration(minutes: 2),
+  }) async {
+    final cutoff = DateTime.now()
+        .subtract(staleAfter)
+        .toUtc()
+        .toIso8601String();
+    await customStatement(
+      "UPDATE queued_api_operations SET status = 'pending' WHERE status = 'in_flight' AND created_at < ?",
+      [cutoff],
+    );
+  }
+}
+
+class QueuedApiOperation {
+  final String operationId;
+  final String method;
+  final String path;
+  final Map<String, dynamic> payload;
+
+  const QueuedApiOperation({
+    required this.operationId,
+    required this.method,
+    required this.path,
+    required this.payload,
+  });
 }
 
 LazyDatabase _openConnection(String? encryptionKey) {

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../data/database/database_provider.dart';
 import '../../data/ward_board_service.dart';
 import '../../domain/models/staff_profile.dart';
 import '../../domain/models/whiteboard_models.dart';
@@ -65,22 +66,43 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     final ward = ref.watch(selectedWardProvider);
     final shift = ref.watch(selectedShiftTypeProvider);
     final token = ref.watch(authAccessTokenProvider);
+    final offline = ref.watch(offlineSessionProvider);
     final staff = ref.watch(authenticatedStaffProvider);
     final needsConfirmation = ref.watch(wardContextNeedsConfirmationProvider);
-    if (ward.wardId.isEmpty || token == null || staff?.isClinical != true) {
+    if (ward.wardId.isEmpty || staff?.isClinical != true) {
       return const WardBoardData();
     }
     if (staff?.role == 'charge_nurse' && needsConfirmation) {
       return const WardBoardData();
     }
-    final response = await ref
-        .read(wardBoardServiceProvider)
-        .getBoard(
-          wardId: ward.wardId,
-          date: activeWardShiftDate(),
-          shiftType: shift,
-        );
-    return WardBoardData.fromMap(response);
+    final cacheKey = _boardCacheKey(ward.wardId, activeWardShiftDate(), shift);
+    if (token == null || offline) {
+      final cached = await ref
+          .read(localDatabaseProvider)
+          .readCachedJson(cacheKey);
+      return cached == null
+          ? const WardBoardData()
+          : WardBoardData.fromMap(cached);
+    }
+    try {
+      final response = await ref
+          .read(wardBoardServiceProvider)
+          .getBoard(
+            wardId: ward.wardId,
+            date: activeWardShiftDate(),
+            shiftType: shift,
+          );
+      await ref
+          .read(localDatabaseProvider)
+          .cacheJson(cacheKey, Map<String, dynamic>.from(response as Map));
+      return WardBoardData.fromMap(Map<String, dynamic>.from(response as Map));
+    } catch (_) {
+      final cached = await ref
+          .read(localDatabaseProvider)
+          .readCachedJson(cacheKey);
+      if (cached != null) return WardBoardData.fromMap(cached);
+      rethrow;
+    }
   }
 
   String get _shiftType => ref.read(selectedShiftTypeProvider);
@@ -90,18 +112,47 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     String doctorId,
   ) async {
     final ward = ref.read(selectedWardProvider);
-    await ref
-        .read(wardBoardServiceProvider)
-        .communicationRequest(
-          'PUT',
-          '/wards/${Uri.encodeComponent(ward.wardId)}/beds/${Uri.encodeComponent(bed.bedNumber)}/doctor',
-          payload: {
-            'date': activeWardShiftDate(),
-            'patient_id': bed.patientId,
-            'expected_doctor_id': bed.admittingDoctor,
-            'doctor_id': doctorId,
-          },
-        );
+    if (ref.read(authAccessTokenProvider) == null ||
+        ref.read(offlineSessionProvider)) {
+      final current = state.asData?.value ?? const WardBoardData();
+      final assignments = current.assignments
+          .map(
+            (item) => item.bedNumber == bed.bedNumber
+                ? item.copyWith(admittingDoctor: doctorId)
+                : item,
+          )
+          .toList();
+      await _save(assignments, current.supportRoster);
+      return;
+    }
+    try {
+      await ref
+          .read(wardBoardServiceProvider)
+          .communicationRequest(
+            'PUT',
+            '/wards/${Uri.encodeComponent(ward.wardId)}/beds/${Uri.encodeComponent(bed.bedNumber)}/doctor',
+            payload: {
+              'date': activeWardShiftDate(),
+              'patient_id': bed.patientId,
+              'expected_doctor_id': bed.admittingDoctor,
+              'doctor_id': doctorId,
+            },
+          );
+    } catch (error) {
+      if (!error.toString().contains('Could not reach the Oravi service')) {
+        rethrow;
+      }
+      final current = state.asData?.value ?? const WardBoardData();
+      final assignments = current.assignments
+          .map(
+            (item) => item.bedNumber == bed.bedNumber
+                ? item.copyWith(admittingDoctor: doctorId)
+                : item,
+          )
+          .toList();
+      await _save(assignments, current.supportRoster);
+      return;
+    }
     ref.invalidateSelf();
   }
 
@@ -235,33 +286,93 @@ class WardBoardNotifier extends AsyncNotifier<WardBoardData> {
     if (ward.wardId.isEmpty || staff == null) {
       throw StateError('Select a ward and sign in before publishing changes.');
     }
+    final isOffline =
+        ref.read(authAccessTokenProvider) == null ||
+        ref.read(offlineSessionProvider);
+    if (isOffline && carryForwardIssues.isNotEmpty) {
+      throw StateError(
+        'Carrying Medical Issues forward needs a connection. The board was not changed.',
+      );
+    }
+    final current = state.asData?.value ?? const WardBoardData();
+    final date = activeWardShiftDate();
+    final service = ref.read(wardBoardServiceProvider);
+    final allocationId = 'ALLOC-${const Uuid().v7()}';
+    final payload = service.buildPublishBoardPayload(
+      wardId: ward.wardId,
+      date: date,
+      shiftType: _shiftType,
+      staffId: staff.staffId,
+      assignments: assignments,
+      supportRoster: roster.toMap(),
+      carryForwardIssues: carryForwardIssues,
+      allocationId: allocationId,
+    );
+    final cacheKey = _boardCacheKey(ward.wardId, date, _shiftType);
+    final localData = <String, dynamic>{
+      'allocation_id': allocationId,
+      'available_nurse_ids': current.availableNurseIds,
+      'bed_assignments': assignments.map((item) => item.toMap()).toList(),
+      'responsibilities': roster.toMap(),
+    };
     state = const AsyncLoading();
     try {
+      await ref.read(localDatabaseProvider).cacheJson(cacheKey, localData);
+      if (isOffline) {
+        await ref
+            .read(localDatabaseProvider)
+            .enqueueApiOperation(
+              operationId: allocationId,
+              method: 'POST',
+              path: '/api/v1/allocations/publish',
+              payload: payload,
+            );
+        state = AsyncData(WardBoardData.fromMap(localData));
+        return;
+      }
+      await service.publishBoard(
+        wardId: ward.wardId,
+        date: date,
+        shiftType: _shiftType,
+        staffId: staff.staffId,
+        assignments: assignments,
+        supportRoster: roster.toMap(),
+        carryForwardIssues: carryForwardIssues,
+        allocationId: allocationId,
+      );
+      final response = await service.getBoard(
+        wardId: ward.wardId,
+        date: date,
+        shiftType: _shiftType,
+      );
       await ref
-          .read(wardBoardServiceProvider)
-          .publishBoard(
-            wardId: ward.wardId,
-            date: activeWardShiftDate(),
-            shiftType: _shiftType,
-            staffId: staff.staffId,
-            assignments: assignments,
-            supportRoster: roster.toMap(),
-            carryForwardIssues: carryForwardIssues,
-          );
-      final response = await ref
-          .read(wardBoardServiceProvider)
-          .getBoard(
-            wardId: ward.wardId,
-            date: activeWardShiftDate(),
-            shiftType: _shiftType,
-          );
-      state = AsyncData(WardBoardData.fromMap(response));
+          .read(localDatabaseProvider)
+          .cacheJson(cacheKey, Map<String, dynamic>.from(response as Map));
+      state = AsyncData(
+        WardBoardData.fromMap(Map<String, dynamic>.from(response as Map)),
+      );
     } catch (error, stackTrace) {
+      if (!isOffline &&
+          error.toString().contains('Could not reach the Oravi service')) {
+        await ref
+            .read(localDatabaseProvider)
+            .enqueueApiOperation(
+              operationId: allocationId,
+              method: 'POST',
+              path: '/api/v1/allocations/publish',
+              payload: payload,
+            );
+        state = AsyncData(WardBoardData.fromMap(localData));
+        return;
+      }
       state = AsyncError(error, stackTrace);
       rethrow;
     }
   }
 }
+
+String _boardCacheKey(String wardId, String date, String shift) =>
+    'ward_board:$wardId:$date:$shift';
 
 final wardBoardProvider =
     AsyncNotifierProvider<WardBoardNotifier, WardBoardData>(
@@ -295,11 +406,35 @@ final wardSupportRosterProvider =
 final boardStaffListProvider = FutureProvider<List<StaffProfile>>((ref) async {
   final wardId = ref.watch(selectedWardProvider).wardId;
   if (wardId.isEmpty) return const [];
-  return ref
-      .read(wardBoardServiceProvider)
-      .getStaffForWard(
-        wardId,
-        date: activeWardShiftDate(),
-        shiftType: ref.watch(selectedShiftTypeProvider),
-      );
+  final shift = ref.watch(selectedShiftTypeProvider);
+  final key = 'ward_staff:$wardId:${activeWardShiftDate()}:$shift';
+  final db = ref.read(localDatabaseProvider);
+  if (ref.watch(offlineSessionProvider) ||
+      ref.watch(authAccessTokenProvider) == null) {
+    final cached = await db.readCachedJson(key);
+    return (cached?['staff'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              StaffProfile.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+  }
+  try {
+    final staff = await ref
+        .read(wardBoardServiceProvider)
+        .getStaffForWard(wardId, date: activeWardShiftDate(), shiftType: shift);
+    await db.cacheJson(key, {
+      'staff': staff.map((item) => item.toJson()).toList(),
+    });
+    return staff;
+  } catch (_) {
+    final cached = await db.readCachedJson(key);
+    if (cached == null) rethrow;
+    return (cached['staff'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              StaffProfile.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+  }
 });

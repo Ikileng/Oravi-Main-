@@ -388,33 +388,54 @@ class WardBoardService {
     required List<WhiteboardBedAssignment> assignments,
     required Map<String, dynamic> supportRoster,
     List<Map<String, String>> carryForwardIssues = const [],
+    String? allocationId,
   }) async {
     await _request(
       'POST',
       '/api/v1/allocations/publish',
-      payload: {
-        'allocation_id': 'ALLOC-${const Uuid().v7()}',
-        'ward_id': wardId,
-        'shift_type': shiftType,
-        'date': date,
-        'published_by': staffId,
-        'published_at': DateTime.now().toUtc().toIso8601String(),
-        'support_roster': supportRoster,
-        'bed_assignments': assignments.map((assignment) {
-          return {
-            'bed_number': assignment.bedNumber,
-            'patient_id': assignment.patientId,
-            'patient_initials': assignment.patientInitials,
-            'admission_number': assignment.patientId,
-            'admitting_doctor': assignment.admittingDoctor,
-            'assigned_nurse_id': shiftType == 'day'
-                ? assignment.dayShiftNurseId
-                : assignment.nightShiftNurseId,
-            'status': assignment.status,
-          };
-        }).toList(),
-        'carry_forward_issues': carryForwardIssues,
-      },
+      payload: buildPublishBoardPayload(
+        wardId: wardId,
+        date: date,
+        shiftType: shiftType,
+        staffId: staffId,
+        assignments: assignments,
+        supportRoster: supportRoster,
+        carryForwardIssues: carryForwardIssues,
+        allocationId: allocationId,
+      ),
     );
   }
+
+  Map<String, dynamic> buildPublishBoardPayload({
+    required String wardId,
+    required String date,
+    required String shiftType,
+    required String staffId,
+    required List<WhiteboardBedAssignment> assignments,
+    required Map<String, dynamic> supportRoster,
+    List<Map<String, String>> carryForwardIssues = const [],
+    String? allocationId,
+  }) => {
+    'allocation_id': allocationId ?? 'ALLOC-${const Uuid().v7()}',
+    'ward_id': wardId,
+    'shift_type': shiftType,
+    'date': date,
+    'published_by': staffId,
+    'published_at': DateTime.now().toUtc().toIso8601String(),
+    'support_roster': supportRoster,
+    'bed_assignments': assignments.map((assignment) {
+      return {
+        'bed_number': assignment.bedNumber,
+        'patient_id': assignment.patientId,
+        'patient_initials': assignment.patientInitials,
+        'admission_number': assignment.patientId,
+        'admitting_doctor': assignment.admittingDoctor,
+        'assigned_nurse_id': shiftType == 'day'
+            ? assignment.dayShiftNurseId
+            : assignment.nightShiftNurseId,
+        'status': assignment.status,
+      };
+    }).toList(),
+    'carry_forward_issues': carryForwardIssues,
+  };
 }

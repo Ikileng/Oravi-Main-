@@ -1829,6 +1829,73 @@ class ShiftAllocationDisputedEvent extends OraviEvent {
   }
 }
 
+class ClinicalRitualApprovedEvent extends OraviEvent {
+  static const String eventType = 'ClinicalRitualApproved';
+  final String ritualId;
+  final String ritualType;
+  final String title;
+  final Map<String, dynamic> summary;
+  ClinicalRitualApprovedEvent({
+    required super.eventId,
+    required super.patientId,
+    required super.authorId,
+    required super.deviceId,
+    required super.clientCreatedAt,
+    required this.ritualId,
+    required this.ritualType,
+    required this.title,
+    required this.summary,
+    super.serverSeq,
+    super.serverReceivedAt,
+    super.schemaVersion,
+    super.prevHash,
+    super.hash,
+  }) : super(type: eventType);
+
+  @override
+  Map<String, dynamic> toMap() => {
+    'event_id': eventId,
+    'type': type,
+    'patient_id': patientId,
+    'author_id': authorId,
+    'device_id': deviceId,
+    'client_created_at': clientCreatedAt.toIso8601String(),
+    'server_seq': serverSeq,
+    'server_received_at': serverReceivedAt?.toIso8601String(),
+    'schema_version': schemaVersion,
+    'prev_hash': prevHash,
+    'hash': hash,
+    'payload': {
+      'ritual_id': ritualId,
+      'ritual_type': ritualType,
+      'title': title,
+      'summary': summary,
+    },
+  };
+
+  factory ClinicalRitualApprovedEvent.fromMap(Map<String, dynamic> map) {
+    final payload = Map<String, dynamic>.from(map['payload'] as Map);
+    return ClinicalRitualApprovedEvent(
+      eventId: map['event_id'] as String,
+      patientId: map['patient_id'] as String,
+      authorId: map['author_id'] as String,
+      deviceId: map['device_id'] as String,
+      clientCreatedAt: DateTime.parse(map['client_created_at'] as String),
+      serverSeq: map['server_seq'] as int?,
+      serverReceivedAt: map['server_received_at'] == null
+          ? null
+          : DateTime.parse(map['server_received_at'] as String),
+      schemaVersion: map['schema_version'] as int? ?? 1,
+      prevHash: map['prev_hash'] as String?,
+      hash: map['hash'] as String?,
+      ritualId: payload['ritual_id'] as String,
+      ritualType: payload['ritual_type'] as String,
+      title: payload['title'] as String,
+      summary: Map<String, dynamic>.from(payload['summary'] as Map),
+    );
+  }
+}
+
 /// Generic factory to deserialize any canonical event map into its specific type.
 OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
   final type = map['type'] as String;
@@ -1887,6 +1954,8 @@ OraviEvent deserializeOraviEvent(Map<String, dynamic> map) {
       return ShiftAllocationAcceptedEvent.fromMap(map);
     case ShiftAllocationDisputedEvent.eventType:
       return ShiftAllocationDisputedEvent.fromMap(map);
+    case ClinicalRitualApprovedEvent.eventType:
+      return ClinicalRitualApprovedEvent.fromMap(map);
     default:
       throw UnsupportedError('Unknown event type: $type');
   }

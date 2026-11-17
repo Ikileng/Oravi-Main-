@@ -10,8 +10,15 @@ class AuthResult {
   final StaffProfile? staff;
   final String? token;
   final String? error;
+  final bool networkUnavailable;
 
-  const AuthResult({required this.success, this.staff, this.token, this.error});
+  const AuthResult({
+    required this.success,
+    this.staff,
+    this.token,
+    this.error,
+    this.networkUnavailable = false,
+  });
 }
 
 class StaffAuthService {
@@ -383,11 +390,31 @@ class StaffAuthService {
           client.close();
         }
       });
-    } catch (_) {
+    } on SocketException catch (_) {
       return const AuthResult(
         success: false,
         error:
             'Sign-in service unavailable. Connect to the configured Oravi service.',
+        networkUnavailable: true,
+      );
+    } on TimeoutException catch (_) {
+      return const AuthResult(
+        success: false,
+        error:
+            'Sign-in service unavailable. Connect to the configured Oravi service.',
+        networkUnavailable: true,
+      );
+    } on HandshakeException catch (_) {
+      return const AuthResult(
+        success: false,
+        error:
+            'Sign-in service unavailable. Connect to the configured Oravi service.',
+        networkUnavailable: true,
+      );
+    } catch (_) {
+      return const AuthResult(
+        success: false,
+        error: 'Sign-in failed. Check your details and try again.',
       );
     }
   }

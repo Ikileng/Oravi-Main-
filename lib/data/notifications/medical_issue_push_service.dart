@@ -32,6 +32,12 @@ class CallAlert {
   const CallAlert({required this.callId});
 }
 
+class RitualAlert {
+  final String ritualId;
+  final bool review;
+  const RitualAlert({required this.ritualId, this.review = false});
+}
+
 class MedicalIssuePushService {
   static const _channelId = 'medical_issue_alerts';
   static const _callCredentialKey = 'oravi_call_credential';
@@ -42,6 +48,9 @@ class MedicalIssuePushService {
       StreamController<MedicalIssueAlert>.broadcast();
   final StreamController<CallAlert> _openedCalls =
       StreamController<CallAlert>.broadcast();
+  final StreamController<RitualAlert> _openedRituals =
+      StreamController<RitualAlert>.broadcast();
+  Stream<RitualAlert> get openedRituals => _openedRituals.stream;
   StreamSubscription<RemoteMessage>? _foregroundMessages;
   StreamSubscription<RemoteMessage>? _openedMessages;
   StreamSubscription<String>? _tokenRefreshSubscription;
@@ -204,6 +213,7 @@ class MedicalIssuePushService {
     await _openedMessages?.cancel();
     await _openedAlerts.close();
     await _openedCalls.close();
+    await _openedRituals.close();
     await _openedInbox.close();
   }
 
@@ -354,6 +364,19 @@ class MedicalIssuePushService {
       if (data['type'] == 'oravi_call' && data['call_id'] is String) {
         if (!_openedCalls.isClosed) {
           _openedCalls.add(CallAlert(callId: data['call_id'] as String));
+        }
+        return;
+      }
+      if ((data['type'] == 'clinical_ritual' ||
+              data['type'] == 'clinical_ritual_review') &&
+          data['ritual_id'] is String) {
+        if (!_openedRituals.isClosed) {
+          _openedRituals.add(
+            RitualAlert(
+              ritualId: data['ritual_id'] as String,
+              review: data['type'] == 'clinical_ritual_review',
+            ),
+          );
         }
         return;
       }
