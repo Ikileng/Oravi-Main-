@@ -1,7 +1,11 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'admin/dev_admin_dashboard_screen.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../domain/models/loop_enums.dart';
 import '../domain/models/staff_profile.dart';
 import 'communications/staff_communications_screen.dart';
@@ -151,107 +155,104 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
       return true;
     }).toList();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF070C18),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top Clean Header
-            _buildCleanHeader(context, currentWard.name, authStaff),
-            if (offlineSession) _buildOfflineSessionBanner(),
-
-            // Scrollable Dashboard Body
-            Expanded(
-              child: SingleChildScrollView(
-                key: PageStorageKey('clinician-tab-$_activeNavIndex'),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14.0,
-                  vertical: 8.0,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        icon: const InboxBadge(),
-                        label: const Text('Messages & calls'),
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => const StaffCommunicationsScreen(),
-                          ),
+    final wardDestination = SafeArea(
+      child: Column(
+        children: [
+          _buildCleanHeader(context, currentWard.name, authStaff),
+          if (offlineSession) _buildOfflineSessionBanner(),
+          Expanded(
+            child: SingleChildScrollView(
+              key: PageStorageKey('clinician-tab-$_activeNavIndex'),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14.0,
+                vertical: 8.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const InboxBadge(),
+                      label: const Text('Messages & calls'),
+                      onPressed: () => setState(() => _activeNavIndex = 2),
+                    ),
+                  ),
+                  if (_activeNavIndex == 0) ...[
+                    _buildGreetingSection(nurseName),
+                    _buildClinicalRitualNotifications(context),
+                    const NotebookReminderBanner(),
+                    const WardTransferNotice(),
+                    const SizedBox(height: 14),
+                    _buildCarriedForwardIssues(carriedIssuesState),
+                  ] else
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'My Patients',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    if (_activeNavIndex == 0) ...[
-                      _buildGreetingSection(nurseName),
-                      _buildClinicalRitualNotifications(context),
-                      const NotebookReminderBanner(),
-                      const WardTransferNotice(),
-                      const SizedBox(height: 14),
-                      _buildCarriedForwardIssues(carriedIssuesState),
-                    ] else
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Text(
-                          'My Patients',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  if (currentWard.wardId.isEmpty) ...[
+                    if (_activeNavIndex == 0) _buildHomeEmptyState(),
+                    _buildNoWardPanel(authStaff),
+                  ] else if (authStaff?.isChargeNurse == true &&
+                      ref.watch(wardContextNeedsConfirmationProvider))
+                    _buildWardConfirmationPanel(currentWard.name)
+                  else if (boardState.isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (boardState.hasError)
+                    _buildBoardLoadError(boardState.error)
+                  else ...[
+                    if (_activeNavIndex == 0 && totalPatients == 0)
+                      _buildHomeEmptyState(),
+                    if (_activeNavIndex == 0 && totalPatients > 0)
+                      _buildAtAGlanceCards(
+                        totalPatients,
+                        summary.openIssues,
+                        summary.closedIssues,
                       ),
-                    if (currentWard.wardId.isEmpty) ...[
-                      if (_activeNavIndex == 0) _buildHomeEmptyState(),
-                      _buildNoWardPanel(authStaff),
-                    ] else if (authStaff?.isChargeNurse == true &&
-                        ref.watch(wardContextNeedsConfirmationProvider))
-                      _buildWardConfirmationPanel(currentWard.name)
-                    else if (boardState.isLoading)
-                      const Center(child: CircularProgressIndicator())
-                    else if (boardState.hasError)
-                      _buildBoardLoadError(boardState.error)
-                    else ...[
-                      if (_activeNavIndex == 0 && totalPatients == 0)
-                        _buildHomeEmptyState(),
-                      if (_activeNavIndex == 0 && totalPatients > 0)
-                        _buildAtAGlanceCards(
+                    const SizedBox(height: 14),
+                    if (_activeNavIndex == 0 && totalPatients > 0)
+                      _buildShiftHandoffBanner(context)
+                    else if (_activeNavIndex == 1) ...[
+                      if (totalPatients > 0)
+                        _buildFilterRow(
                           totalPatients,
-                          summary.openIssues,
-                          summary.closedIssues,
+                          summary.pendingPatients.length,
+                          summary.completedPatients.length,
                         ),
                       const SizedBox(height: 14),
-                      if (_activeNavIndex == 0 && totalPatients > 0)
-                        _buildShiftHandoffBanner(context)
-                      else if (_activeNavIndex == 1) ...[
-                        if (totalPatients > 0)
-                          _buildFilterRow(
-                            totalPatients,
-                            summary.pendingPatients.length,
-                            summary.completedPatients.length,
-                          ),
-                        const SizedBox(height: 14),
-                        _buildPatientListSection(
-                          filteredPatients,
-                          doctorMap,
-                          hasAnyPatients: myPatients.isNotEmpty,
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-                      const SizedBox(height: 20),
+                      _buildPatientListSection(
+                        filteredPatients,
+                        doctorMap,
+                        hasAnyPatients: myPatients.isNotEmpty,
+                      ),
+                      const SizedBox(height: 18),
                     ],
+                    const SizedBox(height: 20),
                   ],
-                ),
+                ],
               ),
             ),
-
-            // 5-Tab Bottom Navigation Bar
-            _buildBottomNavigation(context),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF070C18),
+      body: switch (_activeNavIndex) {
+        2 => const StaffCommunicationsScreen(),
+        3 => const PersonalNotebookScreen(),
+        4 => _buildMoreDestination(context, authStaff),
+        _ => wardDestination,
+      },
+      bottomNavigationBar: _buildBottomNavigation(context),
     );
   }
 
@@ -1531,193 +1532,168 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
   // ==========================================
   Widget _buildBottomNavigation(BuildContext context) {
     final pendingTasks = ref.watch(pendingPersonalTasksProvider);
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF0B1224),
-        border: Border(top: BorderSide(color: Color(0xFF16233B), width: 1)),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _activeNavIndex,
-        onTap: (index) {
-          if (index == 0 || index == 1) {
-            setState(() => _activeNavIndex = index);
-          } else if (index == 2) {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const PersonalNotebookScreen(),
-              ),
-            );
-          } else if (index == 3) {
-            // Handoff tab
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HandoffWizardScreen()),
-            );
-          } else if (index == 4) {
-            // More tab (Access Central Whiteboard & Ward Switcher)
-            _showMoreMenu(context);
-          }
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        selectedItemColor: const Color(0xFF38BDF8),
-        unselectedItemColor: const Color(0xFF64748B),
-        selectedFontSize: 10,
-        unselectedFontSize: 10,
-        items: [
-          const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.people_outline),
-            label: 'Patients',
+    final inbox = ref.watch(personalInboxProvider);
+    final unread = inbox.asData?.value['unread_count'] as int? ?? 0;
+
+    return NavigationBar(
+      selectedIndex: _activeNavIndex,
+      onDestinationSelected: (index) => setState(() => _activeNavIndex = index),
+      backgroundColor: const Color(0xFF0B1224),
+      indicatorColor: const Color(0xFF123047),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      destinations: [
+        const NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Home',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.people_outline),
+          selectedIcon: Icon(Icons.people_rounded),
+          label: 'Patients',
+        ),
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread > 99 ? '99+' : '$unread'),
+            child: const Icon(Icons.chat_bubble_outline_rounded),
           ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.assignment_outlined),
-                if (pendingTasks > 0)
-                  Positioned(
-                    top: -2,
-                    right: -4,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$pendingTasks',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            label: 'Tasks',
+          selectedIcon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread > 99 ? '99+' : '$unread'),
+            child: const Icon(Icons.chat_bubble_rounded),
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.swap_horiz),
-            label: 'Handoff',
+          label: 'Inbox',
+        ),
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: pendingTasks > 0,
+            label: Text(pendingTasks > 99 ? '99+' : '$pendingTasks'),
+            child: const Icon(Icons.checklist_outlined),
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.more_horiz),
-            label: 'More',
+          selectedIcon: Badge(
+            isLabelVisible: pendingTasks > 0,
+            label: Text(pendingTasks > 99 ? '99+' : '$pendingTasks'),
+            child: const Icon(Icons.checklist_rounded),
           ),
-        ],
-      ),
+          label: 'Tasks',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.grid_view_outlined),
+          selectedIcon: Icon(Icons.grid_view_rounded),
+          label: 'More',
+        ),
+      ],
     );
   }
 
-  void _showMoreMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Material(
-        color: const Color(0xFF0F172A),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+  Widget _buildMoreDestination(BuildContext context, StaffProfile? staff) =>
+      Scaffold(
+        backgroundColor: const Color(0xFF070C18),
+        appBar: AppBar(
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ListTile(
-                leading: const Icon(
-                  Icons.dashboard_customize,
-                  color: Color(0xFF38BDF8),
-                ),
-                title: const Text(
-                  'Ward Management & Nurse Allocation Board',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                subtitle: const Text(
-                  'View master whiteboard beds 1–10 and shift roster',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                ),
-                trailing: const Icon(
-                  Icons.chevron_right,
+              Text('More'),
+              Text(
+                'Ward tools and account',
+                style: TextStyle(
                   color: Color(0xFF94A3B8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                 ),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const DigitalWhiteboardScreen(),
-                    ),
-                  );
-                },
-              ),
-              if (ref.watch(authenticatedStaffProvider)?.isChargeNurse == true)
-                ListTile(
-                  leading: const Icon(
-                    Icons.apartment,
-                    color: Color(0xFF34D399),
-                  ),
-                  title: const Text(
-                    'Switch Active Hospital Ward',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  subtitle: const Text(
-                    'Select another ward with search autofilter',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                  ),
-                  trailing: const Icon(
-                    Icons.chevron_right,
-                    color: Color(0xFF94A3B8),
-                  ),
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    showDialog(
-                      context: context,
-                      builder: (_) => const WardSelectionDialog(),
-                    );
-                  },
-                ),
-              ListTile(
-                leading: const Icon(
-                  Icons.lock_outline,
-                  color: Color(0xFFEF4444),
-                ),
-                title: const Text(
-                  'Lock Station',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                subtitle: const Text(
-                  'Return to Digital ID badge screen',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                ),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  ref.read(authControllerProvider.notifier).logout();
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(
-                      builder: (_) => const DigitalIdLockscreen(),
-                    ),
-                    (route) => false,
-                  );
-                },
               ),
             ],
           ),
         ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _moreSectionLabel('Clinical workflows'),
+            _moreDestinationTile(
+              icon: Icons.swap_horiz_rounded,
+              color: const Color(0xFF38BDF8),
+              title: 'Shift handoff',
+              subtitle: 'Review outstanding work and hand over safely',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const HandoffWizardScreen(),
+                ),
+              ),
+            ),
+            _moreDestinationTile(
+              icon: Icons.dashboard_customize_outlined,
+              color: const Color(0xFFA78BFA),
+              title: 'Ward Management & Nurse Allocation Board',
+              subtitle: 'Beds, assignments, and shift roster',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DigitalWhiteboardScreen(),
+                ),
+              ),
+            ),
+            if (staff?.isChargeNurse == true)
+              _moreDestinationTile(
+                icon: Icons.apartment_rounded,
+                color: const Color(0xFF34D399),
+                title: 'Switch Active Hospital Ward',
+                subtitle: 'Choose another ward you coordinate',
+                onTap: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => const WardSelectionDialog(),
+                ),
+              ),
+            const SizedBox(height: 22),
+            _moreSectionLabel('Account and security'),
+            _moreDestinationTile(
+              icon: Icons.lock_outline_rounded,
+              color: const Color(0xFFF87171),
+              title: 'Lock Station',
+              subtitle: 'Secure Oravi and return to Digital ID',
+              onTap: () => _showLockDialog(context, ref, staff),
+            ),
+          ],
+        ),
+      );
+
+  Widget _moreSectionLabel(String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+    child: Text(
+      label.toUpperCase(),
+      style: const TextStyle(
+        color: Color(0xFF64748B),
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.8,
       ),
-    );
-  }
+    ),
+  );
+
+  Widget _moreDestinationTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) => Card(
+    margin: const EdgeInsets.only(bottom: 10),
+    child: ListTile(
+      onTap: onTap,
+      minTileHeight: 74,
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 21),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+    ),
+  );
 
   void _showLockDialog(
     BuildContext context,
