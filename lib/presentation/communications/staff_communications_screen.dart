@@ -160,10 +160,14 @@ class _StaffCommunicationsScreenState
             SizedBox(height: 2),
             Row(
               children: [
-                Icon(Icons.lock_outline, size: 11, color: ClinicalTheme.textSecondary),
+                Icon(
+                  Icons.lock_outline,
+                  size: 11,
+                  color: ClinicalTheme.textSecondary,
+                ),
                 SizedBox(width: 4),
                 Text(
-                  'Secure clinical communication',
+                  'Secure communication',
                   style: TextStyle(
                     color: ClinicalTheme.textSecondary,
                     fontSize: 11,
@@ -233,100 +237,125 @@ class _StaffCommunicationsScreenState
                         _refreshCommunications();
                         await ref.read(staffInboxProvider.future);
                       },
-                      child: ref.watch(staffInboxProvider).when(
-                        loading: () => const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                        error: (_, _) => ListView(
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            _CommunicationStateCard(
-                              icon: Icons.cloud_off_outlined,
-                              title: 'Communications are unavailable',
-                              message: 'Check your connection and try again.',
-                              onRetry: _refreshCommunications,
+                      child: ref
+                          .watch(staffInboxProvider)
+                          .when(
+                            loading: () => const Center(
+                              child: CircularProgressIndicator(),
                             ),
-                          ],
-                        ),
-                        data: (inbox) => ListView(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-                          children: [
-                            _SignedInContext(staff: staff),
-                            const SizedBox(height: 18),
-                            const ReceivedInbox(),
-                            const SizedBox(height: 22),
-                            _CommunicationSectionHeader(
-                              title: 'Direct conversations',
-                              count: inbox[0].length,
+                            error: (_, _) => ListView(
+                              padding: const EdgeInsets.all(16),
+                              children: [
+                                _CommunicationStateCard(
+                                  icon: Icons.cloud_off_outlined,
+                                  title: 'Communications are unavailable',
+                                  message:
+                                      'Check your connection and try again.',
+                                  onRetry: _refreshCommunications,
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 10),
-                            if (inbox[0].isEmpty)
-                              const _CommunicationStateCard(
-                                icon: Icons.forum_outlined,
-                                title: 'No messages yet',
-                                message: 'Your direct conversations will appear here.',
-                              )
-                            else
-                              _CommunicationGroup(
-                                children: [
-                                  for (final thread in inbox[0])
-                                    _DirectConversationTile(
-                                      thread: Map<String, dynamic>.from(thread as Map),
-                                      onTap: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute<void>(
-                                          builder: (_) => StaffChatScreen(
-                                            staffId: thread['contact']['staff_id'] as String,
-                                            name: thread['contact']['name'] as String,
+                            data: (inbox) => ListView(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+                              children: [
+                                _SignedInContext(staff: staff),
+                                const SizedBox(height: 18),
+                                const ReceivedInbox(),
+                                const SizedBox(height: 22),
+                                _CommunicationSectionHeader(
+                                  title: 'Direct conversations',
+                                  count: inbox[0].length,
+                                ),
+                                const SizedBox(height: 10),
+                                if (inbox[0].isEmpty)
+                                  const _CommunicationStateCard(
+                                    icon: Icons.forum_outlined,
+                                    title: 'No messages yet',
+                                    message:
+                                        'Your direct conversations will appear here.',
+                                  )
+                                else
+                                  _CommunicationGroup(
+                                    children: [
+                                      for (final thread in inbox[0])
+                                        _DirectConversationTile(
+                                          thread: Map<String, dynamic>.from(
+                                            thread as Map,
+                                          ),
+                                          onTap: () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => StaffChatScreen(
+                                                staffId:
+                                                    thread['contact']['staff_id']
+                                                        as String,
+                                                name:
+                                                    thread['contact']['name']
+                                                        as String,
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            const SizedBox(height: 22),
-                            _CommunicationSectionHeader(
-                              title: 'Calls',
-                              count: inbox[1].length,
+                                    ],
+                                  ),
+                                const SizedBox(height: 22),
+                                _CommunicationSectionHeader(
+                                  title: 'Calls',
+                                  count: inbox[1].length,
+                                ),
+                                const SizedBox(height: 10),
+                                if (inbox[1].isEmpty)
+                                  const _CommunicationStateCard(
+                                    icon: Icons.phone_in_talk_outlined,
+                                    title: 'No calls yet',
+                                    message:
+                                        'Recent Oravi calls will appear here.',
+                                  )
+                                else
+                                  _CommunicationGroup(
+                                    children: [
+                                      for (final call in inbox[1])
+                                        _CallActivityTile(
+                                          call: Map<String, dynamic>.from(
+                                            call as Map,
+                                          ),
+                                          currentStaffId: staff.staffId,
+                                          onAnswer: () => _answer(
+                                            call['call_id'] as String,
+                                          ),
+                                          onDecline: () async {
+                                            try {
+                                              await ref
+                                                  .read(
+                                                    wardBoardServiceProvider,
+                                                  )
+                                                  .declineCall(
+                                                    call['call_id'] as String,
+                                                  );
+                                              ref.invalidate(
+                                                staffInboxProvider,
+                                              );
+                                            } catch (_) {
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Could not decline the call. Try again.',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            }
+                                          },
+                                        ),
+                                    ],
+                                  ),
+                                _buildBriefsSection(context, staff),
+                              ],
                             ),
-                            const SizedBox(height: 10),
-                            if (inbox[1].isEmpty)
-                              const _CommunicationStateCard(
-                                icon: Icons.phone_in_talk_outlined,
-                                title: 'No calls yet',
-                                message: 'Recent Oravi calls will appear here.',
-                              )
-                            else
-                              _CommunicationGroup(
-                                children: [
-                                  for (final call in inbox[1])
-                                    _CallActivityTile(
-                                      call: Map<String, dynamic>.from(call as Map),
-                                      currentStaffId: staff.staffId,
-                                      onAnswer: () => _answer(call['call_id'] as String),
-                                      onDecline: () async {
-                                        try {
-                                          await ref
-                                              .read(wardBoardServiceProvider)
-                                              .declineCall(call['call_id'] as String);
-                                          ref.invalidate(staffInboxProvider);
-                                        } catch (_) {
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(
-                                                content: Text('Could not decline the call. Try again.'),
-                                              ),
-                                            );
-                                          }
-                                        }
-                                      },
-                                    ),
-                                ],
-                              ),
-                            _buildBriefsSection(context, staff),
-                          ],
-                        ),
-                      ),
+                          ),
                     ),
             ),
           ],
@@ -554,7 +583,10 @@ class _SignedInContext extends StatelessWidget {
             children: [
               Text(
                 staff.name,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
@@ -663,7 +695,9 @@ class _DirectConversationTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight: unread > 0 ? FontWeight.w800 : FontWeight.w600,
+                      fontWeight: unread > 0
+                          ? FontWeight.w800
+                          : FontWeight.w600,
                     ),
                   ),
                   if (contact['role'] != null) ...[
@@ -734,7 +768,9 @@ class _CallActivityTile extends StatelessWidget {
     final incoming = call['recipient_id'] == currentStaffId;
     final ringing = call['status'] == 'ringing' && incoming;
     final missed = call['status'] == 'missed';
-    final color = missed ? ClinicalTheme.criticalRed : ClinicalTheme.successGreen;
+    final color = missed
+        ? ClinicalTheme.criticalRed
+        : ClinicalTheme.successGreen;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -758,7 +794,10 @@ class _CallActivityTile extends StatelessWidget {
               children: [
                 Text(
                   call['name'] as String? ?? 'Oravi call',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -776,7 +815,10 @@ class _CallActivityTile extends StatelessWidget {
             IconButton(
               tooltip: 'Decline',
               onPressed: onDecline,
-              icon: const Icon(Icons.call_end, color: ClinicalTheme.criticalRed),
+              icon: const Icon(
+                Icons.call_end,
+                color: ClinicalTheme.criticalRed,
+              ),
             ),
             IconButton(
               tooltip: 'Answer',
@@ -798,7 +840,12 @@ class _ClinicianAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final parts = name.trim().split(RegExp(r'\s+'));
-    final initials = parts.where((part) => part.isNotEmpty).take(2).map((part) => part[0]).join().toUpperCase();
+    final initials = parts
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0])
+        .join()
+        .toUpperCase();
     final color = ClinicalTheme.cadreColor('${role ?? ''} $name');
     return Container(
       width: 44,
@@ -810,7 +857,11 @@ class _ClinicianAvatar extends StatelessWidget {
       ),
       child: Text(
         initials.isEmpty ? 'CL' : initials,
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
@@ -841,12 +892,18 @@ class _CommunicationStateCard extends StatelessWidget {
       children: [
         Icon(icon, color: ClinicalTheme.textSecondary, size: 26),
         const SizedBox(height: 8),
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
         const SizedBox(height: 3),
         Text(
           message,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: ClinicalTheme.textSecondary, fontSize: 12),
+          style: const TextStyle(
+            color: ClinicalTheme.textSecondary,
+            fontSize: 12,
+          ),
         ),
         if (onRetry != null) ...[
           const SizedBox(height: 8),
@@ -1005,11 +1062,21 @@ class _StaffChatScreenState extends ConsumerState<StaffChatScreen> {
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock_outline, size: 13, color: ClinicalTheme.clinicalBlue),
+                  Icon(
+                    Icons.lock_outline,
+                    size: 13,
+                    color: ClinicalTheme.clinicalBlue,
+                  ),
                   SizedBox(width: 5),
-                  Text(
-                    'Keep patient identifiers within approved clinical threads',
-                    style: TextStyle(color: ClinicalTheme.textSecondary, fontSize: 11),
+                  Expanded(
+                    child: Text(
+                      'Keep patient identifiers within approved clinical threads',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: ClinicalTheme.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1018,15 +1085,25 @@ class _StaffChatScreenState extends ConsumerState<StaffChatScreen> {
               Container(
                 width: double.infinity,
                 color: ClinicalTheme.criticalRed.withValues(alpha: 0.12),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 9,
+                ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline, size: 17, color: ClinicalTheme.criticalRed),
+                    const Icon(
+                      Icons.error_outline,
+                      size: 17,
+                      color: ClinicalTheme.criticalRed,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: ClinicalTheme.criticalRed, fontSize: 12),
+                        style: const TextStyle(
+                          color: ClinicalTheme.criticalRed,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -1043,7 +1120,8 @@ class _StaffChatScreenState extends ConsumerState<StaffChatScreen> {
                       child: _CommunicationStateCard(
                         icon: Icons.chat_bubble_outline,
                         title: 'Start the conversation',
-                        message: 'Messages sent here are for clinical coordination.',
+                        message:
+                            'Messages sent here are for clinical coordination.',
                       ),
                     )
                   : ListView.builder(
@@ -1055,7 +1133,10 @@ class _StaffChatScreenState extends ConsumerState<StaffChatScreen> {
                           _messages[_messages.length - 1 - index] as Map,
                         );
                         final mine = message['sender_id'] == staff.staffId;
-                        return _ClinicalMessageBubble(message: message, mine: mine);
+                        return _ClinicalMessageBubble(
+                          message: message,
+                          mine: mine,
+                        );
                       },
                     ),
             ),

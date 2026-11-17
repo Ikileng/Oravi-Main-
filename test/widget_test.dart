@@ -16,6 +16,7 @@ import 'package:oravi_app/presentation/providers/whiteboard_providers.dart';
 import 'package:oravi_app/presentation/providers/ward_context_providers.dart';
 import 'package:oravi_app/presentation/providers/auth_providers.dart';
 import 'package:oravi_app/presentation/providers/ward_providers.dart';
+
 import 'fixtures/seeded_ward_data.dart';
 
 const _testStaff = [
@@ -201,8 +202,10 @@ void main() {
       await tester.tap(find.text('More').last);
       await tester.pumpAndSettle();
       expect(find.text('Switch Active Hospital Ward'), findsNothing);
-      Navigator.of(tester.element(find.text('Lock Station'))).pop();
+      expect(find.text('Lock Station'), findsOneWidget);
+      await tester.tap(find.text('Home').last);
       await tester.pumpAndSettle();
+      expect(find.text('Nothing on your Home page yet'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       container.dispose();
       await tester.pump();
@@ -216,6 +219,9 @@ void main() {
 
     // Verify AppBar
     expect(find.textContaining('ORAVI'), findsOneWidget);
+
+    await tester.tap(find.text('Patients').last);
+    await tester.pumpAndSettle();
 
     // Verify the bedside identifiers are bed number and initials only.
     expect(find.text('01'), findsOneWidget);
@@ -335,7 +341,9 @@ void main() {
     (WidgetTester tester) async {
       await _pumpWardBoard(tester);
 
-      // Open Bed 1 using the visible patient identity.
+      // Open Bed 1 from the Patients destination.
+      await tester.tap(find.text('Patients').last);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('01'));
       await tester.pumpAndSettle();
 
@@ -380,7 +388,9 @@ void main() {
     (WidgetTester tester) async {
       await _pumpWardBoard(tester);
 
-      // Tap search icon in Ward Board AppBar
+      // Search is available from the Patients destination.
+      await tester.tap(find.text('Patients').last);
+      await tester.pumpAndSettle();
       final searchIconFinder = find.byIcon(Icons.search);
       expect(searchIconFinder, findsOneWidget);
       await tester.tap(searchIconFinder);
