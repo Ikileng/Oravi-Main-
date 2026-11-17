@@ -652,7 +652,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
             ),
           )
         : ListView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
             itemCount: loops.length,
             itemBuilder: (context, index) =>
                 _buildLoopCard(loops[index], authorNames, authorRoles),
@@ -671,7 +671,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
             ),
             if (widget.issueOnlyLoopIds == null)
               Text(
-                '${widget.patient.age}y / ${widget.patient.sex} • Admitted: ${widget.patient.shortAdmittingNote}',
+                '${widget.patient.age}y · ${widget.patient.sex} · ${widget.patient.wardId}',
                 style: const TextStyle(
                   fontSize: 11,
                   color: ClinicalTheme.textSecondary,
@@ -709,6 +709,8 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
       ),
       body: Column(
         children: [
+          if (widget.issueOnlyLoopIds == null)
+            _buildPatientContextBanner(widget.patient),
           if (widget.issueOnlyLoopIds == null &&
               widget.patient.keyAlerts.isNotEmpty)
             Container(
@@ -723,12 +725,16 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                     size: 18,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Key Alerts: ${widget.patient.keyAlerts.join(", ")}',
-                    style: const TextStyle(
-                      color: ClinicalTheme.criticalRed,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      'Key alerts · ${widget.patient.keyAlerts.join(" · ")}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: ClinicalTheme.criticalRed,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -780,6 +786,73 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     );
   }
 
+  Widget _buildPatientContextBanner(PatientStateProjection patient) =>
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 11, 16, 12),
+        decoration: const BoxDecoration(
+          color: ClinicalTheme.surface,
+          border: Border(
+            bottom: BorderSide(color: ClinicalTheme.border, width: 0.8),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: ClinicalTheme.nurseBlue.withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                patient.patientInitials,
+                style: const TextStyle(
+                  color: ClinicalTheme.nurseBlue,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${patient.bedNumber} · ${patient.age}y · ${patient.sex}',
+                    style: const TextStyle(
+                      color: ClinicalTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    patient.shortAdmittingNote,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ClinicalTheme.textSecondary,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.shield_outlined,
+              color: ClinicalTheme.routineTeal,
+              size: 18,
+            ),
+          ],
+        ),
+      );
+
   Widget _buildLoopCard(
     LoopStateProjection loop,
     Map<String, String> authorNames,
@@ -805,42 +878,56 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Row: Type, Urgency Badge, State Badge
+            // Urgency and lifecycle state remain visible at narrow widths.
             Row(
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
-                    vertical: 3,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: urgencyColor.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(6),
+                    color: urgencyColor.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: urgencyColor, width: 0.8),
                   ),
-                  child: Text(
-                    loop.urgency.wireName.toUpperCase(),
-                    style: TextStyle(
-                      color: urgencyColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  loop.loopType.wireName.replaceAll('_', ' ').toUpperCase(),
-                  style: const TextStyle(
-                    color: ClinicalTheme.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        loop.isCritical
+                            ? Icons.warning_amber_rounded
+                            : Icons.circle,
+                        size: loop.isCritical ? 13 : 7,
+                        color: urgencyColor,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        loop.urgency.wireName.toUpperCase(),
+                        style: TextStyle(
+                          color: urgencyColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const Spacer(),
                 _buildStateBadge(loop),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 7),
+            Text(
+              loop.loopType.wireName.replaceAll('_', ' ').toUpperCase(),
+              style: const TextStyle(
+                color: ClinicalTheme.textMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(height: 7),
 
             // Loop Title & Description
             Text(
@@ -898,39 +985,48 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                 ),
               ),
 
-            // Owner & Metadata Row with Color-Coded Cadre
+            // Owner identity flexes instead of overflowing on small phones.
             Row(
               children: [
-                Icon(Icons.person_outline, size: 14, color: ownerCadreColor),
-                const SizedBox(width: 4),
-                Text(
-                  'Owner: ',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: ClinicalTheme.textMuted,
-                  ),
-                ),
-                Text(
-                  ClinicalTheme.formatAuthorDisplayName(loop.currentOwnerId),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: ownerCadreColor,
-                  ),
-                ),
-                Text(
-                  ' (${loop.currentOwnerRole})',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: ClinicalTheme.textMuted,
+                Icon(Icons.person_outline, size: 16, color: ownerCadreColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        const TextSpan(
+                          text: 'Owner · ',
+                          style: TextStyle(color: ClinicalTheme.textMuted),
+                        ),
+                        TextSpan(
+                          text: ClinicalTheme.formatAuthorDisplayName(
+                            loop.currentOwnerId,
+                          ),
+                          style: TextStyle(
+                            color: ownerCadreColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        TextSpan(
+                          text:
+                              ' · ${loop.currentOwnerRole.replaceAll('_', ' ')}',
+                          style: const TextStyle(
+                            color: ClinicalTheme.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, height: 1.3),
                   ),
                 ),
                 if (loop.reopenCount > 0) ...[
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Text(
                     'Reopened ${loop.reopenCount}x',
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 10,
                       color: ClinicalTheme.urgentAmber,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1066,18 +1162,22 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Message Header: Color-coded Author + WhatsApp timestamp + Quick Actions
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                authorName,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: authorColor,
+                              Expanded(
+                                child: Text(
+                                  authorName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: authorColor,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 8),
                               Text(
                                 timeFormatted,
                                 style: const TextStyle(
@@ -1085,88 +1185,54 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                                   color: ClinicalTheme.textMuted,
                                 ),
                               ),
-                              const Spacer(),
-
-                              // One-tap Message button (anchors @reply in thread)
-                              InkWell(
-                                onTap: () => _anchorMessageToAuthor(
-                                  loop.loopId,
-                                  msg.authorId,
-                                  authorName,
-                                ),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 2,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.reply,
-                                        size: 13,
-                                        color: ClinicalTheme.routineTeal,
-                                      ),
-                                      SizedBox(width: 2),
-                                      Text(
-                                        'Reply',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: ClinicalTheme.routineTeal,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-
-                              // One-tap direct call to the message author; the outcome is logged after hang-up.
-                              InkWell(
-                                onTap: () => _startCall(
-                                  loop,
-                                  msg.authorId,
-                                  msg.authorRole,
-                                ),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 2,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.call,
-                                        size: 13,
-                                        color: ClinicalTheme.successGreen,
-                                      ),
-                                      SizedBox(width: 2),
-                                      Text(
-                                        'Call',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: ClinicalTheme.successGreen,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 5),
 
                           // Message Content
                           Text(
                             msg.content,
                             style: TextStyle(
                               fontSize: 12,
-                              color: msg.isCallLog
-                                  ? ClinicalTheme.textPrimary
-                                  : ClinicalTheme.textPrimary,
+                              color: ClinicalTheme.textPrimary,
+                              height: 1.35,
                               fontWeight: msg.isCallLog
                                   ? FontWeight.w500
                                   : FontWeight.normal,
                             ),
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () => _anchorMessageToAuthor(
+                                  loop.loopId,
+                                  msg.authorId,
+                                  authorName,
+                                ),
+                                icon: const Icon(Icons.reply, size: 15),
+                                label: const Text('Reply'),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _startCall(
+                                  loop,
+                                  msg.authorId,
+                                  msg.authorRole,
+                                ),
+                                icon: const Icon(
+                                  Icons.call_outlined,
+                                  size: 15,
+                                  color: ClinicalTheme.successGreen,
+                                ),
+                                label: const Text(
+                                  'Call',
+                                  style: TextStyle(
+                                    color: ClinicalTheme.successGreen,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1232,77 +1298,82 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                 ),
               if (loop.isOpen &&
                   loop.state != LoopState.closedAwaitingConfirmation) ...[
-                // Reply Input
-                Row(
+                // Reply composer keeps clinical actions usable at phone widths.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _getReplyController(loop.loopId),
-                        style: const TextStyle(
-                          color: ClinicalTheme.textPrimary,
-                          fontSize: 12,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Add note or update...',
-                          hintStyle: const TextStyle(
-                            color: ClinicalTheme.textMuted,
-                            fontSize: 11,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          filled: true,
-                          fillColor: ClinicalTheme.surfaceElevated,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            borderSide: const BorderSide(
-                              color: ClinicalTheme.border,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _getReplyController(loop.loopId),
+                            style: const TextStyle(
+                              color: ClinicalTheme.textPrimary,
+                              fontSize: 12,
                             ),
+                            minLines: 1,
+                            maxLines: 4,
+                            decoration: InputDecoration(
+                              hintText: 'Add note or update...',
+                              hintStyle: const TextStyle(
+                                color: ClinicalTheme.textMuted,
+                                fontSize: 11,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                              filled: true,
+                              fillColor: ClinicalTheme.surfaceElevated,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                  color: ClinicalTheme.border,
+                                ),
+                              ),
+                            ),
+                            onSubmitted: (_) => _sendReply(loop.loopId),
                           ),
                         ),
-                        onSubmitted: (_) => _sendReply(loop.loopId),
-                      ),
+                        const SizedBox(width: 4),
+                        if (widget.issueOnlyLoopIds == null)
+                          IconButton(
+                            tooltip: 'Mention a clinician',
+                            icon: const Icon(
+                              Icons.alternate_email,
+                              color: ClinicalTheme.routineTeal,
+                              size: 20,
+                            ),
+                            onPressed: () => _mentionClinician(loop.loopId),
+                          ),
+                        IconButton(
+                          tooltip: 'Send update',
+                          icon: const Icon(
+                            Icons.send,
+                            color: ClinicalTheme.routineTeal,
+                            size: 20,
+                          ),
+                          onPressed: () => _sendReply(loop.loopId),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    if (widget.issueOnlyLoopIds == null)
-                      IconButton(
-                        tooltip: 'Mention a clinician',
-                        icon: const Icon(
-                          Icons.alternate_email,
-                          color: ClinicalTheme.routineTeal,
-                          size: 20,
+                    const SizedBox(height: 7),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: ClinicalTheme.successGreen,
+                          side: const BorderSide(
+                            color: ClinicalTheme.successGreen,
+                          ),
                         ),
-                        onPressed: () => _mentionClinician(loop.loopId),
-                      ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.send,
-                        color: ClinicalTheme.routineTeal,
-                        size: 20,
-                      ),
-                      onPressed: () => _sendReply(loop.loopId),
-                    ),
-                    const SizedBox(width: 4),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: ClinicalTheme.successGreen,
-                        side: const BorderSide(
-                          color: ClinicalTheme.successGreen,
+                        onPressed: () => showDialog(
+                          context: context,
+                          builder: (ctx) => CloseLoopDialog(loop: loop),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                      ),
-                      onPressed: () => showDialog(
-                        context: context,
-                        builder: (ctx) => CloseLoopDialog(loop: loop),
-                      ),
-                      icon: const Icon(Icons.check, size: 16),
-                      label: const Text(
-                        'Close',
-                        style: TextStyle(fontSize: 11),
+                        icon: const Icon(Icons.check, size: 16),
+                        label: const Text('Close issue'),
                       ),
                     ),
                   ],
