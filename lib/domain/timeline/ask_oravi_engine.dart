@@ -347,27 +347,37 @@ class AskOraviEngine {
         final sections = event.summary['sections'];
         final lines = <String>[];
         if (sections is Map) {
-          for (final key in ['situation', 'decisions', 'actions', 'owners', 'follow_up', 'unresolved_questions']) {
+          for (final key in [
+            'situation',
+            'decisions',
+            'actions',
+            'owners',
+            'follow_up',
+            'unresolved_questions',
+          ]) {
             final values = sections[key];
             if (values is List && values.isNotEmpty) {
               lines.add('${key.replaceAll('_', ' ')}: ${values.join('; ')}');
             }
           }
         }
-        entries.add(PatientTimelineEntry(
-          id: event.eventId,
-          patientId: patientId,
-          loopId: null,
-          loopTitle: event.title,
-          loopUrgency: LoopUrgency.routine,
-          loopState: LoopState.closed,
-          entryType: TimelineEntryType.clinicalRitual,
-          authorId: event.authorId,
-          authorRole: _inferCadreRole(event.authorId),
-          verbatimText: 'Approved ${event.ritualType} summary: ${lines.join(' | ')}',
-          timestamp: event.clientCreatedAt,
-          metadata: {'ritualId': event.ritualId, 'summary': event.summary},
-        ));
+        entries.add(
+          PatientTimelineEntry(
+            id: event.eventId,
+            patientId: patientId,
+            loopId: null,
+            loopTitle: event.title,
+            loopUrgency: LoopUrgency.routine,
+            loopState: LoopState.closed,
+            entryType: TimelineEntryType.clinicalRitual,
+            authorId: event.authorId,
+            authorRole: _inferCadreRole(event.authorId),
+            verbatimText:
+                'Approved ${event.ritualType} summary: ${lines.join(' | ')}',
+            timestamp: event.clientCreatedAt,
+            metadata: {'ritualId': event.ritualId, 'summary': event.summary},
+          ),
+        );
       }
     }
 
@@ -571,11 +581,13 @@ class AskOraviEngine {
         absenceMessage =
             '${patient.patientInitials} (${patient.bedNumber}) was admitted: "${patient.shortAdmittingNote}". '
             '$keyAlertsText '
-            'There are currently no active medical issues for this patient.';
+            'No matching events were found in Oravi for the searched period. '
+            'Kindly verify with the main hospital EHR. Missing in Oravi does not mean it did not happen.';
       } else {
         absenceMessage =
             'No record in Oravi mentions \'$queryString\' for this patient. '
             'Absence of a mention does not mean there was no change or that all is well. '
+            'Kindly verify with the main hospital EHR. '
             '$keyAlertsText '
             'Admitted with primary note: "${patient.shortAdmittingNote}".';
       }

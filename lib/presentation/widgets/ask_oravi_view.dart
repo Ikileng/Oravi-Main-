@@ -7,7 +7,6 @@ import '../../domain/timeline/patient_timeline_entry.dart';
 import '../providers/ward_providers.dart';
 import '../providers/auth_providers.dart';
 import '../theme/clinical_theme.dart';
-import 'log_call_outcome_dialog.dart';
 
 enum ChatSender { clinician, oravi }
 
@@ -82,12 +81,19 @@ class AskOraviView extends ConsumerStatefulWidget {
   final PatientStateProjection patient;
   final void Function(String loopId)? onSwitchToLoop;
   final void Function(String loopId, String authorName)? onAnchorMessage;
+  final Future<void> Function(
+    LoopStateProjection loop,
+    String recipientId,
+    String role,
+  )?
+  onCall;
 
   const AskOraviView({
     super.key,
     required this.patient,
     this.onSwitchToLoop,
     this.onAnchorMessage,
+    this.onCall,
   });
 
   @override
@@ -98,6 +104,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   final TextEditingController _queryController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<OraviChatMessage> _messages = [];
+  bool _calling = false;
 
   final List<String> _suggestedQueries = [
     'SpO2 / Oxygen',
@@ -243,77 +250,13 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             : 'ALL CLEAR — There are currently no active medical issues for ${widget.patient.patientInitials}.',
         timestamp: DateTime.now(),
         activeMedicalIssues: openLoops,
-        isAllClear: openLoops.isEmpty,
+        isAllClear: false,
       );
 
       setState(() {
         _messages.add(oraviMsg);
       });
       _scrollToBottom();
-      return;
-    }
-
-    // 4. Clinical Briefing Intent: What do I need to know / Orientation
-    if (_isBriefingQuery(clean)) {
-      final oraviMsgId = 'oravi-${DateTime.now().millisecondsSinceEpoch}';
-      final placeholder = OraviChatMessage(
-        id: oraviMsgId,
-        sender: ChatSender.oravi,
-        text: 'Reviewing patient chart and active medical issues...',
-        timestamp: DateTime.now(),
-        isLoading: true,
-      );
-
-      setState(() {
-        _messages.add(placeholder);
-      });
-      _scrollToBottom();
-
-      // Query offline model service in background
-      final modelService = ref.read(askOraviModelServiceProvider);
-      modelService
-          .askPatient(patientId: widget.patient.patientId, query: clean)
-          .then((resp) {
-            if (!mounted) return;
-            final synthesis =
-                resp?.observationNote ??
-                'Here is the clinical overview for ${widget.patient.patientInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}';
-
-            setState(() {
-              final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-              if (idx != -1) {
-                _messages[idx] = _messages[idx].copyWith(
-                  text: synthesis,
-                  isLoading: false,
-                  isModelAssisted: resp != null && resp.observationNote != null,
-                  modelName: resp?.modelName,
-                  modelProvider: resp?.modelProvider,
-                  activeMedicalIssues: openLoops.isNotEmpty ? openLoops : null,
-                  isAllClear: openLoops.isEmpty,
-                );
-              }
-            });
-            _scrollToBottom();
-          })
-          .catchError((_) {
-            if (mounted) {
-              setState(() {
-                final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
-                if (idx != -1) {
-                  _messages[idx] = _messages[idx].copyWith(
-                    text:
-                        'Here is the clinical overview for ${widget.patient.patientInitials} (${widget.patient.bedNumber}):\n• Admitted: ${widget.patient.age}y ${widget.patient.sex}, ${widget.patient.shortAdmittingNote}\n• Key Alerts: ${widget.patient.keyAlerts.isNotEmpty ? widget.patient.keyAlerts.join(", ") : "No known allergies"}\n• Active Issues: ${openLoops.isEmpty ? "All Clear (0 open)" : "${openLoops.length} active issue(s)"}',
-                    isLoading: false,
-                    activeMedicalIssues: openLoops.isNotEmpty
-                        ? openLoops
-                        : null,
-                    isAllClear: openLoops.isEmpty,
-                  );
-                }
-              });
-              _scrollToBottom();
-            }
-          });
       return;
     }
 
@@ -324,14 +267,28 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       queryString: clean,
     );
 
+    final isBriefing = _isBriefingQuery(clean);
+    final staffName = ref.read(authenticatedStaffProvider)?.name ?? 'colleague';
+    final briefingText =
+        'Hello $staffName, here is what is recorded in Oravi for this patient. '
+        'The recorded events and decisions are below. '
+        'There are ${openLoops.length} open medical issues recorded in Oravi. '
+        'For information not recorded here, kindly verify with the main hospital EHR.';
+    final fallbackText = localResult.isAbsence
+        ? localResult.absenceMessage!
+        : isBriefing
+        ? briefingText
+        : 'Here is what the Oravi record says:';
+
     final oraviMsgId = 'oravi-${DateTime.now().millisecondsSinceEpoch}';
     final oraviPlaceholder = OraviChatMessage(
       id: oraviMsgId,
       sender: ChatSender.oravi,
-      text: 'Searching record for "$clean"...',
+      text: fallbackText,
       timestamp: DateTime.now(),
       result: localResult,
-      isLoading: true,
+      activeMedicalIssues: isBriefing ? openLoops : null,
+      isLoading: !localResult.isAbsence && !localResult.isRefusal,
     );
 
     setState(() {
@@ -339,36 +296,35 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
     });
     _scrollToBottom();
 
+    if (localResult.isAbsence || localResult.isRefusal) return;
     final modelService = ref.read(askOraviModelServiceProvider);
     modelService
         .askPatient(patientId: widget.patient.patientId, query: clean)
         .then((resp) {
           if (!mounted) return;
+          final canUseModel =
+              resp != null &&
+              resp.patientId == widget.patient.patientId &&
+              resp.verificationPassed &&
+              !resp.isAbsence &&
+              !resp.isRefusal &&
+              resp.observationNote != null;
           setState(() {
             final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
             if (idx != -1) {
-              final displayText =
-                  (resp != null &&
-                      resp.observationNote != null &&
-                      resp.verificationPassed)
+              final displayText = canUseModel
                   ? resp.observationNote!
-                  : (localResult.verbatimQuotes.isNotEmpty
-                        ? 'Here is what the record says about "$clean" for ${widget.patient.patientInitials}:'
-                        : (localResult.absenceMessage ??
-                              'No record in Oravi mentions this topic.'));
+                  : fallbackText;
 
               _messages[idx] = _messages[idx].copyWith(
                 text: displayText,
-                isModelAssisted:
-                    resp != null &&
-                    resp.observationNote != null &&
-                    resp.verificationPassed,
+                isModelAssisted: canUseModel,
                 modelName: resp?.modelName,
                 modelProvider: resp?.modelProvider,
                 isLoading: false,
                 result: _messages[idx].result?.copyWith(
-                  observationNote: resp?.observationNote,
-                  isModelAssisted: resp != null,
+                  observationNote: canUseModel ? resp.observationNote : null,
+                  isModelAssisted: canUseModel,
                   modelName: resp?.modelName,
                   modelProvider: resp?.modelProvider,
                   verificationPassed: resp?.verificationPassed,
@@ -383,10 +339,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             setState(() {
               final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
               if (idx != -1) {
-                final displayText = localResult.verbatimQuotes.isNotEmpty
-                    ? 'Here is what the record says about "$clean" for ${widget.patient.patientInitials}:'
-                    : (localResult.absenceMessage ??
-                          'No record in Oravi mentions this topic.');
+                final displayText = fallbackText;
                 _messages[idx] = _messages[idx].copyWith(
                   text: displayText,
                   isLoading: false,
@@ -489,36 +442,53 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
     );
   }
 
-  void _initiateCall(PatientTimelineEntry entry) {
-    final loops = ref.read(patientLoopsProvider(widget.patient.patientId));
-    final loop = loops.firstWhere(
-      (l) => l.loopId == entry.loopId,
-      orElse: () => loops.isNotEmpty
-          ? loops.first
-          : LoopStateProjection(
-              loopId: 'GLOBAL-${widget.patient.patientId}',
-              patientId: widget.patient.patientId,
-              title: entry.loopTitle,
-              description: entry.verbatimText,
-              loopType: LoopType.taskOrPendingResult,
-              urgency: entry.loopUrgency,
-              state: entry.loopState,
-              currentOwnerId: entry.authorId,
-              currentOwnerRole: entry.authorRole,
-              createdAt: entry.timestamp,
-              updatedAt: entry.timestamp,
-            ),
-    );
-
-    showDialog(
-      context: context,
-      builder: (ctx) => LogCallOutcomeDialog(
-        loop: loop,
-        recipientId: entry.authorId,
-        recipientName: ClinicalTheme.formatAuthorDisplayName(entry.authorId),
-        recipientRole: entry.authorRole,
+  void _callUnavailable() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'A call cannot be started from this record. Open the relevant medical issue and try again.',
+        ),
       ),
     );
+  }
+
+  Future<void> _call(
+    LoopStateProjection? loop,
+    String recipientId,
+    String role,
+  ) async {
+    if (_calling) return;
+    if (loop == null ||
+        loop.patientId != widget.patient.patientId ||
+        widget.onCall == null ||
+        recipientId.isEmpty) {
+      _callUnavailable();
+      return;
+    }
+    setState(() => _calling = true);
+    try {
+      await widget.onCall!(loop, recipientId, role);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not start the call. Check your connection and try again.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _calling = false);
+    }
+  }
+
+  void _initiateCall(PatientTimelineEntry entry) {
+    final loop = ref
+        .read(patientLoopsProvider(widget.patient.patientId))
+        .where((l) => l.loopId == entry.loopId)
+        .firstOrNull;
+    _call(loop, entry.authorId, entry.authorRole);
   }
 
   String _formatTimestamp(DateTime dt) {
@@ -954,20 +924,17 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                         final loops = ref.read(
                           patientLoopsProvider(widget.patient.patientId),
                         );
-                        if (loops.isNotEmpty) {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => LogCallOutcomeDialog(
-                              loop: loops.first,
-                              recipientId: result.doctorInChargeId,
-                              recipientName:
-                                  ClinicalTheme.formatAuthorDisplayName(
-                                    result.doctorInChargeId,
-                                  ),
-                              recipientRole: 'doctor_on_call',
-                            ),
-                          );
-                        }
+                        final doctorLoop = loops
+                            .where(
+                              (l) =>
+                                  l.currentOwnerId == result.doctorInChargeId,
+                            )
+                            .firstOrNull;
+                        _call(
+                          doctorLoop,
+                          result.doctorInChargeId,
+                          'doctor_on_call',
+                        );
                       },
                     ),
                   ],
@@ -1066,8 +1033,19 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   }
 
   Widget _buildActiveMedicalIssueCard(LoopStateProjection loop) {
+    final opening = ref
+        .read(localWardRepositoryProvider)
+        .getPatientTimeline(widget.patient.patientId)
+        .where(
+          (entry) =>
+              entry.loopId == loop.loopId &&
+              entry.entryType == TimelineEntryType.loopOpened,
+        )
+        .firstOrNull;
+    final contactId = opening?.authorId ?? loop.currentOwnerId;
+    final contactRole = opening?.authorRole ?? loop.currentOwnerRole;
     final urgencyColor = ClinicalTheme.urgencyColor(loop.urgency);
-    final ownerColor = ClinicalTheme.cadreColor(loop.currentOwnerId);
+    final ownerColor = ClinicalTheme.cadreColor(contactId);
 
     return Container(
       margin: const EdgeInsets.only(top: 8, bottom: 4),
@@ -1165,7 +1143,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     Icon(Icons.person_outline, size: 12, color: ownerColor),
                     const SizedBox(width: 4),
                     Text(
-                      loop.currentOwnerId,
+                      contactId,
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.bold,
@@ -1194,18 +1172,18 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 icon: const Icon(Icons.chat_bubble_outline, size: 12),
                 label: Text(
-                  'Message ${loop.currentOwnerId}',
+                  'Message ${contactId}',
                   style: const TextStyle(fontSize: 11),
                 ),
                 onPressed: () {
                   if (widget.onAnchorMessage != null) {
-                    widget.onAnchorMessage!(loop.loopId, loop.currentOwnerId);
+                    widget.onAnchorMessage!(loop.loopId, contactId);
                   }
                 },
               ),
               const SizedBox(width: 6),
 
-              // 1-Tap Call Button: opens post-call outcome prompt immediately
+              // Initiate the real call; the parent collects the outcome after it ends.
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: ClinicalTheme.doctorPink,
@@ -1219,19 +1197,9 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 icon: const Icon(Icons.call, size: 12),
                 label: const Text('Call', style: TextStyle(fontSize: 11)),
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => LogCallOutcomeDialog(
-                      loop: loop,
-                      recipientId: loop.currentOwnerId,
-                      recipientName: ClinicalTheme.formatAuthorDisplayName(
-                        loop.currentOwnerId,
-                      ),
-                      recipientRole: loop.currentOwnerRole,
-                    ),
-                  );
-                },
+                onPressed: _calling
+                    ? null
+                    : () => _call(loop, contactId, contactRole),
               ),
             ],
           ),

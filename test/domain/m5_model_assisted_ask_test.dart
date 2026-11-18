@@ -8,6 +8,9 @@ import 'package:oravi_app/presentation/providers/ward_providers.dart';
 import 'package:oravi_app/presentation/widgets/ask_oravi_view.dart';
 
 void main() {
+  test('Missing verification flag fails closed', () {
+    expect(ModelAskResponse.fromJson({}).verificationPassed, isFalse);
+  });
   group(
     'M5: Model-Assisted Answers with Verification (PRD Section 8A & Tech Arch Section 11)',
     () {
@@ -98,9 +101,8 @@ void main() {
             mockHandler: (patientId, query, timeWindow) async {
               return const ModelAskResponse(
                 patientId: 'PAT-4B-01',
-                query: 'urine',
-                observationNote:
-                    'Urine output was 30ml at 06:00 draining dark amber.',
+                query: 'oxygen',
+                observationNote: 'SpO2 stable at 94% on 2L nasal prongs.',
                 verificationPassed: true,
                 modelProvider: 'ollama',
                 modelName: 'qwen2.5:7b',
@@ -128,7 +130,7 @@ void main() {
           final textField = find.byType(TextField);
           expect(textField, findsOneWidget);
 
-          await tester.enterText(textField, 'urine');
+          await tester.enterText(textField, 'oxygen');
           await tester.testTextInput.receiveAction(TextInputAction.search);
           await tester.pumpAndSettle();
 
@@ -141,7 +143,7 @@ void main() {
 
           // 2. Observation content
           expect(
-            find.text('Urine output was 30ml at 06:00 draining dark amber.'),
+            find.text('SpO2 stable at 94% on 2L nasal prongs.'),
             findsOneWidget,
           );
 
@@ -155,6 +157,40 @@ void main() {
             ),
             findsOneWidget,
           );
+        },
+      );
+
+      testWidgets(
+        'Missing urine record shows EHR guidance without asking the model',
+        (tester) async {
+          var modelCalls = 0;
+          final patient = repository
+              .getPatientsForWard(SeededWardData.wardId)
+              .firstWhere((p) => p.patientId == 'PAT-4B-01');
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                localWardRepositoryProvider.overrideWithValue(repository),
+                askOraviModelServiceProvider.overrideWithValue(
+                  AskOraviModelService(
+                    mockHandler: (patientId, query, hours) async {
+                      modelCalls++;
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+              child: MaterialApp(
+                home: Scaffold(body: AskOraviView(patient: patient)),
+              ),
+            ),
+          );
+          await tester.enterText(find.byType(TextField), 'urine');
+          await tester.testTextInput.receiveAction(TextInputAction.send);
+          await tester.pumpAndSettle();
+          expect(modelCalls, 0);
+          expect(find.textContaining('main hospital EHR'), findsWidgets);
+          expect(find.textContaining('ALL CLEAR'), findsNothing);
         },
       );
 

@@ -747,6 +747,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                   ? [
                       issuesTab,
                       AskOraviView(
+                        onCall: _startCall,
                         patient: widget.patient,
                         onAnchorMessage: (loopId, author) {
                           _anchorMessageToAuthor(

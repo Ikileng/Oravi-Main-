@@ -112,14 +112,15 @@ class VerificationHarness:
         if is_absence and not is_diagnostic:
             absence_message = (
                 f"No record in Oravi mentions '{query}' for this patient. "
-                "Absence of a mention does not mean there was no change or that all is well."
+                "Absence of a mention does not mean there was no change or that all is well. "
+                "Kindly verify with the main hospital EHR. Oravi has not searched the hospital EHR."
             )
 
         # 4. Verify Numbers in Model Observation (Rule 2)
         raw_observation = model_output.get("observation_note", "")
         verified_observation = None
 
-        if raw_observation:
+        if raw_observation and not is_absence and not is_diagnostic:
             sentences = re.split(r'(?<=[.!?])\s+', str(raw_observation).strip())
             valid_sentences = []
 

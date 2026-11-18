@@ -105,7 +105,8 @@ void main() {
             messageEntry.verbatimText,
             contains('SpO2 stable at 94% on 2L nasal prongs'),
           );
-          expect(messageEntry.authorRole, equals('ward_nurse'));
+          // Legacy messages without a recorded role must not invent one.
+          expect(messageEntry.authorRole, isEmpty);
           expect(messageEntry.loopUrgency, equals(LoopUrgency.urgent));
         },
       );
@@ -151,6 +152,7 @@ void main() {
           expect(result.isAbsence, isTrue);
           expect(result.verbatimQuotes, isEmpty);
           expect(result.absenceMessage, isNotNull);
+          expect(result.absenceMessage, contains('main hospital EHR'));
           expect(
             result.absenceMessage,
             contains('No record in Oravi mentions'),

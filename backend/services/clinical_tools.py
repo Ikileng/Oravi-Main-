@@ -68,7 +68,7 @@ def execute_query_patient_timeline(
             sex = event.payload.get("sex", "")
             name = event.payload.get("name_or_initials", "")
             note = event.payload.get("short_admitting_note", "")
-            alerts = ", ".join(event.payload.get("key_alerts", [])) or "No known allergies"
+            alerts = ", ".join(event.payload.get("key_alerts", [])) or "No key alerts recorded in Oravi; verify with the main hospital EHR"
             content = f"Admitted to {bed}: {name}, {age}y {sex}. Note: {note}. Key Alerts: {alerts}."
             loop_title = "Admission Record"
         elif event.type == "LoopOpened":
