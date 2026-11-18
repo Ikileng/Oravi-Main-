@@ -43,7 +43,7 @@ class ModelAskResponse {
       isAbsence: json['is_absence'] as bool? ?? false,
       absenceMessage: json['absence_message'] as String?,
       doctorInCharge: json['doctor_in_charge'] as String? ?? 'DOC-OTIENO',
-      verificationPassed: json['verification_passed'] as bool? ?? true,
+      verificationPassed: json['verification_passed'] as bool? ?? false,
       modelProvider: json['model_provider'] as String? ?? 'ollama',
       modelName: json['model_name'] as String? ?? 'qwen2.5:7b',
       verbatimQuotes:

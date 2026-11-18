@@ -94,6 +94,17 @@ class TestM5AskVerification(unittest.TestCase):
         self.assertIn("No record in Oravi mentions 'penicillin allergy'", res.absence_message)
         self.assertIn("Absence of a mention does not mean there was no change", res.absence_message)
 
+    def test_missing_record_blocks_model_reassurance(self):
+        result = VerificationHarness.verify(
+            query="urine",
+            raw_patient_events=[],
+            model_output={"verbatim_quotes": [], "observation_note": "Urine is normal. All clear."},
+        )
+        self.assertTrue(result.is_absence)
+        self.assertIsNone(result.verified_observation)
+        self.assertIn("main hospital EHR", result.absence_message)
+        self.assertIn("Oravi has not searched", result.absence_message)
+
     def test_hallucination_number_stripping_rule_2(self):
         # Model claims numbers not present in raw quotes (e.g. 120/80 or 40ml)
         model_output = {
