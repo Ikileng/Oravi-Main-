@@ -171,6 +171,20 @@ final offlineSessionProvider = NotifierProvider<OfflineSessionNotifier, bool>(
   OfflineSessionNotifier.new,
 );
 
+/// Last loaded server preference. The profile fetches it before enabling edits;
+/// sign-in, logout, and connection changes never overwrite the preference.
+class ClinicianAvailabilityNotifier extends Notifier<bool> {
+  @override
+  bool build() => true;
+
+  void setAvailable(bool value) => state = value;
+}
+
+final clinicianAvailabilityProvider =
+    NotifierProvider<ClinicianAvailabilityNotifier, bool>(
+      ClinicianAvailabilityNotifier.new,
+    );
+
 const _sessionCredentialStorage = FlutterSecureStorage();
 const _sessionCredentialKey = 'oravi_authenticated_session_v1';
 const _sessionTokenLifetime = Duration(hours: 8);

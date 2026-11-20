@@ -11,6 +11,24 @@ import '../domain/models/call_session.dart';
 import 'api_configuration.dart';
 
 class WardBoardService {
+  Future<bool> availability({bool? value}) async {
+    final result = await _request(
+      value == null ? 'GET' : 'PUT',
+      '/api/v1/staff/me/availability',
+      payload: value == null ? null : {'available': value},
+    );
+    return (result as Map<String, dynamic>)['available'] as bool;
+  }
+
+  Future<void> reconnectDevice(String token) async {
+    await _request(
+      'POST',
+      '/api/v1/staff/device/reconnect',
+      payload: {'token': token},
+      allowCallCredential: true,
+    );
+  }
+
   Future<Object?> communicationRequest(
     String method,
     String path, {
@@ -68,7 +86,8 @@ class WardBoardService {
         extraHeaders?.forEach(request.headers.set);
         if (token != null && token.isNotEmpty) {
           request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-        } else if (allowCallCredential) {
+        }
+        if (allowCallCredential && callCredential?.isNotEmpty == true) {
           request.headers.set('X-Oravi-Call-Credential', callCredential!);
         }
         if (payload != null) {

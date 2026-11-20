@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../Services/firebase_options.dart';
 import '../ward_board_service.dart';
@@ -40,6 +41,7 @@ class RitualAlert {
 
 class MedicalIssuePushService {
   static const _channelId = 'medical_issue_alerts';
+  static const _callChannelId = 'oravi_calls';
   static const _callCredentialKey = 'oravi_call_credential';
   static const _callCredentialStorage = FlutterSecureStorage();
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -58,6 +60,9 @@ class MedicalIssuePushService {
   bool _initialMessageChecked = false;
   Future<void>? _initialization;
   Future<void> _pendingTokenRegistration = Future<void>.value();
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _reconnectTimer;
+  bool _reconnecting = false;
 
   Stream<MedicalIssueAlert> get openedAlerts => _openedAlerts.stream;
   Stream<CallAlert> get openedCalls => _openedCalls.stream;
@@ -75,6 +80,37 @@ class MedicalIssuePushService {
       Error.throwWithStackTrace(error, stackTrace);
     }));
     _listenForMessages(FirebaseMessaging.instance);
+    _connectivitySubscription ??= Connectivity().onConnectivityChanged.listen((
+      results,
+    ) {
+      if (results.any((r) => r != ConnectivityResult.none))
+        unawaited(reconnect());
+    });
+    _reconnectTimer ??= Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(reconnect()),
+    );
+    unawaited(reconnect());
+  }
+
+  /// Restore the notification route while locked, without granting chart access
+  /// or changing the clinician's explicitly saved availability preference.
+  Future<void> reconnect() async {
+    if (_reconnecting) return;
+    _reconnecting = true;
+    try {
+      final credential = await readCallCredential();
+      if (credential == null) return; // First enrollment requires sign-in.
+      final token = await _getRegistrationToken(FirebaseMessaging.instance);
+      await WardBoardService(
+        getAccessToken: () => null,
+        callCredential: credential,
+      ).reconnectDevice(token);
+    } catch (_) {
+      // A connection event or the timer retries; preference remains unchanged.
+    } finally {
+      _reconnecting = false;
+    }
   }
 
   Future<void> _initialize() async {
@@ -158,7 +194,7 @@ class MedicalIssuePushService {
     _tokenRefreshSubscription = messaging.onTokenRefresh.listen(
       (token) async {
         try {
-          await registerToken(token);
+          await reconnect();
         } catch (error) {
           onError('Device token refresh failed (${error.runtimeType}).');
         }
@@ -208,6 +244,8 @@ class MedicalIssuePushService {
   }
 
   Future<void> dispose() async {
+    _reconnectTimer?.cancel();
+    await _connectivitySubscription?.cancel();
     await _tokenRefreshSubscription?.cancel();
     await _foregroundMessages?.cancel();
     await _openedMessages?.cancel();
@@ -250,6 +288,10 @@ class MedicalIssuePushService {
 
   void _listenForMessages(FirebaseMessaging messaging) {
     _foregroundMessages ??= FirebaseMessaging.onMessage.listen((message) async {
+      if (message.data['type'] == 'oravi_call') {
+        _publishOpenedAlert(message);
+        return;
+      }
       try {
         await _showForegroundNotification(message);
       } catch (error) {
@@ -313,6 +355,11 @@ class MedicalIssuePushService {
       ),
     );
     _localNotificationsInitialized = true;
+    await android?.createNotificationChannel(
+      const AndroidNotificationChannel(_callChannelId, 'Incoming Oravi calls',
+        description: 'Incoming calls from colleagues.',
+        importance: Importance.max, playSound: true, enableVibration: true),
+    );
     final launch = await _localNotifications.getNotificationAppLaunchDetails();
     if (launch?.didNotificationLaunchApp == true) {
       _publishOpenedPayload(launch?.notificationResponse?.payload);

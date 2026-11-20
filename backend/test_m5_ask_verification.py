@@ -55,6 +55,20 @@ class TestM5AskVerification(unittest.TestCase):
                 server_received_at="2026-10-23T08:30:01Z",
                 loop_id="loop-blood",
             ),
+            CanonicalEvent(
+                event_id="evt-5",
+                patient_id="PAT-4B-01",
+                author_id="DOC-OTIENO",
+                device_id="DEV-A",
+                type="CallLogged",
+                payload={
+                    "recipient_id": "NURSE-WANJIKU",
+                    "outcome_note": "Agreed to continue observation overnight.",
+                },
+                client_created_at="2026-10-23T09:00:00Z",
+                server_received_at="2026-10-23T09:00:01Z",
+                loop_id="loop-resp",
+            ),
         ]
         self.store.append_events(self.events)
 
@@ -70,6 +84,23 @@ class TestM5AskVerification(unittest.TestCase):
         # Querying 'oxygen' should retrieve SpO2 / sats events
         res_o2 = execute_query_patient_timeline(self.store, "PAT-4B-01", "oxygen")
         self.assertEqual(len(res_o2["quotes"]), 2)
+
+    def test_calls_and_chats_are_retrievable_from_patient_context(self):
+        calls = execute_query_patient_timeline(
+            self.store, "PAT-4B-01", "Have any calls been made concerning this patient?"
+        )
+        self.assertEqual(len(calls["quotes"]), 1)
+        self.assertIn("Call between", calls["quotes"][0]["verbatim_text"])
+
+        chats = execute_query_patient_timeline(
+            self.store, "PAT-4B-01", "Are there any chats on the medical issues?"
+        )
+        message_quotes = [
+            quote
+            for quote in chats["quotes"]
+            if "in clinical thread" in quote["verbatim_text"]
+        ]
+        self.assertEqual(len(message_quotes), 3)
 
     def test_diagnostic_refusal_rule_4(self):
         # Querying diagnostic prompt "Does patient have kidney failure?"
@@ -150,7 +181,8 @@ class TestM5AskVerification(unittest.TestCase):
     def test_conversational_greeting_hello(self):
         llm = LLMService(store=self.store)
         res = llm.query(patient_id="PAT-4B-01", query_text="Hello")
-        self.assertEqual(res["observation_note"], "Hey, how may I help you?")
+        self.assertTrue(res["observation_note"])
+        self.assertNotEqual(res["model_provider"], "deterministic")
         self.assertTrue(res["verification_passed"])
 
     def test_llm_service_offline_fallback(self):

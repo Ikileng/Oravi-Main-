@@ -59,7 +59,8 @@ class ModelAskResponse {
 ///
 /// Features:
 /// 1. Pluggable backend: connects to FastAPI backend running locally or on ward server.
-/// 2. Zero-failure guarantee: silently falls back if backend is offline or times out (>4s).
+/// 2. Graceful fallback: reports transport failures to the UI while preserving
+///    the local deterministic result when the backend is unavailable.
 /// 3. Injectable HTTP client for fast, deterministic unit testing.
 class AskOraviModelService {
   static List<String> get defaultCandidateUrls =>
@@ -70,6 +71,8 @@ class AskOraviModelService {
   String get baseUrl => _activeBaseUrl;
   final Duration timeout;
   final String? Function()? getAccessToken;
+  String? _lastFailure;
+  String? get lastFailure => _lastFailure;
   final Future<ModelAskResponse?> Function(
     String patientId,
     String query,
@@ -80,14 +83,16 @@ class AskOraviModelService {
   AskOraviModelService({
     String? baseUrl,
     List<String>? candidateUrls,
-    this.timeout = const Duration(seconds: 30),
+    // Patient-aware prompts can contain a substantial event history and may
+    // take longer on a laptop-hosted local model than a short chat prompt.
+    // Keep this above the backend inference deadline so a valid slow response
+    // is not reported as an unreachable model.
+    this.timeout = const Duration(seconds: 90),
     this.getAccessToken,
     this.mockHandler,
   }) : candidateUrls =
            candidateUrls ??
-           (baseUrl != null
-               ? [baseUrl, ...defaultCandidateUrls]
-               : defaultCandidateUrls),
+           (baseUrl != null ? [baseUrl] : defaultCandidateUrls),
        _activeBaseUrl =
            baseUrl ??
            ((candidateUrls ?? defaultCandidateUrls).isEmpty
@@ -126,12 +131,17 @@ class AskOraviModelService {
     required String patientId,
     required String query,
     int? timeWindowHours,
+    List<Map<String, String>> conversationHistory = const [],
   }) async {
+    _lastFailure = null;
     if (mockHandler != null) {
       return mockHandler!(patientId, query, timeWindowHours);
     }
     final accessToken = getAccessToken?.call();
-    if (accessToken == null) return null;
+    if (accessToken == null || accessToken.isEmpty) {
+      _lastFailure = 'No online session token is available.';
+      return null;
+    }
 
     try {
       return await _executeWithFallback((base) async {
@@ -154,6 +164,9 @@ class AskOraviModelService {
           if (timeWindowHours != null) {
             bodyMap['time_window_hours'] = timeWindowHours;
           }
+          if (conversationHistory.isNotEmpty) {
+            bodyMap['conversation_history'] = conversationHistory;
+          }
 
           final payload = jsonEncode(bodyMap);
 
@@ -161,17 +174,22 @@ class AskOraviModelService {
           final response = await request.close().timeout(timeout);
 
           if (response.statusCode == 200) {
-            final body = await response.transform(utf8.decoder).join();
+            _lastFailure = null;
+            final body = await response
+                .transform(utf8.decoder)
+                .join()
+                .timeout(timeout);
             final json = jsonDecode(body) as Map<String, dynamic>;
             return ModelAskResponse.fromJson(json);
           }
+          _lastFailure = 'Backend returned HTTP ${response.statusCode}.';
           throw Exception('Backend returned HTTP ${response.statusCode}');
         } finally {
           client.close();
         }
       });
-    } catch (_) {
-      // 100% Silent Fallback: Zero UI interruption on network or backend unavailability
+    } catch (error) {
+      _lastFailure ??= 'Ask Oravi request failed: $error';
       return null;
     }
   }

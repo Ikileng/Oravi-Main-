@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 import urllib.request
 from typing import Any, Dict, List, Optional
 from backend.event_store import EventStore
@@ -14,6 +15,7 @@ class LLMService:
 
     def __init__(self, store: EventStore):
         self.store = store
+        self.db_path = store.db_path
         # Load .env file automatically if present
         candidate_paths = [
             ".env",
@@ -66,26 +68,78 @@ class LLMService:
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
         try:
-            # 35s timeout gives local CPU inference breathing room on cold start
-            with urllib.request.urlopen(req, timeout=35.0) as resp:
+            # Patient-aware prompts can be much larger than a short chat
+            # prompt, especially on a laptop-hosted local model. Keep enough
+            # headroom for cold starts and long clinical context generation.
+            with urllib.request.urlopen(req, timeout=90.0) as resp:
                 if resp.status == 200:
                     body = resp.read().decode("utf-8")
                     return json.loads(body)
         except Exception as e:
             return None
 
-    def query(self, patient_id: str, query_text: str, time_window_hours: Optional[int] = None) -> Dict[str, Any]:
+    def query(
+        self,
+        patient_id: str,
+        query_text: str,
+        time_window_hours: Optional[int] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
         """
         Executes a natural language query with verification harness and fallback.
         """
         clean_lower = query_text.strip().lower()
-        # 0. Conversational greetings
-        if clean_lower in ["hello", "hi", "hey", "jambo", "habari", "good morning", "good afternoon", "good evening", "how are you", "sasa"]:
+        # 0. Conversational greetings still go through the configured model so
+        # the conversation starts naturally. Keep a deterministic response if
+        # the model is unavailable; greetings do not contain clinical claims.
+        conversational_turn = (
+            clean_lower in {
+                "hello", "hi", "hey", "jambo", "habari", "good morning",
+                "good afternoon", "good evening", "how are you", "sasa",
+                "thanks", "thank you", "okay", "ok", "help",
+            }
+            or clean_lower.startswith(("hello oravi", "hi oravi", "hey oravi"))
+            or any(
+                phrase in clean_lower
+                for phrase in (
+                    "what can you do", "how can you help", "explain that",
+                    "tell me more", "continue", "go on", "who are you",
+                )
+            )
+        )
+        if conversational_turn:
+            model_response = self._call_openai_compatible_api(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Oravi, a warm clinical conversation assistant. "
+                            "Reply naturally and briefly to the clinician. Use the "
+                            "conversation history when it helps. Do not make claims "
+                            "about the patient and do not mention information that "
+                            "was not supplied."
+                        ),
+                    },
+                    *[
+                        {"role": turn["role"], "content": turn["content"]}
+                        for turn in (conversation_history or [])[-8:]
+                        if turn.get("role") in {"user", "assistant"}
+                        and turn.get("content")
+                    ],
+                    {"role": "user", "content": query_text},
+                ],
+                max_tokens=80,
+            )
+            observation_note = None
+            if model_response and model_response.get("choices"):
+                observation_note = str(
+                    model_response["choices"][0]["message"].get("content", "")
+                ).strip() or None
             return {
                 "patient_id": patient_id,
                 "query": query_text,
                 "verbatim_quotes": [],
-                "observation_note": "Hey, how may I help you?",
+                "observation_note": observation_note or "Hey, how may I help you?",
                 "coverage_summary": "Conversational assistant ready.",
                 "is_refusal": False,
                 "refusal_message": None,
@@ -93,8 +147,8 @@ class LLMService:
                 "absence_message": None,
                 "doctor_in_charge": "DOC-OTIENO",
                 "verification_passed": True,
-                "model_provider": self.provider,
-                "model_name": self.model_name,
+                "model_provider": self.provider if observation_note else "deterministic",
+                "model_name": self.model_name if observation_note else "fallback",
             }
 
         all_events, _ = self.store.get_events_since(since_seq=0, limit=1000)
@@ -116,6 +170,21 @@ class LLMService:
             f"{q.get('timestamp', '')} | {q.get('author_id', '')} | {q.get('verbatim_text', '')}"
             for q in quotes if q.get("verbatim_text")
         ]
+        # Clinical Rituals are stored in the same SQLite database but are not
+        # event-stream records. Include their transcripts and saved summaries
+        # so a briefing can cover huddles, briefs, debriefs and calls as well.
+        ritual_lines = self._ritual_context_lines(patient_id)
+        record_lines.extend(line["text"] for line in ritual_lines)
+        for line in ritual_lines:
+            quotes.append(
+                {
+                    "quote_id": line["quote_id"],
+                    "author_id": "clinical-ritual",
+                    "timestamp": line["timestamp"],
+                    "verbatim_text": line["text"],
+                    "loop_title": line["title"],
+                }
+            )
         records_context = "\n".join(record_lines)
 
         system_prompt = (
@@ -129,12 +198,12 @@ class LLMService:
             "Do not diagnose, predict, or prescribe. State only facts from the record."
         )
 
-        model_response = self._call_openai_compatible_api(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Verified Patient Records:\n{records_context}\n\nClinician Question: {query_text}"}
-            ]
-        )
+        messages = [{"role": "system", "content": system_prompt}]
+        for turn in (conversation_history or [])[-8:]:
+            if turn.get("role") in {"user", "assistant"} and turn.get("content"):
+                messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": f"Verified Patient Records:\n{records_context}\n\nClinician Question: {query_text}"})
+        model_response = self._call_openai_compatible_api(messages=messages)
 
         observation_note = None
         if model_response and "choices" in model_response and model_response["choices"]:
@@ -146,9 +215,13 @@ class LLMService:
         }
 
         # 3. Pass through the Automatic Verification Harness (Tech Arch Section 11)
+        verification_events = list(patient_events)
+        verification_events.extend(
+            {"payload": {"content": line["text"]}} for line in ritual_lines
+        )
         verification: VerificationResult = VerificationHarness.verify(
             query=query_text,
-            raw_patient_events=patient_events,
+            raw_patient_events=verification_events,
             model_output=raw_model_output,
         )
 
@@ -167,6 +240,55 @@ class LLMService:
             "model_provider": self.provider,
             "model_name": self.model_name,
         }
+
+    def _ritual_context_lines(self, patient_id: str) -> List[Dict[str, str]]:
+        """Return patient-scoped ritual transcripts and saved draft summaries."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT ritual_id, ritual_type, title, status, transcript,
+                           summary_json, created_at, updated_at
+                    FROM clinical_rituals
+                    WHERE patient_id = ?
+                    ORDER BY updated_at ASC
+                    """,
+                    (patient_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return []
+
+        lines: List[Dict[str, str]] = []
+        for row in rows:
+            header = (
+                f"{row['updated_at'] or row['created_at']} | clinical ritual "
+                f"({row['ritual_type']}) {row['title']} | status={row['status']}"
+            )
+            if row["transcript"]:
+                lines.append({
+                    "quote_id": f"ritual:{row['ritual_id']}:transcript",
+                    "timestamp": row["updated_at"] or row["created_at"],
+                    "title": row["title"],
+                    "text": f"{header} | transcript: {row['transcript']}",
+                })
+            if row["summary_json"]:
+                try:
+                    summary = json.loads(row["summary_json"])
+                    lines.append({
+                        "quote_id": f"ritual:{row['ritual_id']}:summary",
+                        "timestamp": row["updated_at"] or row["created_at"],
+                        "title": row["title"],
+                        "text": f"{header} | approved/draft summary: {json.dumps(summary, ensure_ascii=False)}",
+                    })
+                except (TypeError, json.JSONDecodeError):
+                    lines.append({
+                        "quote_id": f"ritual:{row['ritual_id']}:summary",
+                        "timestamp": row["updated_at"] or row["created_at"],
+                        "title": row["title"],
+                        "text": f"{header} | saved summary: {row['summary_json']}",
+                    })
+        return lines
 
     def summarize_ritual(
         self, *, ritual_type: str, title: str, transcript: str
@@ -203,10 +325,31 @@ class LLMService:
                 content = content[4:].lstrip()
         try:
             summary = json.loads(content)
-        except json.JSONDecodeError as error:
-            raise RuntimeError(
-                "The configured LLM returned an invalid ritual draft."
-            ) from error
+        except json.JSONDecodeError:
+            # Ollama models often wrap valid JSON in a short explanation. Find
+            # and decode the first JSON object before treating the response as
+            # invalid.
+            try:
+                start = content.index("{")
+                summary, _ = json.JSONDecoder().raw_decode(content[start:])
+            except (ValueError, json.JSONDecodeError) as error:
+                # Preserve a reviewable draft rather than silently losing the
+                # completed transcript. No clinical facts are invented here.
+                return {
+                    "ritual_type": ritual_type,
+                    "title": title,
+                    "sections": {
+                        "situation": [transcript.strip()],
+                        "decisions": ["Not stated"],
+                        "actions": ["Not stated"],
+                        "owners": ["Not stated"],
+                        "follow_up": ["Not stated"],
+                        "unresolved_questions": ["Not stated"],
+                    },
+                    "model_provider": self.provider,
+                    "model_name": self.model_name,
+                    "draft_status": "transcript_review_required",
+                }
         if not isinstance(summary, dict):
             raise RuntimeError("The configured LLM returned an invalid ritual draft.")
         fields = (

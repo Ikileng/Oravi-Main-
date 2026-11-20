@@ -21,6 +21,7 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
     wardId: ref.watch(selectedWardProvider).wardId,
     deviceId: ref.read(localDeviceIdProvider),
     getAccessToken: () => ref.read(authAccessTokenProvider),
+    getStaffId: () => ref.read(authenticatedStaffProvider)?.staffId,
     onRemoteEventsReceived: () async {
       await repo.reloadFromDatabase();
       ref.read(wardControllerProvider.notifier).refresh();
