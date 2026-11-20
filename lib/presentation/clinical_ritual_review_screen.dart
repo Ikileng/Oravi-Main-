@@ -71,14 +71,12 @@ class _ClinicalRitualReviewScreenState
   void _setRitual(ClinicalRitual ritual) {
     _ritual = ritual;
     final sections = ritual.summary?['sections'];
-    if (sections is Map) {
-      for (final entry in _sections.keys) {
-        final values = sections[entry];
-        _sectionControllers[entry] ??= TextEditingController();
-        _sectionControllers[entry]!.text = values is List
-            ? values.join('\n')
-            : '';
-      }
+    for (final entry in _sections.keys) {
+      final values = sections is Map ? sections[entry] : null;
+      _sectionControllers[entry] ??= TextEditingController();
+      _sectionControllers[entry]!.text = values is List
+          ? values.join('\n')
+          : '';
     }
     setState(() {});
   }
@@ -186,137 +184,430 @@ class _ClinicalRitualReviewScreenState
     }
   }
 
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'draft_ready':
+        return 'Draft ready for review';
+      case 'approved':
+        return 'Approved and saved';
+      case 'processing':
+        return 'Preparing transcript';
+      default:
+        return status.replaceAll('_', ' ');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(title: const Text('Ritual review')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
     final ritual = _ritual;
     final canManage =
         ritual?.creatorId == ref.read(authenticatedStaffProvider)?.staffId;
     final editable = ritual?.status == 'draft_ready' && canManage;
+
     return Scaffold(
       backgroundColor: ClinicalTheme.background,
-      appBar: AppBar(title: const Text('Clinical Ritual review')),
+      appBar: AppBar(title: const Text('Ritual review')),
       body: ritual == null
-          ? Center(child: Text(_error ?? 'Ritual unavailable.'))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Text(
-                  ritual.title,
-                  style: const TextStyle(
-                    color: ClinicalTheme.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${ritual.ritualType.toUpperCase()} • ${ritual.status}',
-                  style: const TextStyle(color: ClinicalTheme.textSecondary),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: const TextStyle(color: ClinicalTheme.criticalRed),
-                  ),
-                ],
-                if (ritual.transcript != null) ...[
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Source transcript',
-                    style: TextStyle(
-                      color: ClinicalTheme.textPrimary,
-                      fontWeight: FontWeight.bold,
+          ? _RitualLoadError(
+              message: _error ?? 'Ritual unavailable.',
+              onRetry: () {
+                setState(() {
+                  _loading = true;
+                  _error = null;
+                });
+                _load();
+              },
+            )
+          : SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: ClinicalTheme.surfaceAccent,
+                      borderRadius: BorderRadius.circular(
+                        ClinicalTheme.radiusMedium,
+                      ),
+                      border: Border.all(
+                        color: ClinicalTheme.clinicalBlue.withValues(
+                          alpha: 0.35,
+                        ),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _RitualMetaBadge(
+                              icon: Icons.groups_outlined,
+                              label: ritual.ritualType
+                                  .replaceAll('_', ' ')
+                                  .toUpperCase(),
+                              color: ClinicalTheme.clinicalBlue,
+                            ),
+                            _RitualMetaBadge(
+                              icon: ritual.status == 'approved'
+                                  ? Icons.verified_outlined
+                                  : Icons.rate_review_outlined,
+                              label: _statusLabel(ritual.status),
+                              color: ritual.status == 'approved'
+                                  ? ClinicalTheme.successGreen
+                                  : ClinicalTheme.urgentAmber,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          ritual.title,
+                          style: const TextStyle(
+                            color: ClinicalTheme.textPrimary,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            height: 1.2,
+                          ),
+                        ),
+                        if (ritual.patientId?.isNotEmpty == true) ...[
+                          const SizedBox(height: 8),
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.lock_outline,
+                                size: 16,
+                                color: ClinicalTheme.textSecondary,
+                              ),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Linked to the patient record and visible to authorized care-team members.',
+                                  style: TextStyle(
+                                    color: ClinicalTheme.textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  SelectableText(
-                    ritual.transcript!,
-                    style: const TextStyle(color: ClinicalTheme.textSecondary),
-                  ),
-                ],
-                if (ritual.summary == null &&
-                    ritual.transcript != null &&
-                    canManage)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 24),
-                    child: FilledButton.icon(
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: ClinicalTheme.criticalRed.withValues(
+                          alpha: 0.08,
+                        ),
+                        borderRadius: BorderRadius.circular(
+                          ClinicalTheme.radiusMedium,
+                        ),
+                        border: Border.all(
+                          color: ClinicalTheme.criticalRed.withValues(
+                            alpha: 0.4,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: ClinicalTheme.criticalRed,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_error!)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (ritual.transcript != null) ...[
+                    const SizedBox(height: 16),
+                    Card(
+                      child: ExpansionTile(
+                        leading: const Icon(Icons.article_outlined),
+                        title: const Text(
+                          'Source transcript',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: const Text(
+                          'Original transcription used to prepare this review',
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: SelectableText(
+                              ritual.transcript!,
+                              style: const TextStyle(
+                                color: ClinicalTheme.textSecondary,
+                                fontSize: 13,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (ritual.summary == null &&
+                      ritual.transcript != null &&
+                      canManage) ...[
+                    const SizedBox(height: 20),
+                    const _ReviewGuidanceCard(
+                      icon: Icons.auto_awesome_outlined,
+                      title: 'Prepare a structured draft',
+                      message:
+                          'Oravi will organize the transcript into situation, decisions, actions, owners, follow-up, and unresolved questions. You must review it before approval.',
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(54),
+                      ),
                       onPressed: _saving ? null : _generateDraft,
                       icon: const Icon(Icons.auto_awesome),
-                      label: const Text('Generate draft summary'),
+                      label: Text(
+                        _saving ? 'Preparing draft…' : 'Generate draft summary',
+                      ),
                     ),
-                  )
-                else if (ritual.summary == null && !canManage)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 24),
-                    child: Text(
-                      'The initiator is preparing the review summary.',
+                  ] else if (ritual.summary == null && !canManage) ...[
+                    const SizedBox(height: 20),
+                    const _ReviewGuidanceCard(
+                      icon: Icons.hourglass_top,
+                      title: 'Waiting for the initiator',
+                      message:
+                          'The ritual initiator is preparing the review summary. It will appear here when ready.',
                     ),
-                  )
-                else if (ritual.summary == null)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 24),
-                    child: Text(
-                      'No transcript is available. If recording was declined, this ritual has no audio summary.',
+                  ] else if (ritual.summary == null) ...[
+                    const SizedBox(height: 20),
+                    const _ReviewGuidanceCard(
+                      icon: Icons.mic_off_outlined,
+                      title: 'No transcript available',
+                      message:
+                          'This ritual has no audio summary. Recording may have been declined or unavailable.',
                     ),
-                  )
-                else ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    ritual.status == 'approved'
-                        ? 'Approved summary'
-                        : 'AI draft — review before approval',
-                    style: TextStyle(
+                  ] else ...[
+                    const SizedBox(height: 20),
+                    _ReviewGuidanceCard(
+                      icon: ritual.status == 'approved'
+                          ? Icons.verified_outlined
+                          : Icons.fact_check_outlined,
+                      title: ritual.status == 'approved'
+                          ? 'Approved clinical summary'
+                          : 'Review every section before approval',
+                      message: ritual.status == 'approved'
+                          ? 'This summary is saved to the patient record and is read-only.'
+                          : 'Edit the generated draft for clinical accuracy. Approval is the clinician’s responsibility.',
                       color: ritual.status == 'approved'
-                          ? ClinicalTheme.routineTeal
+                          ? ClinicalTheme.successGreen
                           : ClinicalTheme.urgentAmber,
-                      fontWeight: FontWeight.bold,
                     ),
-                  ),
-                  ..._sections.entries.map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: TextField(
-                        controller: _sectionControllers[entry.key],
-                        readOnly: !editable,
-                        minLines: 1,
-                        maxLines: 5,
-                        style: const TextStyle(
-                          color: ClinicalTheme.textPrimary,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: entry.value,
-                          labelStyle: const TextStyle(
-                            color: ClinicalTheme.textSecondary,
+                    ..._sections.entries.map(
+                      (entry) => Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: TextField(
+                          controller: _sectionControllers[entry.key],
+                          readOnly: !editable,
+                          minLines: 2,
+                          maxLines: 7,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: const TextStyle(
+                            color: ClinicalTheme.textPrimary,
+                            fontSize: 14,
+                            height: 1.4,
                           ),
-                          filled: true,
-                          fillColor: ClinicalTheme.surfaceElevated,
-                          border: const OutlineInputBorder(),
+                          decoration: InputDecoration(
+                            labelText: entry.value,
+                            helperText: editable
+                                ? 'Use one item per line'
+                                : null,
+                            alignLabelWithHint: true,
+                            prefixIcon: Icon(
+                              _sectionIcon(entry.key),
+                              color: ClinicalTheme.textSecondary,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (canManage)
-                    FilledButton.icon(
-                      onPressed: editable && !_saving ? _approve : null,
-                      icon: const Icon(Icons.verified),
-                      label: const Text(
-                        'Save approved summary to patient record',
+                    const SizedBox(height: 20),
+                    if (canManage)
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          backgroundColor: ClinicalTheme.successGreen,
+                          foregroundColor: Colors.black,
+                        ),
+                        onPressed: editable && !_saving ? _approve : null,
+                        icon: const Icon(Icons.verified),
+                        label: Text(
+                          _saving
+                              ? 'Saving approved summary…'
+                              : 'Approve and save to patient record',
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                    ),
-                  if (ritual.status == 'approved')
-                    OutlinedButton.icon(
-                      onPressed: _print,
-                      icon: const Icon(Icons.print),
-                      label: const Text('Print approved summary'),
-                    ),
+                    if (ritual.status == 'approved') ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                        ),
+                        onPressed: _print,
+                        icon: const Icon(Icons.print),
+                        label: const Text('Print approved summary'),
+                      ),
+                    ],
+                  ],
                 ],
-              ],
+              ),
             ),
     );
   }
+
+  IconData _sectionIcon(String section) {
+    switch (section) {
+      case 'situation':
+        return Icons.info_outline;
+      case 'decisions':
+        return Icons.gavel_outlined;
+      case 'actions':
+        return Icons.checklist;
+      case 'owners':
+        return Icons.person_outline;
+      case 'follow_up':
+        return Icons.update;
+      default:
+        return Icons.help_outline;
+    }
+  }
+}
+
+class _RitualMetaBadge extends StatelessWidget {
+  const _RitualMetaBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusLarge),
+      border: Border.all(color: color.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ReviewGuidanceCard extends StatelessWidget {
+  const _ReviewGuidanceCard({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.color = ClinicalTheme.clinicalBlue,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+      border: Border.all(color: color.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: color, size: 22),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                message,
+                style: const TextStyle(
+                  color: ClinicalTheme.textSecondary,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _RitualLoadError extends StatelessWidget {
+  const _RitualLoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.cloud_off_outlined,
+            color: ClinicalTheme.textSecondary,
+            size: 40,
+          ),
+          const SizedBox(height: 12),
+          Text(message, textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          FilledButton.tonal(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    ),
+  );
 }

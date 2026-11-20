@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import '../data/call_media.dart';
@@ -144,9 +145,50 @@ class _CallScreenState extends State<CallScreen> {
   void dispose() {
     _statusTimer?.cancel();
     _durationTimer?.cancel();
+    _media.removeListener(_mediaChanged);
     if (!_ending) unawaited(_notifyEnded());
     unawaited(_media.close());
     super.dispose();
+  }
+
+  String get _formattedDuration {
+    final minutes = (_durationSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (_durationSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  String get _statusLabel {
+    if (_error != null) return 'Connection failed';
+    if (_connecting) return 'Connecting securely';
+    if (_callStatus == 'ringing') return 'Waiting for answer';
+    if (_callStatus == 'answered') return 'Secure call connected';
+    return _callStatus.replaceAll('_', ' ');
+  }
+
+  String get _supportingMessage {
+    if (_error != null) return _error!;
+    if (_connecting) {
+      return 'Setting up an encrypted audio connection.';
+    }
+    if (_media.reconnecting) {
+      return 'The audio connection is reconnecting. Keep this call open.';
+    }
+    if (_media.error != null) {
+      return _media.error!;
+    }
+    if (_callStatus == 'ringing') {
+      return 'The clinician has been notified. If they are unavailable, this call will be marked as missed.';
+    }
+    return 'Audio is connected. Document the agreed outcome after ending the call.';
+  }
+
+  String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2);
+    return parts.map((part) => part[0].toUpperCase()).join();
   }
 
   @override
@@ -154,85 +196,305 @@ class _CallScreenState extends State<CallScreen> {
     final otherParty = widget.session.isIncoming
         ? widget.session.callerName
         : widget.session.recipientName;
+    final otherRole = widget.session.isIncoming
+        ? widget.session.callerRole
+        : widget.session.recipientRole;
+    final active = _error == null &&
+        _media.error == null &&
+        !_connecting &&
+        _media.ready;
     return PopScope<int>(
       canPop: _canPop,
       onPopInvokedWithResult: (didPop, result) { if (!didPop) unawaited(_end()); },
       child: Scaffold(
       backgroundColor: ClinicalTheme.background,
-      appBar: AppBar(title: const Text('Oravi call')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircleAvatar(
-                radius: 42,
-                backgroundColor: ClinicalTheme.routineTeal,
-                child: Icon(Icons.person, size: 42, color: Colors.white),
+      appBar: AppBar(
+        title: Text(
+          widget.session.isIncoming ? 'Incoming call' : 'Clinical call',
+        ),
+      ),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight - 40,
               ),
-              const SizedBox(height: 16),
-              Text(
-                otherParty,
-                style: const TextStyle(
-                  color: ClinicalTheme.textPrimary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
+              child: IntrinsicHeight(
+                child: Column(
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: ClinicalTheme.surfaceAccent,
+                          borderRadius: BorderRadius.circular(
+                            ClinicalTheme.radiusLarge,
+                          ),
+                          border: Border.all(
+                            color: ClinicalTheme.clinicalBlue.withValues(
+                              alpha: 0.35,
+                            ),
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.lock_outline,
+                              size: 16,
+                              color: ClinicalTheme.clinicalBlue,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Secure clinical audio',
+                              style: TextStyle(
+                                color: ClinicalTheme.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    CircleAvatar(
+                      radius: 52,
+                      backgroundColor: ClinicalTheme.clinicalBlue.withValues(
+                        alpha: 0.16,
+                      ),
+                      child: Text(
+                        _initials(otherParty),
+                        style: const TextStyle(
+                          color: ClinicalTheme.clinicalBlue,
+                          fontSize: 30,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      otherParty,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: ClinicalTheme.textPrimary,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      otherRole.replaceAll('_', ' ').toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: ClinicalTheme.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _CallStatusCard(
+                      label: _statusLabel,
+                      message: _supportingMessage,
+                      duration: _everConnected
+                          ? _formattedDuration
+                          : null,
+                      isError: _error != null || _media.error != null,
+                      isLoading: _connecting,
+                    ),
+                    const Spacer(),
+                    const SizedBox(height: 28),
+                    if (active)
+                      _CallControl(
+                        icon: _muted ? Icons.mic_off : Icons.mic,
+                        label: _muted ? 'Unmute' : 'Mute',
+                        active: _muted,
+                        onPressed: () async {
+                          final nextMuted = !_muted;
+                          try {
+                            await _media.setMuted(nextMuted);
+                            if (mounted) setState(() => _muted = nextMuted);
+                          } catch (_) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Could not change microphone state.',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                      )
+                    else
+                      const SizedBox(height: 84),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _ending ? null : () => _end(),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          backgroundColor: ClinicalTheme.criticalRed,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.call_end),
+                        label: Text(
+                          _ending
+                              ? 'Ending call…'
+                              : _callStatus == 'ringing'
+                              ? 'Cancel call'
+                              : 'End call',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                _error ?? _media.error ??
-                    (_connecting
-                        ? 'Connecting securely…'
-                        : _callStatus == 'ringing'
-                        ? 'Calling • waiting for the clinician to answer. If they are offline or do not answer, this call will be marked missed.'
-                        : _media.reconnecting
-                        ? 'Reconnecting audio…'
-                        : !_media.ready
-                        ? 'Waiting for the other clinician to connect audio…'
-                        : 'Connected • ${_durationSeconds}s'),
-                style: TextStyle(
-                  color: _error == null
-                      ? ClinicalTheme.textSecondary
-                      : ClinicalTheme.criticalRed,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              if (_error == null && !_connecting)
-                IconButton.filled(
-                  onPressed: () async {
-                    final nextMuted = !_muted;
-                    try {
-                      await _media.setMuted(nextMuted);
-                      if (mounted) setState(() => _muted = nextMuted);
-                    } catch (_) {
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Could not change microphone state.')));
-                    }
-                  },
-                  icon: Icon(_muted ? Icons.mic_off : Icons.mic),
-                  tooltip: _muted ? 'Unmute' : 'Mute',
-                ),
-              const SizedBox(height: 28),
-              FilledButton.icon(
-                onPressed: () => _end(),
-                style: FilledButton.styleFrom(
-                  backgroundColor: ClinicalTheme.criticalRed,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 28,
-                    vertical: 14,
-                  ),
-                ),
-                icon: const Icon(Icons.call_end),
-                label: const Text('End call'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     ));
   }
+}
+
+class _CallStatusCard extends StatelessWidget {
+  const _CallStatusCard({
+    required this.label,
+    required this.message,
+    required this.duration,
+    required this.isError,
+    required this.isLoading,
+  });
+
+  final String label;
+  final String message;
+  final String? duration;
+  final bool isError;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isError
+        ? ClinicalTheme.criticalRed
+        : duration != null
+        ? ClinicalTheme.successGreen
+        : ClinicalTheme.clinicalBlue;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isLoading)
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: color,
+                  ),
+                )
+              else
+                Icon(
+                  isError ? Icons.error_outline : Icons.graphic_eq,
+                  color: color,
+                  size: 18,
+                ),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (duration != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  duration!,
+                  style: const TextStyle(
+                    color: ClinicalTheme.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: ClinicalTheme.textSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CallControl extends StatelessWidget {
+  const _CallControl({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      IconButton.filled(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(64, 64),
+          backgroundColor: active
+              ? ClinicalTheme.criticalRed
+              : ClinicalTheme.surfaceElevated,
+          foregroundColor: Colors.white,
+        ),
+        icon: Icon(icon, size: 28),
+        tooltip: label,
+      ),
+      const SizedBox(height: 7),
+      Text(
+        label,
+        style: const TextStyle(
+          color: ClinicalTheme.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
 }

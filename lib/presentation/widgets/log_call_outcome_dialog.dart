@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../domain/projections/projections.dart';
 import '../providers/ward_providers.dart';
 import '../theme/clinical_theme.dart';
@@ -55,8 +56,7 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
     final note = _noteController.text.trim();
     if (note.isEmpty) {
       setState(
-        () => _error =
-            'A one-line outcome note is mandatory to eliminate verbal silos.',
+        () => _error = 'Add the agreed outcome before saving to the thread.',
       );
       return;
     }
@@ -72,8 +72,8 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
             recipientRole: widget.recipientRole,
             outcomeNote: note,
             durationSeconds: widget.durationSeconds,
-             callId: widget.callId,
-             callStatus: widget.callStatus,
+            callId: widget.callId,
+            callStatus: widget.callStatus,
           );
       if (mounted) {
         Navigator.of(context).pop();
@@ -92,89 +92,134 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
   @override
   Widget build(BuildContext context) {
     return Consumer(
-      builder: (context, ref, child) {
-        return AlertDialog(
-          backgroundColor: ClinicalTheme.surface,
-          title: Row(
-            children: [
-              const Icon(Icons.phone_in_talk, color: ClinicalTheme.routineTeal),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Call with ${widget.recipientName}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+      builder: (context, ref, child) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        backgroundColor: ClinicalTheme.surface,
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: ClinicalTheme.routineTeal.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
               ),
-            ],
-          ),
-          content: SingleChildScrollView(
+              child: const Icon(
+                Icons.phone_in_talk,
+                color: ClinicalTheme.routineTeal,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Document call outcome',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    widget.recipientName,
+                    style: const TextStyle(
+                      color: ClinicalTheme.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: ClinicalTheme.surfaceElevated,
-                    borderRadius: BorderRadius.circular(6),
+                    color: ClinicalTheme.surfaceAccent,
+                    borderRadius: BorderRadius.circular(
+                      ClinicalTheme.radiusMedium,
+                    ),
                     border: Border.all(color: ClinicalTheme.border),
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Icon(
-                        Icons.lock_clock,
-                        size: 16,
-                        color: ClinicalTheme.routineTeal,
+                        Icons.medical_information_outlined,
+                        size: 19,
+                        color: ClinicalTheme.clinicalBlue,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          'Target: ${widget.loop.title}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: ClinicalTheme.textSecondary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Related medical issue',
+                              style: TextStyle(
+                                color: ClinicalTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              widget.loop.title,
+                              style: const TextStyle(
+                                color: ClinicalTheme.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 const Text(
-                  'Verbal Outcome Summary (Mandatory - FR-54):',
+                  'What was agreed?',
                   style: TextStyle(
                     color: ClinicalTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
+                const Text(
+                  'Required. This note is added to the medical issue thread so the verbal decision is visible to the care team.',
+                  style: TextStyle(
+                    color: ClinicalTheme.textSecondary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 10),
                 TextField(
                   controller: _noteController,
-                  maxLines: 2,
+                  minLines: 3,
+                  maxLines: 5,
+                  maxLength: 500,
+                  textCapitalization: TextCapitalization.sentences,
                   style: const TextStyle(
                     color: ClinicalTheme.textPrimary,
-                    fontSize: 13,
+                    fontSize: 14,
                   ),
-                  decoration: InputDecoration(
-                    hintText:
-                        'e.g., Agreed to hold dose until repeat Hb at 16:00...',
-                    hintStyle: const TextStyle(
-                      color: ClinicalTheme.textMuted,
-                      fontSize: 12,
-                    ),
-                    filled: true,
-                    fillColor: ClinicalTheme.surfaceElevated,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: ClinicalTheme.border),
-                    ),
+                  decoration: const InputDecoration(
+                    labelText: 'Call outcome',
+                    hintText: 'State the decision, action, and any follow-up…',
+                    alignLabelWithHint: true,
                   ),
                   onChanged: (_) {
                     if (_error != null) setState(() => _error = null);
@@ -182,62 +227,81 @@ class _LogCallOutcomeDialogState extends State<LogCallOutcomeDialog> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 6),
-                  Text(
-                    _error!,
-                    style: const TextStyle(
-                      color: ClinicalTheme.criticalRed,
-                      fontSize: 11,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 18,
+                        color: ClinicalTheme.criticalRed,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(
+                            color: ClinicalTheme.criticalRed,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 const Text(
-                  'Quick Outcome Chips:',
+                  'Common outcomes',
                   style: TextStyle(
                     color: ClinicalTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 7),
                 Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: _quickOutcomes.map((text) {
-                    return ActionChip(
-                      label: Text(text, style: const TextStyle(fontSize: 10)),
-                      backgroundColor: ClinicalTheme.surfaceElevated,
-                      onPressed: () {
-                        setState(() {
-                          _noteController.text = text;
-                          _error = null;
-                        });
-                      },
-                    );
-                  }).toList(),
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: _quickOutcomes
+                      .map(
+                        (text) => ActionChip(
+                          label: Text(text),
+                          onPressed: _isSaving
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _noteController.text = text;
+                                    _noteController.selection =
+                                        TextSelection.collapsed(
+                                          offset: text.length,
+                                        );
+                                    _error = null;
+                                  });
+                                },
+                        ),
+                      )
+                      .toList(),
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(color: ClinicalTheme.textMuted),
-              ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        actions: [
+          TextButton(
+            onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: ClinicalTheme.routineTeal,
+              foregroundColor: Colors.white,
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ClinicalTheme.routineTeal,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: _isSaving ? null : () => _submit(ref),
-              child: Text(_isSaving ? 'Saving…' : 'Save Outcome to Thread'),
-            ),
-          ],
-        );
-      },
+            onPressed: _isSaving ? null : () => _submit(ref),
+            icon: const Icon(Icons.add_comment_outlined),
+            label: Text(_isSaving ? 'Saving…' : 'Save to thread'),
+          ),
+        ],
+      ),
     );
   }
 }
