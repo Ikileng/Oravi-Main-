@@ -354,7 +354,10 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
   }
 
   /// Returns pending outbox events ready to be pushed to the backend.
-  Future<List<LocalEvent>> getPendingOutboxEvents({int limit = 50}) async {
+  Future<List<LocalEvent>> getPendingOutboxEvents({
+    int limit = 50,
+    String? authorId,
+  }) async {
     final query =
         select(outbox).join([
             innerJoin(
@@ -362,9 +365,14 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
               localEvents.eventId.equalsExp(outbox.eventId),
             ),
           ])
-          ..where(
-            outbox.status.equals('pending') | outbox.status.equals('failed'),
-          )
+          ..where(() {
+            final status =
+                outbox.status.equals('pending') |
+                outbox.status.equals('failed');
+            return authorId == null
+                ? status
+                : status & localEvents.authorId.equals(authorId);
+          }())
           ..orderBy([
             OrderingTerm(expression: outbox.createdAt),
             OrderingTerm(expression: outbox.id),
@@ -378,6 +386,45 @@ class OraviLocalDatabase extends _$OraviLocalDatabase {
   Future<OutboxData?> getOutboxStatus(String eventId) => (select(
     outbox,
   )..where((t) => t.eventId.equals(eventId))).getSingleOrNull();
+
+  /// Recover legacy date-based rejections once. The server still revalidates
+  /// every event; author mismatches and other rejections are never reset.
+  Future<void> recoverAssignmentDateRejections() => transaction(() async {
+    const key = 'hospital_date_rejection_recovery_v1';
+    final done = await customSelect(
+      'SELECT value FROM local_sync_metadata WHERE key = ?',
+      variables: [Variable.withString(key)],
+    ).getSingleOrNull();
+    if (done != null) return;
+    await customUpdate(
+      "UPDATE outbox SET status = 'pending', error_message = NULL WHERE status = 'rejected' AND error_message = ?",
+      variables: [
+        Variable.withString(
+          'The patient was not assigned to this account for the event date.',
+        ),
+      ],
+      updates: {outbox},
+    );
+    await customStatement(
+      'INSERT INTO local_sync_metadata (key, value) VALUES (?, ?)',
+      [key, 'done'],
+    );
+  });
+
+  Future<List<OutboxData>> getRejectedOutboxEvents({String? authorId}) {
+    final query =
+        select(outbox).join([
+          innerJoin(localEvents, localEvents.eventId.equalsExp(outbox.eventId)),
+        ])..where(
+          authorId == null
+              ? outbox.status.equals('rejected')
+              : outbox.status.equals('rejected') &
+                    localEvents.authorId.equals(authorId),
+        );
+    return query.get().then(
+      (rows) => rows.map((row) => row.readTable(outbox)).toList(),
+    );
+  }
 
   /// Marks outbox items as in-flight during an active network sync push.
   Future<void> markOutboxInFlight(List<String> eventIds) {

@@ -207,6 +207,8 @@ def build_router(api):
         recipient = member(payload.recipient_id)
         if recipient is None or recipient.staff_id == profile.staff_id:
             raise HTTPException(400, 'Recipient is unavailable.')
+        if not api.staff_store.is_available(recipient.staff_id):
+            raise HTTPException(409, 'This clinician has turned availability off and cannot receive calls right now. You can leave a message in their inbox.')
         recipient_fids = api.staff_store.get_fcm_fids_for_staff(recipient.staff_id)
         if not recipient_fids:
             raise HTTPException(409, 'This clinician has no reachable Oravi device right now.')
@@ -222,10 +224,12 @@ def build_router(api):
                 api.logger.warning('Direct call push could not be delivered.')
         if delivered == 0:
             api.call_store.mark_cancelled(call_id, profile.staff_id)
+            if not api.fcm_service.credentials_ready():
+                raise HTTPException(503, 'Oravi server notification credentials are missing or invalid. Contact the administrator.')
             raise HTTPException(503, 'The clinician could not be notified. They may be offline.')
         return {'call_id':call_id,'patient_id':'','loop_id':'','caller_id':profile.staff_id,
                 'caller_name':profile.name,'recipient_id':recipient.staff_id,'recipient_name':recipient.name,
-                'recipient_role':recipient.role,'room_name':room,'livekit_url':api.os.getenv('LIVEKIT_URL'),
+                'recipient_role':recipient.role,'room_name':room,'livekit_url':api.os.getenv('LIVEKIT_PUBLIC_URL') or api.os.getenv('LIVEKIT_URL'),
                 'token':token,'status':'ringing'}
 
     return router

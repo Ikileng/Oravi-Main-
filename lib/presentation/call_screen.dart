@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:livekit_client/livekit_client.dart';
+import '../data/call_media.dart';
 
 import '../domain/models/call_session.dart';
 import '../data/ward_board_service.dart';
@@ -10,19 +10,22 @@ import 'theme/clinical_theme.dart';
 class CallScreen extends StatefulWidget {
   final CallSession session;
   final WardBoardService api;
+  final CallMedia? media;
 
-  const CallScreen({super.key, required this.session, required this.api});
+  const CallScreen({super.key, required this.session, required this.api, this.media});
 
   @override
   State<CallScreen> createState() => _CallScreenState();
 }
 
 class _CallScreenState extends State<CallScreen> {
-  late final Room _room;
+  late final CallMedia _media;
   Timer? _durationTimer;
   Timer? _statusTimer;
   bool _checkingStatus = false;
   bool _ending = false;
+  bool _canPop = false;
+  bool _everConnected = false;
   DateTime? _connectedAt;
   String? _error;
   bool _connecting = true;
@@ -34,9 +37,8 @@ class _CallScreenState extends State<CallScreen> {
   void initState() {
     super.initState();
     _callStatus = widget.session.status;
-    _room = Room(
-      roomOptions: const RoomOptions(adaptiveStream: false, dynacast: false),
-    );
+    _media = widget.media ?? LiveKitCallMedia();
+    _media.addListener(_mediaChanged);
     unawaited(_connect());
     _statusTimer = Timer.periodic(
       const Duration(seconds: 3),
@@ -52,7 +54,7 @@ class _CallScreenState extends State<CallScreen> {
       final status = call['status'] as String? ?? _callStatus;
       if (mounted && status != _callStatus) {
         setState(() => _callStatus = status);
-        if (status == 'answered') _startDurationClock();
+        _mediaChanged();
       }
       if (mounted &&
           const {
@@ -61,7 +63,7 @@ class _CallScreenState extends State<CallScreen> {
             'cancelled',
             'missed',
           }.contains(call['status'])) {
-        await _end();
+        await _end(notifyServer: false);
       }
     } catch (_) {
       // Keep connected audio usable through transient API outages.
@@ -72,19 +74,33 @@ class _CallScreenState extends State<CallScreen> {
 
   Future<void> _connect() async {
     try {
-      await _room.connect(widget.session.liveKitUrl, widget.session.token);
-      await _room.localParticipant!.setMicrophoneEnabled(true);
-      if (!mounted) return;
+      await _media.connect(widget.session.liveKitUrl, widget.session.token,
+        widget.session.isIncoming ? widget.session.callerId : widget.session.recipientId);
+      if (!mounted || _ending) return;
       setState(() {
         _connecting = false;
       });
-      if (_callStatus == 'answered') _startDurationClock();
+      _mediaChanged();
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _connecting = false;
         _error = 'Could not connect the call (${error.runtimeType}).';
       });
+      await _notifyEnded();
+      await _media.close();
+    }
+  }
+
+  void _mediaChanged() {
+    if (!mounted || _ending) return;
+    setState(() {});
+    if (_media.error != null) {
+      _durationTimer?.cancel();
+      unawaited(_notifyEnded());
+    } else if (_callStatus == 'answered' && _media.ready) {
+      _everConnected = true;
+      _startDurationClock();
     }
   }
 
@@ -93,29 +109,43 @@ class _CallScreenState extends State<CallScreen> {
     _connectedAt = DateTime.now();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _connectedAt == null) return;
-      setState(() => _durationSeconds = DateTime.now().difference(_connectedAt!).inSeconds);
+      if (_media.ready) setState(() => _durationSeconds++);
     });
   }
 
-  Future<void> _end() async {
+  Future<void> _notifyEnded() async {
+    try {
+      if (!widget.session.isIncoming && _callStatus == 'ringing') {
+        try { await widget.api.cancelCall(widget.session.callId); }
+        catch (_) { await widget.api.endCall(widget.session.callId); }
+      } else {
+        await widget.api.endCall(widget.session.callId);
+      }
+    } catch (_) { /* Peer departure and server polling provide fallback. */ }
+  }
+
+  Future<void> _end({bool notifyServer = true}) async {
     if (_ending) return;
     _ending = true;
     _statusTimer?.cancel();
     _durationTimer?.cancel();
-    await _room.disconnect();
-    try {
-      await widget.api.endCall(widget.session.callId);
-    } catch (_) {
-      // The local call is already ended. The event/outcome remains recoverable.
-    }
-    if (mounted) Navigator.of(context).pop(_callStatus == 'answered' ? _durationSeconds : null);
+    await Future.wait([
+      _media.close().catchError((Object _) {}),
+      if (notifyServer) _notifyEnded(),
+    ]);
+    if (!mounted) return;
+    setState(() => _canPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop(_everConnected ? _durationSeconds : null);
+    });
   }
 
   @override
   void dispose() {
     _statusTimer?.cancel();
     _durationTimer?.cancel();
-    unawaited(_room.disconnect());
+    if (!_ending) unawaited(_notifyEnded());
+    unawaited(_media.close());
     super.dispose();
   }
 
@@ -124,7 +154,10 @@ class _CallScreenState extends State<CallScreen> {
     final otherParty = widget.session.isIncoming
         ? widget.session.callerName
         : widget.session.recipientName;
-    return Scaffold(
+    return PopScope<int>(
+      canPop: _canPop,
+      onPopInvokedWithResult: (didPop, result) { if (!didPop) unawaited(_end()); },
+      child: Scaffold(
       backgroundColor: ClinicalTheme.background,
       appBar: AppBar(title: const Text('Oravi call')),
       body: Center(
@@ -149,11 +182,15 @@ class _CallScreenState extends State<CallScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                _error ??
+                _error ?? _media.error ??
                     (_connecting
                         ? 'Connecting securely…'
                         : _callStatus == 'ringing'
                         ? 'Calling • waiting for the clinician to answer. If they are offline or do not answer, this call will be marked missed.'
+                        : _media.reconnecting
+                        ? 'Reconnecting audio…'
+                        : !_media.ready
+                        ? 'Waiting for the other clinician to connect audio…'
                         : 'Connected • ${_durationSeconds}s'),
                 style: TextStyle(
                   color: _error == null
@@ -167,17 +204,20 @@ class _CallScreenState extends State<CallScreen> {
                 IconButton.filled(
                   onPressed: () async {
                     final nextMuted = !_muted;
-                    await _room.localParticipant!.setMicrophoneEnabled(
-                      !nextMuted,
-                    );
-                    if (mounted) setState(() => _muted = nextMuted);
+                    try {
+                      await _media.setMuted(nextMuted);
+                      if (mounted) setState(() => _muted = nextMuted);
+                    } catch (_) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Could not change microphone state.')));
+                    }
                   },
                   icon: Icon(_muted ? Icons.mic_off : Icons.mic),
                   tooltip: _muted ? 'Unmute' : 'Mute',
                 ),
               const SizedBox(height: 28),
               FilledButton.icon(
-                onPressed: _end,
+                onPressed: () => _end(),
                 style: FilledButton.styleFrom(
                   backgroundColor: ClinicalTheme.criticalRed,
                   foregroundColor: Colors.white,
@@ -193,6 +233,6 @@ class _CallScreenState extends State<CallScreen> {
           ),
         ),
       ),
-    );
+    ));
   }
 }

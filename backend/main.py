@@ -20,7 +20,7 @@ load_dotenv(Path(__file__).with_name('.env'), override=False)
 import secrets
 import sqlite3
 import uuid
-from datetime import date
+from .clinical_time import clinical_date
 from typing import List, Optional
 from fastapi import FastAPI, Query, HTTPException, Header, Depends, status
 from .models import (
@@ -34,6 +34,7 @@ from .staff_store import StaffStore
 from .ward_store import WardStore
 from .services.llm_service import LLMService
 from .services.elevenlabs_service import ElevenLabsTranscriptionService
+from .services.whisper_service import WhisperTranscriptionService
 from .services.livekit_egress_service import LiveKitEgressService
 from .services.fcm_service import FcmService
 from .services.medical_issue_validation import (
@@ -56,7 +57,12 @@ store = EventStore(db_path=database_path)
 staff_store = StaffStore(db_path=database_path)
 ward_store = WardStore(db_path=database_path)
 llm_service = LLMService(store=store)
-transcription_service = ElevenLabsTranscriptionService()
+transcription_service = (
+    WhisperTranscriptionService()
+    if os.getenv("TRANSCRIPTION_PROVIDER", "elevenlabs").strip().lower()
+    == "whisper_local"
+    else ElevenLabsTranscriptionService()
+)
 livekit_egress_service = LiveKitEgressService()
 fcm_service = FcmService()
 call_store = CallStore(db_path=database_path)
@@ -173,7 +179,7 @@ def _notification_recipients_for_events(events) -> dict[str, list[str]]:
         history = histories.get(issue_key)
         if history is None:
             history = store.get_loop_events(*issue_key)
-        assignment_date = event.client_created_at[:10]
+        assignment_date = clinical_date(event.client_created_at)
         authorized = _authorized_patient_staff_ids(
             event.patient_id, assignment_date
         )
@@ -253,7 +259,7 @@ def _validate_patient_issue_events(
         if any(prior.event_id == event.event_id for prior in history):
             continue
         assignment = ward_store.get_patient_assignment(
-            event.patient_id, event.client_created_at[:10]
+            event.patient_id, clinical_date(event.client_created_at)
         )
         if assignment is None:
             if not _staff_can_access_carried_issue(
@@ -415,10 +421,7 @@ def health_check():
         "status": "ok",
         "service": "oravi-backend",
         "version": "0.3.0",
-        "medical_issue_push_configured": bool(
-            os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-            or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        ),
+        "medical_issue_push_configured": fcm_service.credentials_ready(),
     }
 
 
@@ -601,7 +604,7 @@ def get_medical_issue_thread(
 ):
     history = store.get_loop_events(patient_id, loop_id)
     if not history or not (
-        _staff_can_access_patient(profile, patient_id, date.today().isoformat())
+        _staff_can_access_patient(profile, patient_id, clinical_date())
         or _staff_can_access_carried_issue(profile.staff_id, patient_id, loop_id)
     ):
         raise HTTPException(
@@ -971,6 +974,30 @@ def register_fcm_device_token(
     return {"success": True, "call_credential": call_credential}
 
 
+@app.get('/api/v1/staff/me/availability')
+def get_availability(profile: StaffProfile = Depends(require_communicating_staff)):
+    return {'available': staff_store.is_available(profile.staff_id)}
+
+
+@app.put('/api/v1/staff/me/availability')
+def set_availability(payload: dict, profile: StaffProfile = Depends(require_communicating_staff)):
+    if type(payload.get('available')) is not bool:
+        raise HTTPException(400, 'Availability must be true or false.')
+    staff_store.set_available(profile.staff_id, payload['available'])
+    return {'available': staff_store.is_available(profile.staff_id)}
+
+
+@app.post('/api/v1/staff/device/reconnect')
+def reconnect_device(payload: dict, x_oravi_call_credential: str = Header(default='')):
+    token = payload.get('token')
+    if not isinstance(token, str) or not 20 <= len(token) <= 4096:
+        raise HTTPException(400, 'A valid notification token is required.')
+    available = staff_store.refresh_contact_device(x_oravi_call_credential, token)
+    if available is None:
+        raise HTTPException(401, 'Sign in once to associate this device with your account.')
+    return {'available': available}
+
+
 @app.delete("/api/v1/staff/me/fcm-installation")
 def remove_fcm_device_token(
     payload: dict, profile: StaffProfile = Depends(require_communicating_staff)
@@ -983,7 +1010,7 @@ def remove_fcm_device_token(
 
 
 def _livekit_token(identity: str, name: str, room_name: str) -> str:
-    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_url = os.getenv("LIVEKIT_PUBLIC_URL") or os.getenv("LIVEKIT_URL")
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
     if not livekit_url or not api_key or not api_secret:
@@ -1032,7 +1059,7 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
     recipient_id = payload.get("recipient_id")
     if not all(isinstance(value, str) and value.strip() for value in (patient_id, loop_id, recipient_id)):
         raise HTTPException(status_code=400, detail="A patient, issue, and recipient are required.")
-    assignment_date = date.today().isoformat()
+    assignment_date = clinical_date()
     if not _staff_can_access_patient(profile, patient_id, assignment_date):
         raise HTTPException(status_code=403, detail="You do not have access to this patient.")
     if not store.get_loop_events(patient_id, loop_id):
@@ -1040,12 +1067,14 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
     authorized_ids = _authorized_patient_staff_ids(patient_id, assignment_date)
     if recipient_id not in authorized_ids or not staff_store.is_active_clinical_staff(recipient_id):
         raise HTTPException(status_code=403, detail="The selected clinician is not authorized for this patient.")
+    if not staff_store.is_available(recipient_id):
+        raise HTTPException(409, 'This clinician has turned availability off and cannot receive calls right now. You can leave a message in their inbox.')
     recipient_fids = staff_store.get_fcm_fids_for_staff(recipient_id)
     if not recipient_fids:
         raise HTTPException(status_code=409, detail="The selected clinician has no registered Oravi device.")
     call_id = f"CALL-{uuid.uuid4()}"
     room_name = f"oravi-call-{uuid.uuid4().hex}"
-    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_url = os.getenv("LIVEKIT_PUBLIC_URL") or os.getenv("LIVEKIT_URL")
     call_store.create(call_id=call_id, room_name=room_name, patient_id=patient_id, loop_id=loop_id, caller_id=profile.staff_id, recipient_id=recipient_id)
     caller_token = _livekit_token(profile.staff_id, profile.name, room_name)
     delivered = 0
@@ -1057,6 +1086,8 @@ def invite_call(payload: dict, profile: StaffProfile = Depends(require_staff)):
             logger.error("Call invitation delivery failed (%s).", type(error).__name__)
     if delivered == 0:
         call_store.mark_cancelled(call_id, profile.staff_id)
+        if not fcm_service.credentials_ready():
+            raise HTTPException(status_code=503, detail="Oravi server notification credentials are missing or invalid. Contact the administrator.")
         raise HTTPException(status_code=503, detail="The clinician could not be notified.")
     recipient = staff_store.get_active_staff_by_ids([recipient_id])[0]
     return {"call_id": call_id, "patient_id": patient_id, "loop_id": loop_id, "caller_id": profile.staff_id, "caller_name": profile.name, "recipient_id": recipient.staff_id, "recipient_name": recipient.name, "recipient_role": recipient.role, "room_name": room_name, "livekit_url": livekit_url, "token": caller_token, "status": "ringing"}
@@ -1093,13 +1124,15 @@ def accept_call(
         raise HTTPException(404, 'Call not found.')
     if call is None or profile.staff_id != call["recipient_id"] or call['status'] != 'ringing':
         raise HTTPException(status_code=409, detail="This call is no longer available.")
+    if not staff_store.is_available(profile.staff_id):
+        raise HTTPException(409, 'Turn availability on before accepting calls.')
     callers = staff_store.get_active_staff_by_ids([call['caller_id']])
     if not callers:
         raise HTTPException(409, 'The caller is no longer available.')
     token = _livekit_token(profile.staff_id, profile.name, call["room_name"])
     if not call_store.mark_answered(call_id):
         raise HTTPException(409, 'This call is no longer available.')
-    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_url = os.getenv("LIVEKIT_PUBLIC_URL") or os.getenv("LIVEKIT_URL")
     caller = callers[0]
     return {"call_id": call_id, "patient_id": call["patient_id"], "loop_id": call["loop_id"], "caller_id": caller.staff_id, "caller_name": caller.name, "caller_role": caller.role, "recipient_id": profile.staff_id, "recipient_name": profile.name, "recipient_role": profile.role, "room_name": call["room_name"], "livekit_url": livekit_url, "token": token, "status": "answered", "is_incoming": True}
 
@@ -1185,7 +1218,7 @@ def sync_push(request: SyncPushRequest, profile: StaffProfile = Depends(require_
     accepted_events = []
     rejected_events = []
     for event in request.events:
-        access_date = event.client_created_at[:10]
+        access_date = clinical_date(event.client_created_at)
         handoff_session_id = event.payload.get("handoff_session_id")
         handoff_start = (
             store.get_handoff_started_event(handoff_session_id)
@@ -1303,7 +1336,7 @@ def sync_pull(
     limit: int = Query(100, description="Max batch size"),
     profile: StaffProfile = Depends(require_staff),
 ):
-    assignment_date = date.today().isoformat()
+    assignment_date = clinical_date()
     has_patient_access = _staff_can_access_ward(
         profile, ward_id, assignment_date
     )
@@ -1358,17 +1391,34 @@ def get_carried_forward_issues(
 
 @app.post("/api/v1/patients/{patient_id}/ask", response_model=AskResponse)
 def ask_patient_record(patient_id: str, request: AskRequest, profile: StaffProfile = Depends(require_staff)):
-    patient_ward = store.get_patient_ward(patient_id)
+    # A patient may have synced issue events before the admission event (or
+    # may have been created from the current ward board). In that case the
+    # event stream has no ward_id yet, but the board assignment is still the
+    # authoritative access context for the assigned care team.
+    board_assignment = ward_store.get_patient_assignment(
+        patient_id, clinical_date()
+    )
+    patient_ward = store.get_patient_ward(patient_id) or (
+        board_assignment["ward_id"] if board_assignment else None
+    )
+    belongs_to_ward = store.patient_belongs_to_ward(patient_id, patient_ward) if patient_ward else False
+    if (
+        not belongs_to_ward
+        and board_assignment is not None
+        and board_assignment["ward_id"] == patient_ward
+    ):
+        belongs_to_ward = True
     if (
         not patient_ward
-        or not _staff_can_access_patient(profile, patient_id, date.today().isoformat())
-        or not store.patient_belongs_to_ward(patient_id, patient_ward)
+        or not _staff_can_access_patient(profile, patient_id, clinical_date())
+        or not belongs_to_ward
     ):
         raise HTTPException(status_code=404, detail="Medical issue or patient context was not found in your ward.")
     result = llm_service.query(
         patient_id=patient_id,
         query_text=request.query,
         time_window_hours=request.time_window_hours,
+        conversation_history=request.conversation_history,
     )
     return AskResponse(**result)
 

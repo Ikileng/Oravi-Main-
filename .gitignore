@@ -70,6 +70,8 @@ lib/generated_plugin_registrant.dart
 *.pem
 *.key
 *serviceAccountKey*.json
+*firebase-adminsdk*.json
+*firebase-service-account*.json
 google-services.json
 GoogleService-Info.plist
 firebase_options_*.dart
@@ -81,3 +83,9 @@ devtools_options.yaml
 *.sqlite
 *.db-shm
 *.db-wal
+
+# Local LiveKit/Redis state and recordings.
+/var/livekit-recordings/
+/var/livekit-redis/
+/var/whisper-cache/
+/docker/local.env

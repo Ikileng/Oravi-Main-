@@ -32,6 +32,7 @@ import '../data/clinical_ritual_service.dart';
 import '../data/ward_board_service.dart';
 import 'clinical_ritual_room_screen.dart';
 import 'clinical_ritual_review_screen.dart';
+import 'profile/profile_screen.dart';
 
 final clinicalRitualAlertsProvider =
     FutureProvider.autoDispose<List<ClinicalRitual>>((ref) async {
@@ -705,8 +706,21 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
                     IconButton(
                       tooltip: 'Sync now',
                       visualDensity: VisualDensity.compact,
-                      onPressed: () =>
-                          unawaited(ref.read(syncEngineProvider).syncAll()),
+                      onPressed: () async {
+                        final result = await ref
+                            .read(syncEngineProvider)
+                            .syncAll();
+                        if (!context.mounted || result.success) return;
+                        final message =
+                            result.error?.replaceFirst('Exception: ', '') ??
+                            'Sync could not complete.';
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(message),
+                            duration: const Duration(seconds: 6),
+                          ),
+                        );
+                      },
                       icon: const Icon(
                         Icons.sync,
                         size: 17,
@@ -728,7 +742,13 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
 
           // Profile Avatar with Quick Lock Station
           InkWell(
-            onTap: () => _showLockDialog(context, ref, authStaff),
+            onTap: authStaff == null
+                ? null
+                : () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ProfileScreen(staff: authStaff),
+                    ),
+                  ),
             borderRadius: BorderRadius.circular(20),
             child: Container(
               padding: const EdgeInsets.all(2),
@@ -931,11 +951,11 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
             ),
             child: const Row(
               children: [
-                Icon(Icons.check_circle_outline, color: Color(0xFF34D399)),
+                Icon(Icons.info_outline, color: Color(0xFF94A3B8)),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'No open clinical issues need your attention.',
+                    'No open Medical Issues in the data loaded here. Sync to check for team updates.',
                     style: TextStyle(
                       color: Color(0xFFD1FAE5),
                       fontSize: 13,
@@ -1506,10 +1526,10 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check, size: 11, color: Color(0xFF34D399)),
+            Icon(Icons.info_outline, size: 11, color: Color(0xFF94A3B8)),
             SizedBox(width: 4),
             Text(
-              'All clear',
+              'None loaded',
               style: TextStyle(
                 fontSize: 10,
                 color: Color(0xFF34D399),
@@ -1858,6 +1878,19 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
             const SizedBox(height: 22),
             _moreSectionLabel('Account and security'),
             _moreDestinationTile(
+              icon: Icons.person_outline_rounded,
+              color: const Color(0xFF38BDF8),
+              title: 'Profile',
+              subtitle: 'Availability, identity, and account preferences',
+              onTap: staff == null
+                  ? null
+                  : () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ProfileScreen(staff: staff),
+                      ),
+                    ),
+            ),
+            _moreDestinationTile(
               icon: Icons.lock_outline_rounded,
               color: const Color(0xFFF87171),
               title: 'Lock Station',
@@ -1886,7 +1919,7 @@ class _WardBoardScreenState extends ConsumerState<WardBoardScreen>
     required Color color,
     required String title,
     required String subtitle,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) => Card(
     margin: const EdgeInsets.only(bottom: 10),
     child: ListTile(

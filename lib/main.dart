@@ -26,6 +26,7 @@ import 'presentation/ward_board_screen.dart';
 import 'presentation/admin/dev_admin_dashboard_screen.dart';
 import 'presentation/communications/staff_communications_screen.dart';
 import 'presentation/call_screen.dart';
+import 'presentation/incoming_call_dialog.dart';
 import 'presentation/clinical_ritual_room_screen.dart';
 import 'presentation/clinical_ritual_review_screen.dart';
 import 'data/notifications/medical_issue_push_service.dart';
@@ -104,6 +105,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   RitualAlert? _pendingRitual;
   bool _openingAlert = false;
   bool _openingCall = false;
+  String? _activeCallId;
   bool _openingRitual = false;
 
   @override
@@ -161,6 +163,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
   }
 
   void _queueCall(CallAlert alert) {
+    if (_activeCallId == alert.callId || _pendingCall?.callId == alert.callId) return;
     _pendingCall = alert;
     if (mounted) setState(() {});
   }
@@ -241,6 +244,7 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       return;
     }
     try {
+      _activeCallId = alert.callId;
       final callCredential = await ref
           .read(medicalIssuePushServiceProvider)
           .readCallCredential();
@@ -250,26 +254,18 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       );
       final details = await api.getCall(alert.callId);
       if (!mounted) return;
+      if (details['status'] != 'ringing') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This call is no longer ringing.')));
+        return;
+      }
       final answer = await showDialog<bool>(
         context: _navigatorKey.currentContext ?? context,
         barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Incoming Oravi call'),
-          content: Text(
-            'Call from ${details['caller_name'] ?? details['caller_id'] ?? 'another clinician'}.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Decline'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Answer'),
-            ),
-          ],
-        ),
+        builder: (_) => IncomingCallDialog(api: api, callId: alert.callId,
+          callerName: '${details['caller_name'] ?? details['caller_id'] ?? 'another clinician'}'),
       );
+      if (answer == null) return;
       if (answer != true) {
         await api.declineCall(alert.callId);
         return;
@@ -293,6 +289,8 @@ class _OraviAppState extends ConsumerState<OraviApp> {
       }
     } finally {
       _openingCall = false;
+      _activeCallId = null;
+      if (mounted && _pendingCall != null) setState(() {});
     }
   }
 

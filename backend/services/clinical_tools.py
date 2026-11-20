@@ -1,4 +1,5 @@
 import re
+import sqlite3
 from typing import Any, Dict, List, Optional
 from backend.event_store import EventStore
 
@@ -17,7 +18,19 @@ TOPIC_SYNONYMS = {
     'blood_pressure': ['bp', 'blood pressure', 'presha', 'hypotension', 'hypertension', 'systolic', 'diastolic'],
     'allergy': ['allergy', 'allergic', 'allergies', 'reaction', 'mzio', 'anaphylaxis'],
     'pain': ['pain', 'ache', 'uchungu', 'maumivu', 'analgesia', 'paracetamol'],
+    'call': ['call', 'calls', 'called', 'phone', 'telephone', 'conversation', 'discussion'],
+    'chat': ['chat', 'chats', 'message', 'messages', 'thread', 'threads', 'discussion', 'conversation'],
 }
+
+
+def _staff_name_map(store: EventStore) -> Dict[str, str]:
+    """Resolve staff identifiers to display names for model evidence."""
+    try:
+        with sqlite3.connect(store.db_path) as conn:
+            rows = conn.execute("SELECT staff_id, name FROM staff_users").fetchall()
+        return {str(staff_id): str(name) for staff_id, name in rows}
+    except sqlite3.Error:
+        return {}
 
 def execute_query_patient_timeline(
     store: EventStore,
@@ -31,9 +44,14 @@ def execute_query_patient_timeline(
     """
     all_events, _ = store.get_events_since(since_seq=0, limit=1000)
     patient_events = [e for e in all_events if e.patient_id == patient_id]
+    staff_names = _staff_name_map(store)
 
     # Auto-detect time window from query if not explicitly passed
     topic_lower = topic.lower()
+    is_issue_query = any(
+        phrase in topic_lower
+        for phrase in ("medical issue", "active issue", "open issue", "issues", "loops")
+    )
     tw_match = re.search(r'\b(\d+)\s*(?:hours|hrs|hr)\b', topic_lower)
     if tw_match and time_window_hours is None:
         time_window_hours = int(tw_match.group(1))
@@ -75,11 +93,14 @@ def execute_query_patient_timeline(
             loop_title = event.payload.get("title", "")
             content = f"{loop_title}: {event.payload.get('description', '')}".strip()
         elif event.type == "MessagePosted":
-            content = event.payload.get("content", "")
+            author = staff_names.get(event.author_id, event.author_id)
+            content = f"Message from {author} in clinical thread: {event.payload.get('content', '')}"
         elif event.type == "CallLogged":
             outcome = event.payload.get("outcome_note", "")
             recipient = event.payload.get("recipient_id", "")
-            content = f"Spoke with {recipient}: {outcome}"
+            caller = staff_names.get(event.author_id, event.author_id)
+            recipient_name = staff_names.get(recipient, recipient)
+            content = f"Call between {caller} and {recipient_name}: {outcome}"
         elif event.type == "EscalationRaised":
             reason = event.payload.get("escalation_reason", "")
             target = event.payload.get("target_role", "")
@@ -100,7 +121,11 @@ def execute_query_patient_timeline(
 
         # Check match
         matched = False
-        if not search_terms or topic_lower == "all" or is_general_briefing or is_general_time_summary:
+        if is_issue_query and event.type in {
+            "LoopOpened", "LoopClosed", "LoopReopened", "EscalationRaised"
+        }:
+            matched = True
+        elif not search_terms or topic_lower == "all" or is_general_briefing or is_general_time_summary:
             matched = True
         else:
             text_lower = f"{content} {loop_title}".lower()
@@ -116,7 +141,7 @@ def execute_query_patient_timeline(
         if matched:
             quotes.append({
                 "quote_id": event.event_id,
-                "author_id": event.author_id,
+                "author_id": staff_names.get(event.author_id, event.author_id),
                 "timestamp": event.client_created_at,
                 "verbatim_text": content,
                 "loop_title": loop_title or "Patient Care Note",

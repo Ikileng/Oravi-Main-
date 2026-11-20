@@ -1,0 +1,73 @@
+name: oravi-local-media
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: Africa/Nairobi
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+      ORAVI_DATABASE_PATH: /data/oravi_server.db
+      LLM_BASE_URL: http://host.docker.internal:11434/v1
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_PUBLIC_URL: ws://${ORAVI_LAN_IP:-localhost}:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+      ORAVI_PUBLIC_URL: http://backend:8000
+      LIVEKIT_EGRESS_STORAGE: local
+      LIVEKIT_LOCAL_RECORDING_DIR: /recordings
+      TRANSCRIPTION_PROVIDER: whisper_local
+      WHISPER_MODEL: large-v3
+      WHISPER_DEVICE: auto
+      WHISPER_COMPUTE_TYPE: int8
+    depends_on:
+      - livekit
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - type: bind
+        source: ${ORAVI_FIREBASE_CREDENTIALS_FILE:?Set ORAVI_FIREBASE_CREDENTIALS_FILE in docker/local.env to the Firebase Admin JSON file}
+        target: /run/secrets/firebase-admin.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./backend:/app/backend
+      - ./var/backend-data:/data
+      - ./var/livekit-recordings:/recordings
+      - ./var/whisper-cache:/root/.cache/huggingface
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./var/livekit-redis:/data
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml", "--node-ip", "${ORAVI_LAN_IP:?Set ORAVI_LAN_IP in docker/local.env to the laptop LAN IPv4 address}"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "51000-51100:51000-51100/udp"
+    volumes:
+      - ./docker/livekit.local.yaml:/etc/livekit.yaml:ro
+
+  livekit-egress:
+    image: livekit/egress:latest
+    restart: unless-stopped
+    depends_on:
+      - livekit
+      - redis
+    environment:
+      EGRESS_CONFIG_FILE: /etc/livekit/egress.yaml
+    volumes:
+      - ./docker/egress.local.yaml:/etc/livekit/egress.yaml:ro
+      - ./var/livekit-recordings:/recordings
+

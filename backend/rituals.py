@@ -615,7 +615,7 @@ def build_router(api):
         ensure_scheduled_time_reached(ritual)
         return {
             "room_name": ritual["room_name"],
-            "livekit_url": os.getenv("LIVEKIT_URL"),
+            "livekit_url": os.getenv("LIVEKIT_PUBLIC_URL") or os.getenv("LIVEKIT_URL"),
             "token": api._livekit_token(
                 profile.staff_id, profile.name, ritual["room_name"]
             ),
@@ -684,7 +684,10 @@ def build_router(api):
             ritual["ritual_id"], "processing", location=location
         )
         try:
-            transcription = api.transcription_service.transcribe_url(source_url)
+            if os.getenv("TRANSCRIPTION_PROVIDER", "elevenlabs").strip().lower() == "whisper_local":
+                transcription = api.transcription_service.transcribe_file(source_url)
+            else:
+                transcription = api.transcription_service.transcribe_url(source_url)
         except RuntimeError as error:
             api.ritual_store.set_recording_status(ritual["ritual_id"], "failed")
             raise HTTPException(status_code=503, detail=str(error)) from error
