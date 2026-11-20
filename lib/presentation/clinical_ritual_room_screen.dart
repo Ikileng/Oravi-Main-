@@ -39,6 +39,8 @@ class _ClinicalRitualRoomScreenState
   bool _consented = false;
   String? _recordingMessage;
   String _patientId = '';
+  String _ritualTitle = 'Clinical ritual';
+  String _ritualType = 'ritual';
   final Set<String> _participantIds = {};
 
   @override
@@ -65,6 +67,8 @@ class _ClinicalRitualRoomScreenState
         _recordingMessage = 'The initiator chose not to record this meeting';
       }
       _patientId = ritual.patientId ?? '';
+      _ritualTitle = ritual.title;
+      _ritualType = ritual.ritualType;
       _participantIds.addAll(
         ritual.participants.map((p) => p['staff_id'] as String),
       );
@@ -167,7 +171,11 @@ class _ClinicalRitualRoomScreenState
 
   Future<void> _leave() async {
     if (_leaving) return;
-    _leaving = true;
+    if (mounted) {
+      setState(() => _leaving = true);
+    } else {
+      _leaving = true;
+    }
     _participantTimer?.cancel();
     try {
       await _room.disconnect();
@@ -185,6 +193,10 @@ class _ClinicalRitualRoomScreenState
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
           title: const Text('Add a clinician'),
           content: SizedBox(
             width: 420,
@@ -295,6 +307,11 @@ class _ClinicalRitualRoomScreenState
 
   @override
   Widget build(BuildContext context) {
+    final roomReady = !_connecting && _error == null;
+    final recordingColor = _recording
+        ? ClinicalTheme.criticalRed
+        : ClinicalTheme.textSecondary;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -302,81 +319,296 @@ class _ClinicalRitualRoomScreenState
       },
       child: Scaffold(
         backgroundColor: ClinicalTheme.background,
-        appBar: AppBar(title: const Text('Clinical Ritual')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircleAvatar(
-                  radius: 42,
-                  backgroundColor: ClinicalTheme.routineTeal,
-                  child: Icon(Icons.groups, size: 42, color: Colors.white),
+        appBar: AppBar(title: const Text('Clinical ritual')),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 40,
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  _error ??
-                      (_connecting
-                          ? 'Joining the secure ritual room…'
-                          : '$_participantCount clinician${_participantCount == 1 ? '' : 's'} connected'),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _error == null
-                        ? ClinicalTheme.textSecondary
-                        : ClinicalTheme.criticalRed,
-                  ),
-                ),
-                if (!_connecting && _error == null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    _recording
-                        ? 'Server recording and transcription active'
-                        : (_recordingMessage ??
-                              (_initiator
-                                  ? 'Meeting is not being recorded'
-                                  : 'Recording status set by initiator')),
-                    style: TextStyle(
-                      color: _recording
-                          ? ClinicalTheme.urgentAmber
-                          : ClinicalTheme.criticalRed,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  IconButton.filled(
-                    onPressed: _toggleMute,
-                    icon: Icon(_muted ? Icons.mic_off : Icons.mic),
-                    tooltip: _muted ? 'Unmute' : 'Mute',
-                  ),
-                  if (_initiator)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: OutlinedButton.icon(
-                        onPressed: _inviteClinician,
-                        icon: const Icon(Icons.person_add_alt_1),
-                        label: const Text('Add clinician'),
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: ClinicalTheme.surfaceAccent,
+                          borderRadius: BorderRadius.circular(
+                            ClinicalTheme.radiusMedium,
+                          ),
+                          border: Border.all(
+                            color: ClinicalTheme.clinicalBlue.withValues(
+                              alpha: 0.35,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: ClinicalTheme.clinicalBlue.withValues(
+                                  alpha: 0.14,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.groups_outlined,
+                                color: ClinicalTheme.clinicalBlue,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _ritualTitle,
+                                    style: const TextStyle(
+                                      color: ClinicalTheme.textPrimary,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _ritualType
+                                        .replaceAll('_', ' ')
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      color: ClinicalTheme.textSecondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
-                const SizedBox(height: 28),
-                FilledButton.icon(
-                  onPressed: _leaving ? null : _leave,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: ClinicalTheme.criticalRed,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 28,
-                      vertical: 14,
-                    ),
+                      const Spacer(),
+                      const SizedBox(height: 28),
+                      Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          CircleAvatar(
+                            radius: 54,
+                            backgroundColor: ClinicalTheme.routineTeal
+                                .withValues(alpha: 0.16),
+                            child: const Icon(
+                              Icons.groups,
+                              size: 52,
+                              color: ClinicalTheme.routineTeal,
+                            ),
+                          ),
+                          if (roomReady)
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: ClinicalTheme.successGreen,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: ClinicalTheme.background,
+                                  width: 3,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.check,
+                                color: Colors.black,
+                                size: 17,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        _error ??
+                            (_connecting
+                                ? 'Joining secure room…'
+                                : '$_participantCount clinician${_participantCount == 1 ? '' : 's'} connected'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _error == null
+                              ? ClinicalTheme.textPrimary
+                              : ClinicalTheme.criticalRed,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _connecting
+                            ? 'Verifying access and preparing encrypted audio.'
+                            : _error != null
+                            ? 'Leave the room and try joining again when your connection is stable.'
+                            : 'Only invited clinicians can enter this room.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: ClinicalTheme.textSecondary,
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (roomReady) ...[
+                        const SizedBox(height: 20),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: recordingColor.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(
+                              ClinicalTheme.radiusMedium,
+                            ),
+                            border: Border.all(
+                              color: recordingColor.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                _recording
+                                    ? Icons.fiber_manual_record
+                                    : Icons.voicemail_outlined,
+                                size: 20,
+                                color: recordingColor,
+                              ),
+                              const SizedBox(width: 9),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _recording
+                                          ? 'Recording and transcription active'
+                                          : 'Not being recorded',
+                                      style: TextStyle(
+                                        color: recordingColor,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      _recording
+                                          ? 'A draft summary will be prepared for clinician review after the ritual.'
+                                          : (_recordingMessage ??
+                                                (_initiator
+                                                    ? 'You chose to continue without recording.'
+                                                    : 'Recording preference is controlled by the initiator.')),
+                                      style: const TextStyle(
+                                        color: ClinicalTheme.textSecondary,
+                                        fontSize: 12,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const Spacer(),
+                      const SizedBox(height: 28),
+                      if (roomReady)
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 20,
+                          runSpacing: 16,
+                          children: [
+                            _RitualControl(
+                              icon: _muted ? Icons.mic_off : Icons.mic,
+                              label: _muted ? 'Unmute' : 'Mute',
+                              active: _muted,
+                              onPressed: _toggleMute,
+                            ),
+                            if (_initiator)
+                              _RitualControl(
+                                icon: Icons.person_add_alt_1,
+                                label: 'Add clinician',
+                                onPressed: _inviteClinician,
+                              ),
+                          ],
+                        )
+                      else
+                        const SizedBox(height: 84),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _leaving ? null : _leave,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(56),
+                            backgroundColor: ClinicalTheme.criticalRed,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.call_end),
+                          label: Text(
+                            _leaving
+                                ? 'Leaving…'
+                                : _initiator
+                                ? 'End ritual for everyone'
+                                : 'Leave ritual',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.call_end),
-                  label: Text(_initiator ? 'End ritual' : 'Leave ritual'),
                 ),
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
+}
+
+class _RitualControl extends StatelessWidget {
+  const _RitualControl({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      IconButton.filled(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(64, 64),
+          backgroundColor: active
+              ? ClinicalTheme.criticalRed
+              : ClinicalTheme.surfaceElevated,
+          foregroundColor: Colors.white,
+        ),
+        icon: Icon(icon, size: 27),
+        tooltip: label,
+      ),
+      const SizedBox(height: 7),
+      Text(
+        label,
+        style: const TextStyle(
+          color: ClinicalTheme.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
 }
