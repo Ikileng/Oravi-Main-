@@ -7,6 +7,30 @@ from backend.staff_store import StaffStore
 
 
 class TestFcmInstallations(unittest.TestCase):
+    def test_explicit_unavailability_survives_reconnect_login_and_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'availability.db')
+            store = StaffStore(path)
+            store.create_staff('N', 'Nurse', 'ward_nurse', '', '1234')
+            credential = store.issue_call_device_credential('N', 'device', 'android')
+            self.assertTrue(store.refresh_contact_device(credential, 'first-token'))
+            self.assertEqual(store.get_fcm_fids_for_staff('N'), ['first-token'])
+            store.set_available('N', False)
+            store.close()
+            store = StaffStore(path)
+            try:
+                self.assertFalse(store.refresh_contact_device(credential, 'new-token'))
+                self.assertTrue(store.verify_pin('N', '1234')[0])
+                self.assertFalse(store.is_available('N'))
+                self.assertEqual(store.get_fcm_fids_for_staff('N'), [])
+                self.assertIsNone(store.refresh_contact_device('invalid', 'bad-token'))
+                store.set_available('N', True)
+                self.assertEqual(store.get_fcm_fids_for_staff('N'), ['new-token'])
+                store.set_staff_active('N', False)
+                self.assertIsNone(store.refresh_contact_device(credential, 'blocked-token'))
+            finally:
+                store.close()
+
     def test_legacy_registration_tokens_are_discarded(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database_path = os.path.join(temp_dir, "staff.db")

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/loop_enums.dart';
@@ -7,6 +9,7 @@ import '../../domain/timeline/patient_timeline_entry.dart';
 import '../providers/ward_providers.dart';
 import '../providers/auth_providers.dart';
 import '../theme/clinical_theme.dart';
+import '../../data/database/database_provider.dart';
 
 enum ChatSender { clinician, oravi }
 
@@ -105,30 +108,14 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
   final ScrollController _scrollController = ScrollController();
   final List<OraviChatMessage> _messages = [];
   bool _calling = false;
-
-  final List<String> _suggestedQueries = [
-    'SpO2 / Oxygen',
-    'Urine / Mkojo',
-    'Blood / Cross-match',
-    'What do I need to know?',
-    'Active Medical Issues',
-    'What happened in the last 8 hours?',
-    'Allergies',
-  ];
+  bool _historyLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    // Initial friendly greeting from Oravi
-    _messages.add(
-      OraviChatMessage(
-        id: 'welcome',
-        sender: ChatSender.oravi,
-        text:
-            'Hello Nurse! I am Oravi, your offline clinical assistant for Bed ${widget.patient.bedNumber} (${widget.patient.patientInitials}). How may I help you with this patient?',
-        timestamp: DateTime.now(),
-      ),
-    );
+    // Let the configured model produce the opening turn too. This keeps the
+    // first response on the same verified conversation path as follow-ups.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreConversation());
   }
 
   @override
@@ -147,6 +134,65 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
           curve: Curves.easeOut,
         );
       }
+    });
+  }
+
+  String get _conversationCacheKey {
+    final staffId = ref.read(authenticatedStaffProvider)?.staffId ?? 'unknown';
+    return 'ask_oravi_conversation:$staffId:${widget.patient.patientId}';
+  }
+
+  Future<void> _restoreConversation() async {
+    final cached = await ref
+        .read(localDatabaseProvider)
+        .readCachedJson(_conversationCacheKey);
+    if (!mounted) return;
+    final restored = <OraviChatMessage>[];
+    for (final raw in (cached?['messages'] as List<dynamic>? ?? const [])) {
+      if (raw is! Map) continue;
+      final text = raw['text'] as String?;
+      final timestamp = DateTime.tryParse(raw['timestamp'] as String? ?? '');
+      if (text == null || text.trim().isEmpty || timestamp == null) continue;
+      restored.add(
+        OraviChatMessage(
+          id: raw['id'] as String? ?? 'restored-${restored.length}',
+          sender: raw['sender'] == 'clinician'
+              ? ChatSender.clinician
+              : ChatSender.oravi,
+          text: text,
+          timestamp: timestamp,
+        ),
+      );
+    }
+    setState(() {
+      _messages
+        ..clear()
+        ..addAll(restored);
+      _historyLoaded = true;
+    });
+    _scrollToBottom();
+    if (restored.isEmpty) {
+      _sendMessage('Hello', showClinicianMessage: false);
+    }
+  }
+
+  Future<void> _persistConversation() async {
+    if (!_historyLoaded) return;
+    await ref.read(localDatabaseProvider).cacheJson(_conversationCacheKey, {
+      'messages': _messages
+          .where((message) => !message.isLoading)
+          .take(100)
+          .map(
+            (message) => {
+              'id': message.id,
+              'sender': message.sender == ChatSender.clinician
+                  ? 'clinician'
+                  : 'oravi',
+              'text': message.text,
+              'timestamp': message.timestamp.toIso8601String(),
+            },
+          )
+          .toList(),
     });
   }
 
@@ -169,20 +215,6 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
     return greetings.contains(lower);
   }
 
-  bool _isActiveMedicalIssuesQuery(String query) {
-    final lower = query.trim().toLowerCase();
-    return lower.contains('active medical issue') ||
-        lower.contains('medical issue') ||
-        lower.contains('active issue') ||
-        lower.contains('open loop') ||
-        lower.contains('open issue') ||
-        lower.contains('pending issue') ||
-        lower.contains('what issues') ||
-        lower.contains('what loops') ||
-        lower == 'loops' ||
-        lower == 'issues';
-  }
-
   bool _isBriefingQuery(String query) {
     final lower = query.trim().toLowerCase();
     return lower.contains('what do i need to know') ||
@@ -199,73 +231,81 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
         lower.contains('what happened');
   }
 
-  void _sendMessage(String query) {
+  bool _isTargetedRecordLookup(String query) {
+    final lower = query.toLowerCase();
+    const recordTerms = [
+      'urine',
+      'urinary',
+      'urine output',
+      'blood pressure',
+      'blood sugar',
+      'glucose',
+      'temperature',
+      'spo2',
+      'oxygen saturation',
+      'heart rate',
+      'pulse',
+      'respiratory rate',
+      'medication',
+      'medicine',
+      'drug',
+      'dose',
+      'allergy',
+    ];
+    return recordTerms.any(lower.contains);
+  }
+
+  void _sendMessage(String query, {bool showClinicianMessage = true}) {
     final clean = query.trim();
     if (clean.isEmpty) return;
 
     _queryController.clear();
 
-    // 1. Add Clinician message bubble
-    final clinicianMsg = OraviChatMessage(
-      id: 'clinician-${DateTime.now().millisecondsSinceEpoch}',
-      sender: ChatSender.clinician,
-      text: clean,
-      timestamp: DateTime.now(),
-    );
-
-    setState(() {
-      _messages.add(clinicianMsg);
-    });
-    _scrollToBottom();
-
-    // 2. Conversational greetings intent
-    if (_isGreeting(clean)) {
-      final oraviGreeting = OraviChatMessage(
-        id: 'oravi-${DateTime.now().millisecondsSinceEpoch}',
-        sender: ChatSender.oravi,
-        text:
-            'Hey, how may I help you with Bed ${widget.patient.bedNumber} (${widget.patient.patientInitials}) today?',
+    if (showClinicianMessage) {
+      final clinicianMsg = OraviChatMessage(
+        id: 'clinician-${DateTime.now().millisecondsSinceEpoch}',
+        sender: ChatSender.clinician,
+        text: clean,
         timestamp: DateTime.now(),
       );
-      setState(() {
-        _messages.add(oraviGreeting);
-      });
-      _scrollToBottom();
-      return;
+      setState(() => _messages.add(clinicianMsg));
+      unawaited(_persistConversation());
     }
+    _scrollToBottom();
 
     // Read patient loops from store
     final loops = ref.read(patientLoopsProvider(widget.patient.patientId));
     final openLoops = loops.where((l) => l.isOpen).toList();
 
-    // 3. Active Medical Issues Intent: Returns issues as rich action cards immediately
-    if (_isActiveMedicalIssuesQuery(clean)) {
-      final oraviMsg = OraviChatMessage(
-        id: 'oravi-${DateTime.now().millisecondsSinceEpoch}',
-        sender: ChatSender.oravi,
-        text: openLoops.isNotEmpty
-            ? (openLoops.length == 1
-                  ? 'There is 1 active medical issue currently open for ${widget.patient.patientInitials}:'
-                  : 'There are ${openLoops.length} active medical issues currently open for ${widget.patient.patientInitials}:')
-            : 'ALL CLEAR — There are currently no active medical issues for ${widget.patient.patientInitials}.',
-        timestamp: DateTime.now(),
-        activeMedicalIssues: openLoops,
-        isAllClear: false,
-      );
-
-      setState(() {
-        _messages.add(oraviMsg);
-      });
-      _scrollToBottom();
-      return;
-    }
-
-    // 5. Specific Topic Search (SpO2, Urine, Blood, etc.): Deterministic engine + Model synthesis
+    // Medical-issue questions are handled by the patient-aware model below,
+    // rather than a keyword shortcut, so the answer can include the complete
+    // patient record and conversation context.
+    // Specific Topic Search (SpO2, Urine, Blood, etc.): Deterministic engine + Model synthesis
     final repo = ref.read(localWardRepositoryProvider);
-    final localResult = repo.askOravi(
-      patientId: widget.patient.patientId,
-      queryString: clean,
-    );
+    late final AskOraviResult localResult;
+    try {
+      localResult = repo.askOravi(
+        patientId: widget.patient.patientId,
+        queryString: clean,
+      );
+    } catch (_) {
+      // A newly signed-in/shared device may not have the patient's local
+      // projection yet. The online model can still answer from the server.
+      localResult = AskOraviResult(
+        patientId: widget.patient.patientId,
+        queryString: clean,
+        verbatimQuotes: const [],
+        systemPatterns: const [],
+        coverage: const CoverageMetadata(
+          termsSearched: [],
+          messageCount: 0,
+          threadCount: 0,
+        ),
+        isAbsence: true,
+        absenceMessage:
+            'This device is still loading the patient context. I will try the secure server record.',
+      );
+    }
 
     final isBriefing = _isBriefingQuery(clean);
     final staffName = ref.read(authenticatedStaffProvider)?.name ?? 'colleague';
@@ -274,7 +314,9 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
         'The recorded events and decisions are below. '
         'There are ${openLoops.length} open medical issues recorded in Oravi. '
         'For information not recorded here, kindly verify with the main hospital EHR.';
-    final fallbackText = localResult.isAbsence
+    final fallbackText = _isGreeting(clean)
+        ? 'Hello, I am Oravi. How can I help you review this patient\'s recorded care?'
+        : localResult.isAbsence
         ? localResult.absenceMessage!
         : isBriefing
         ? briefingText
@@ -288,7 +330,9 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
       timestamp: DateTime.now(),
       result: localResult,
       activeMedicalIssues: isBriefing ? openLoops : null,
-      isLoading: !localResult.isAbsence && !localResult.isRefusal,
+      // Keep the response pending while the model interprets natural language,
+      // including questions with no matching local keyword.
+      isLoading: !localResult.isRefusal,
     );
 
     setState(() {
@@ -296,10 +340,47 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
     });
     _scrollToBottom();
 
-    if (localResult.isAbsence || localResult.isRefusal) return;
+    // Diagnostic/refusal responses must remain deterministic and must never be
+    // sent through the model. An empty keyword search is different: it may be
+    // a natural conversational question, so let the backend model interpret
+    // it and apply the record-absence guardrail there.
+    // A targeted clinical topic with no matching event must use the explicit
+    // EHR verification guardrail. Do not let a model hallucinate an answer or
+    // turn a confirmed absence into an ungrounded conversational response.
+    if (localResult.isRefusal ||
+        (localResult.isAbsence && _isTargetedRecordLookup(clean))) {
+      setState(() {
+        final idx = _messages.indexWhere((m) => m.id == oraviMsgId);
+        if (idx != -1) {
+          _messages[idx] = _messages[idx].copyWith(isLoading: false);
+        }
+      });
+      unawaited(_persistConversation());
+      return;
+    }
     final modelService = ref.read(askOraviModelServiceProvider);
+    final priorMessages = _messages.length > 1
+        ? _messages.sublist(0, _messages.length - 1)
+        : <OraviChatMessage>[];
+    final conversationHistory = priorMessages.reversed
+        .take(8)
+        .toList()
+        .reversed
+        .map(
+          (message) => <String, String>{
+            'role': message.sender == ChatSender.clinician
+                ? 'user'
+                : 'assistant',
+            'content': message.text,
+          },
+        )
+        .toList();
     modelService
-        .askPatient(patientId: widget.patient.patientId, query: clean)
+        .askPatient(
+          patientId: widget.patient.patientId,
+          query: clean,
+          conversationHistory: conversationHistory,
+        )
         .then((resp) {
           if (!mounted) return;
           final canUseModel =
@@ -314,7 +395,11 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
             if (idx != -1) {
               final displayText = canUseModel
                   ? resp.observationNote!
-                  : fallbackText;
+                  : (resp == null && modelService.lastFailure != null
+                        ? (_isGreeting(clean)
+                              ? fallbackText
+                              : 'I could not reach the Oravi model. ${modelService.lastFailure}')
+                        : fallbackText);
 
               _messages[idx] = _messages[idx].copyWith(
                 text: displayText,
@@ -323,6 +408,12 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 modelProvider: resp?.modelProvider,
                 isLoading: false,
                 result: _messages[idx].result?.copyWith(
+                  // A successful conversational response (or a visible
+                  // transport error) must render as a normal assistant bubble;
+                  // do not let the pre-model local absence flag hide it.
+                  isAbsence: canUseModel || resp == null
+                      ? false
+                      : _messages[idx].result?.isAbsence,
                   observationNote: canUseModel ? resp.observationNote : null,
                   isModelAssisted: canUseModel,
                   modelName: resp?.modelName,
@@ -332,6 +423,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
               );
             }
           });
+          unawaited(_persistConversation());
           _scrollToBottom();
         })
         .catchError((_) {
@@ -343,9 +435,15 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 _messages[idx] = _messages[idx].copyWith(
                   text: displayText,
                   isLoading: false,
+                  result: _messages[idx].result?.copyWith(
+                    isAbsence: _isGreeting(clean)
+                        ? false
+                        : _messages[idx].result?.isAbsence,
+                  ),
                 );
               }
             });
+            unawaited(_persistConversation());
             _scrollToBottom();
           }
         });
@@ -519,33 +617,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
           ),
         ),
 
-        // 2. Suggested Prompt Chips (Horizontally Scrollable)
-        Container(
-          height: 38,
-          margin: const EdgeInsets.only(bottom: 4),
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            itemCount: _suggestedQueries.length,
-            itemBuilder: (context, index) {
-              final chipText = _suggestedQueries[index];
-              return Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ActionChip(
-                  label: Text(chipText, style: const TextStyle(fontSize: 11)),
-                  backgroundColor: ClinicalTheme.surfaceElevated,
-                  side: const BorderSide(
-                    color: ClinicalTheme.border,
-                    width: 0.8,
-                  ),
-                  onPressed: () => _sendMessage(chipText),
-                ),
-              );
-            },
-          ),
-        ),
-
-        // 3. Persistent Input Bar (Microphone + TextField + Send)
+        // Persistent Input Bar (Microphone + TextField + Send)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: const BoxDecoration(
@@ -746,13 +818,17 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                             ),
                           ),
                         ),
-                        const Spacer(),
                         if (msg.modelName != null || result?.modelName != null)
-                          Text(
-                            '${msg.modelName ?? result?.modelName} (${msg.modelProvider ?? result?.modelProvider ?? "local"})',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Color(0xFFC4B5FD),
+                          Flexible(
+                            child: Text(
+                              '${msg.modelName ?? result?.modelName} (${msg.modelProvider ?? result?.modelProvider ?? "local"})',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFFC4B5FD),
+                              ),
                             ),
                           ),
                       ],
@@ -775,11 +851,14 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                           color: Color(0xFF10B981),
                         ),
                         SizedBox(width: 4),
-                        Text(
-                          'All numbers verified against patient event log quotes below',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Color(0xFF10B981),
+                        Flexible(
+                          child: Text(
+                            'All numbers verified against patient event log quotes below',
+                            softWrap: true,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF10B981),
+                            ),
                           ),
                         ),
                       ],
@@ -839,11 +918,15 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      msg.text,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: ClinicalTheme.textMuted,
+                    Flexible(
+                      child: Text(
+                        msg.text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: ClinicalTheme.textMuted,
+                        ),
                       ),
                     ),
                   ],
@@ -1044,6 +1127,16 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
         .firstOrNull;
     final contactId = opening?.authorId ?? loop.currentOwnerId;
     final contactRole = opening?.authorRole ?? loop.currentOwnerRole;
+    final patientStaff = ref
+        .watch(patientStaffListProvider(widget.patient.patientId))
+        .asData
+        ?.value;
+    final contactName =
+        patientStaff
+            ?.where((staff) => staff.staffId == contactId)
+            .firstOrNull
+            ?.name ??
+        contactId;
     final urgencyColor = ClinicalTheme.urgencyColor(loop.urgency);
     final ownerColor = ClinicalTheme.cadreColor(contactId);
 
@@ -1143,7 +1236,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                     Icon(Icons.person_outline, size: 12, color: ownerColor),
                     const SizedBox(width: 4),
                     Text(
-                      contactId,
+                      contactName,
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.bold,
@@ -1172,7 +1265,7 @@ class _AskOraviViewState extends ConsumerState<AskOraviView> {
                 ),
                 icon: const Icon(Icons.chat_bubble_outline, size: 12),
                 label: Text(
-                  'Message ${contactId}',
+                  'Message $contactName',
                   style: const TextStyle(fontSize: 11),
                 ),
                 onPressed: () {

@@ -54,6 +54,7 @@ class SyncPullResponse:
 class AskRequest:
     query: str
     time_window_hours: Optional[int] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None
 
 @dataclass
 class AskResponse:

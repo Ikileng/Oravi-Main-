@@ -48,6 +48,8 @@ class StaffStore:
             columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(staff_users)").fetchall()}
             if "email" not in columns:
                 self.conn.execute("ALTER TABLE staff_users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+            if "is_available" not in columns:
+                self.conn.execute("ALTER TABLE staff_users ADD COLUMN is_available INTEGER NOT NULL DEFAULT 1")
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_staff_ward ON staff_users(ward_id)"
             )
@@ -149,7 +151,7 @@ class StaffStore:
 
     def get_session(self, token: str) -> Optional[StaffProfile]:
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        with self.conn:
+        with self._lock, self.conn:
             row = self.conn.execute(
                 """SELECT u.staff_id, u.name, u.role, u.ward_id, u.avatar_color,
                           u.initials, u.is_active
@@ -273,10 +275,38 @@ class StaffStore:
     def get_fcm_fids_for_staff(self, staff_id: str) -> List[str]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT fid FROM fcm_device_tokens WHERE staff_id = ?",
+                "SELECT fid FROM fcm_device_tokens WHERE staff_id = ? AND EXISTS "
+                "(SELECT 1 FROM staff_users u WHERE u.staff_id = fcm_device_tokens.staff_id "
+                "AND u.is_active = 1 AND u.is_available = 1)",
                 (staff_id,),
             ).fetchall()
         return [str(row["fid"]) for row in rows]
+
+    def is_available(self, staff_id: str) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT is_available FROM staff_users WHERE staff_id = ? AND is_active = 1",
+                (staff_id,),
+            ).fetchone()
+        return bool(row and row['is_available'])
+
+    def set_available(self, staff_id: str, available: bool) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("UPDATE staff_users SET is_available = ? WHERE staff_id = ?",
+                              (int(available), staff_id))
+
+    def refresh_contact_device(self, credential: str, token: str) -> Optional[bool]:
+        credential_hash = hashlib.sha256(credential.encode('utf-8')).hexdigest()
+        with self._lock, self.conn:
+            row = self.conn.execute(
+                "SELECT c.staff_id, c.device_id, c.platform FROM call_device_credentials c "
+                "JOIN staff_users u ON u.staff_id=c.staff_id "
+                "WHERE c.credential_hash=? AND u.is_active=1", (credential_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            self.register_fcm_installation(row['staff_id'], row['device_id'], token, row['platform'])
+            return self.is_available(row['staff_id'])
 
     def remove_fcm_installation(self, staff_id: str, device_id: str) -> None:
         with self._lock, self.conn:
@@ -337,26 +367,29 @@ class StaffStore:
             )
 
     def is_active_clinical_staff(self, staff_id: str) -> bool:
-        row = self.conn.execute(
-            """SELECT 1 FROM staff_users
-               WHERE staff_id = ? AND is_active = 1 AND role IN ('ward_nurse','charge_nurse','doctor_on_call')""",
-            (staff_id,),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT 1 FROM staff_users
+                   WHERE staff_id = ? AND is_active = 1 AND role IN ('ward_nurse','charge_nurse','doctor_on_call')""",
+                (staff_id,),
+            ).fetchone()
         return row is not None
 
     def is_active_doctor(self, staff_id: str) -> bool:
-        row = self.conn.execute(
-            """SELECT 1 FROM staff_users
-               WHERE staff_id = ? AND is_active = 1 AND role = 'doctor_on_call'""",
-            (staff_id,),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT 1 FROM staff_users
+                   WHERE staff_id = ? AND is_active = 1 AND role = 'doctor_on_call'""",
+                (staff_id,),
+            ).fetchone()
         return row is not None
 
     def get_ward_preference(self, staff_id: str) -> Optional[str]:
-        row = self.conn.execute(
-            "SELECT ward_id FROM staff_ward_preferences WHERE staff_id = ?",
-            (staff_id,),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT ward_id FROM staff_ward_preferences WHERE staff_id = ?",
+                (staff_id,),
+            ).fetchone()
         return row["ward_id"] if row else None
 
     def set_ward_preference(self, staff_id: str, ward_id: str) -> bool:
@@ -404,10 +437,11 @@ class StaffStore:
         now = time.time()
         if not identifier or not pin.isdigit() or len(pin) > 8:
             return False, None, "Invalid staff ID or PIN."
-        failure = self.conn.execute(
-            "SELECT failure_count, window_started, locked_until FROM auth_failures WHERE staff_id = ?",
-            (identifier,),
-        ).fetchone()
+        with self._lock:
+            failure = self.conn.execute(
+                "SELECT failure_count, window_started, locked_until FROM auth_failures WHERE staff_id = ?",
+                (identifier,),
+            ).fetchone()
         if failure and failure["locked_until"] > now:
             remaining = max(1, int(failure["locked_until"] - now))
             return False, None, f"Too many failed attempts. Locked for {remaining}s."

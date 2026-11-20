@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 from google.cloud import storage
@@ -13,8 +14,12 @@ class LiveKitEgressService:
         self.client_factory = client_factory
 
     def _configuration(self) -> dict[str, str]:
+        storage_mode = os.getenv("LIVEKIT_EGRESS_STORAGE", "gcs").strip().lower()
         values = {
-            "url": os.getenv("LIVEKIT_URL", "").strip(),
+            "url": (
+                os.getenv("LIVEKIT_INTERNAL_URL")
+                or os.getenv("LIVEKIT_URL", "")
+            ).strip(),
             "api_key": os.getenv("LIVEKIT_API_KEY", "").strip(),
             "api_secret": os.getenv("LIVEKIT_API_SECRET", "").strip(),
             "bucket": os.getenv("LIVEKIT_EGRESS_GCS_BUCKET", "").strip(),
@@ -25,16 +30,25 @@ class LiveKitEgressService:
                 "LIVEKIT_EGRESS_GCP_CREDENTIALS", ""
             ).strip(),
             "webhook_url": os.getenv("ORAVI_PUBLIC_URL", "").strip(),
+            "storage_mode": storage_mode,
+            "local_recording_dir": os.getenv(
+                "LIVEKIT_LOCAL_RECORDING_DIR", "/recordings"
+            ).strip(),
         }
-        missing = [
-            key
-            for key, value in values.items()
-            if key not in {"credentials_path", "credentials_json"} and not value
-        ]
-        if not values["credentials_path"] and not values["credentials_json"]:
+        required_keys = {"url", "api_key", "api_secret", "webhook_url"}
+        if storage_mode == "gcs":
+            required_keys.add("bucket")
+        missing = [key for key in required_keys if not values[key]]
+        if storage_mode not in {"gcs", "local"}:
+            raise RuntimeError(
+                "LIVEKIT_EGRESS_STORAGE must be either 'local' or 'gcs'."
+            )
+        if storage_mode == "gcs" and not values["credentials_path"] and not values["credentials_json"]:
             missing.append(
                 "GOOGLE_APPLICATION_CREDENTIALS or LIVEKIT_EGRESS_GCP_CREDENTIALS"
             )
+        if storage_mode == "local" and not values["local_recording_dir"]:
+            missing.append("LIVEKIT_LOCAL_RECORDING_DIR")
         if missing:
             raise RuntimeError(
                 "LiveKit recording is not configured. Missing: "
@@ -61,19 +75,36 @@ class LiveKitEgressService:
     ) -> dict[str, Optional[str]]:
         config = self._configuration()
         webhook_url = f"{config['webhook_url'].rstrip('/')}/api/v1/rituals/webhooks/livekit"
-        storage_config = api.GCPUpload(
-            credentials=self._credentials_json(config),
-            bucket=config["bucket"],
-        )
+        filepath = f"oravi/rituals/{ritual_id}/{room_name}.mp4"
+        storage_config = None
+        if config["storage_mode"] == "gcs":
+            storage_config = api.StorageConfig(
+                gcp=api.GCPUpload(
+                    credentials=self._credentials_json(config),
+                    bucket=config["bucket"],
+                )
+            )
+        else:
+            filepath = str(
+                Path(config["local_recording_dir"])
+                / "oravi"
+                / "rituals"
+                / ritual_id
+                / f"{room_name}.mp4"
+            )
         output = api.FileOutput(
-            filepath=f"oravi/rituals/{ritual_id}/{room_name}.mp4",
+            filepath=filepath,
         )
+        request_kwargs = {
+            "room_name": room_name,
+            "template": api.TemplateSource(audio_only=True),
+            "outputs": [api.Output(file=output)],
+            "webhooks": [api.WebhookConfig(url=webhook_url)],
+        }
+        if storage_config is not None:
+            request_kwargs["storage"] = storage_config
         request = api.StartEgressRequest(
-            room_name=room_name,
-            template=api.TemplateSource(audio_only=True),
-            outputs=[api.Output(file=output)],
-            storage=api.StorageConfig(gcp=storage_config),
-            webhooks=[api.WebhookConfig(url=webhook_url)],
+            **request_kwargs,
         )
         async with self.client_factory(
             url=config["url"],
@@ -101,6 +132,24 @@ class LiveKitEgressService:
         if location.startswith(("https://", "http://")):
             return location
         config = self._configuration()
+        if config["storage_mode"] == "local":
+            # Egress reports the completed file path, including its actual
+            # extension. Audio-only Egress currently writes OGG even when the
+            # requested filename ends in .mp4. Preserve that reported path
+            # instead of reconstructing a possibly different filename.
+            reported_path = Path(location)
+            recordings_root = Path(config["local_recording_dir"]).resolve()
+            normalized_location = location.replace("\\", "/")
+            if normalized_location.startswith("/recordings/"):
+                reported_path = recordings_root / normalized_location.removeprefix("/recordings/")
+            if not reported_path.is_absolute():
+                reported_path = recordings_root / reported_path
+            reported_path = reported_path.resolve()
+            if recordings_root not in reported_path.parents:
+                raise RuntimeError("LiveKit returned a recording path outside the local recording directory.")
+            if not reported_path.is_file():
+                raise RuntimeError(f"The local recording is not available: {reported_path}")
+            return str(reported_path)
         key = f"oravi/rituals/{ritual_id}/{room_name}.mp4"
         credentials_info = json.loads(self._credentials_json(config))
         credentials = service_account.Credentials.from_service_account_info(
@@ -115,3 +164,18 @@ class LiveKitEgressService:
             expiration=timedelta(minutes=15),
             method="GET",
         )
+
+    def recording_path(self, *, ritual_id: str, room_name: str) -> str:
+        config = self._configuration()
+        if config["storage_mode"] != "local":
+            raise RuntimeError("Local recording paths are only available in local storage mode.")
+        path = (
+            Path(config["local_recording_dir"])
+            / "oravi"
+            / "rituals"
+            / ritual_id
+            / f"{room_name}.mp4"
+        )
+        if not path.is_file():
+            raise RuntimeError(f"The local recording is not available: {path}")
+        return str(path)

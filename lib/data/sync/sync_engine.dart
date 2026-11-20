@@ -78,6 +78,7 @@ class SyncEngine {
   final String wardId;
   final String deviceId;
   final String? Function()? getAccessToken;
+  final String? Function()? getStaffId;
   final Duration timeout;
 
   // Optional mock handlers for offline unit testing
@@ -102,6 +103,7 @@ class SyncEngine {
     this.wardId = '',
     this.deviceId = '',
     this.getAccessToken,
+    this.getStaffId,
     this.timeout = const Duration(seconds: 10),
     this.mockPushHandler,
     this.mockPullHandler,
@@ -198,8 +200,11 @@ class SyncEngine {
   Future<int> pushOutbox() async {
     final accessToken = getAccessToken?.call();
     if (mockPushHandler == null && accessToken == null) return 0;
+    await _db.recoverAssignmentDateRejections();
     await _db.resetStaleInFlightOutbox();
-    final pending = await _db.getPendingOutboxEvents();
+    final pending = await _db.getPendingOutboxEvents(
+      authorId: getStaffId?.call(),
+    );
     if (pending.isEmpty) return 0;
 
     final eventIds = pending.map((e) => e.eventId).toList();
@@ -399,17 +404,40 @@ class SyncEngine {
   }
 
   Future<int> _totalPendingCount() async =>
-      (await _db.getPendingOutboxEvents()).length +
+      (await _db.getPendingOutboxEvents(authorId: getStaffId?.call())).length +
       await _db.getPendingApiOperationCount();
 
-  /// Pulls new events created by other ward devices since highest serverSeq stored.
+  /// Reconcile authorized history, including events preceding a new assignment
+  /// or a local upload acknowledgement. A local maximum is not a pull cursor.
   Future<int> pullEvents({String? wardIdOverride}) async {
     final requestedWardId = wardIdOverride ?? wardId;
     if (requestedWardId.isEmpty) return 0;
     final accessToken = getAccessToken?.call();
     if (mockPullHandler == null && accessToken == null) return 0;
-    final sinceSeq = await _db.getHighestServerSeq();
+    var sinceSeq = 0;
+    var inserted = 0;
+    while (true) {
+      final data = await _pullPage(requestedWardId, accessToken, sinceSeq);
+      final rawEvents = (data['events'] as List<dynamic>?) ?? [];
+      if (rawEvents.isEmpty) return inserted;
+      final events = rawEvents.map((e) => e as Map<String, dynamic>).toList();
+      final next = events
+          .map((e) => e['server_seq'] as int)
+          .reduce((a, b) => a > b ? a : b);
+      if (next <= sinceSeq) {
+        throw const FormatException('Sync page did not advance.');
+      }
+      inserted += await _db.insertRemoteEvents(events);
+      sinceSeq = next;
+      if (events.length < 100) return inserted;
+    }
+  }
 
+  Future<Map<String, dynamic>> _pullPage(
+    String requestedWardId,
+    String? accessToken,
+    int sinceSeq,
+  ) async {
     Map<String, dynamic> data;
 
     if (mockPullHandler != null) {
@@ -450,12 +478,7 @@ class SyncEngine {
       });
     }
 
-    final rawEvents = (data['events'] as List<dynamic>?) ?? [];
-    if (rawEvents.isEmpty) return 0;
-
-    final typedList = rawEvents.map((e) => e as Map<String, dynamic>).toList();
-    final inserted = await _db.insertRemoteEvents(typedList);
-    return inserted;
+    return data;
   }
 
   /// Complete bidirectional sync cycle: flushes outbox, then pulls remote events.
@@ -495,14 +518,36 @@ class SyncEngine {
     int pulled = 0;
 
     try {
-      pushed = await pushOutbox();
-      final pushedOperations = await pushQueuedApiOperations();
+      // A rejected or invalid local change must not hide incoming team updates.
+      Object? uploadError;
+      var pushedOperations = 0;
+      try {
+        pushed = await pushOutbox();
+        pushedOperations = await pushQueuedApiOperations();
+      } catch (error) {
+        uploadError = error;
+      }
       pulled = await pullEvents(wardIdOverride: wardIdOverride);
       if (pulled > 0 || pushedOperations > 0) {
         await onRemoteEventsReceived?.call();
       }
 
       final remainingPending = await _totalPendingCount();
+      if (uploadError != null) throw uploadError;
+      final rejected = await _db.getRejectedOutboxEvents(
+        authorId: getStaffId?.call(),
+      );
+      if (rejected.isNotEmpty) {
+        throw StateError(
+          '${rejected.length} saved change(s) have not been shared with the team. '
+          '${rejected.first.errorMessage ?? 'The server rejected these changes.'}',
+        );
+      }
+      if (remainingPending > 0) {
+        throw StateError(
+          '$remainingPending saved change(s) are still waiting to be shared with the team.',
+        );
+      }
       final syncedAt = DateTime.now();
       await _db.saveLastSuccessfulSyncAt(syncedAt);
       _updateStatus(

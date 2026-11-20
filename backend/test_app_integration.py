@@ -15,12 +15,70 @@ from urllib.request import Request, urlopen
 
 
 class TestBackendHttpIntegration(unittest.TestCase):
+    def test_shared_issues_and_replies_across_clinicians_after_local_midnight(self):
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
+        local_midnight = datetime.now(ZoneInfo('Africa/Nairobi')).replace(
+            hour=0, minute=30, second=0, microsecond=0
+        )
+        today = local_midnight.date().isoformat()
+        timestamp = local_midnight.astimezone(timezone.utc).isoformat()
+        tokens = {}
+        for staff, pin in [('CHARGE-TEST', '1234'), ('NURSE-TEST', '5678'),
+                           ('DOC-TEST', '2468'), ('NURSE-INCOMING', '8765')]:
+            code, login = self._request('POST', '/api/v1/auth/verify-pin',
+                                       payload={'staff_id': staff, 'pin': pin})
+            self.assertEqual(code, 200)
+            tokens[staff] = login['token']
+        code, _ = self._request('PUT', '/api/v1/staff/me/ward-context',
+                                payload={'ward_id': 'WARD-TEST'}, token=tokens['CHARGE-TEST'])
+        self.assertEqual(code, 200)
+        code, body = self._request('POST', '/api/v1/allocations/publish',
+            token=tokens['CHARGE-TEST'], payload={
+                'allocation_id': 'SHARED-NIGHT', 'ward_id': 'WARD-TEST',
+                'shift_type': 'night', 'date': today, 'published_by': 'CHARGE-TEST',
+                'published_at': timestamp, 'support_roster': {},
+                'bed_assignments': [{'bed_number': '1', 'patient_id': 'SHARED-PATIENT',
+                    'patient_initials': 'T.S.', 'admitting_doctor': 'DOC-TEST',
+                    'assigned_nurse_id': 'NURSE-TEST', 'status': 'accepted'}]})
+        self.assertEqual(code, 200, body)
+        event_ids = set()
+        for author, other in [('NURSE-TEST', 'DOC-TEST'), ('DOC-TEST', 'NURSE-TEST')]:
+            issue_id = 'ISSUE-' + author
+            for event_id, event_type, writer, payload in [
+                (issue_id, 'LoopOpened', author, {'title': 'Review observations',
+                    'urgency': 'urgent', 'initial_owner_id': author}),
+                ('REPLY-' + author, 'MessagePosted', other, {'content': 'Please repeat observations'})]:
+                event = {'event_id': event_id, 'patient_id': 'SHARED-PATIENT',
+                         'loop_id': issue_id, 'type': event_type, 'author_id': writer,
+                         'device_id': 'PHONE-' + writer, 'client_created_at': timestamp,
+                         'payload': payload}
+                code, body = self._request('POST', '/api/v1/sync/push', token=tokens[writer],
+                    payload={'device_id': 'PHONE-' + writer, 'events': [event]})
+                self.assertEqual(code, 200, body)
+                self.assertEqual(body['acknowledged_count'], 1, body)
+                event_ids.add(event_id)
+        for staff in ['NURSE-TEST', 'DOC-TEST', 'CHARGE-TEST']:
+            code, body = self._request('GET', '/api/v1/sync/pull?ward_id=WARD-TEST&since_seq=0',
+                                       token=tokens[staff])
+            self.assertEqual(code, 200, body)
+            self.assertEqual({e['event_id'] for e in body['events']}, event_ids)
+            code, thread = self._request('GET', '/api/v1/patients/SHARED-PATIENT/medical-issues/ISSUE-NURSE-TEST',
+                                         token=tokens[staff])
+            self.assertEqual(code, 200, thread)
+            self.assertEqual(len(thread['events']), 2)
+        code, _ = self._request('GET', '/api/v1/patients/SHARED-PATIENT/medical-issues/ISSUE-NURSE-TEST',
+                                token=tokens['NURSE-INCOMING'])
+        self.assertEqual(code, 404)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory(prefix="oravi-api-test-")
         self.database_path = str(Path(self.temp_dir.name) / "integration.db")
         database_path = self.database_path
         env = os.environ.copy()
         env["ORAVI_DATABASE_PATH"] = database_path
+        env["ORAVI_TIMEZONE"] = "Africa/Nairobi"
         repo_root = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = os.pathsep.join(
             [repo_root, env.get("PYTHONPATH", "")]
@@ -92,6 +150,9 @@ class TestBackendHttpIntegration(unittest.TestCase):
         if self.server.poll() is None:
             self.server.terminate()
             self.server.wait(timeout=10)
+        # Collect fixture SQLite connections before deleting their files on Windows.
+        import gc
+        gc.collect()
         self.temp_dir.cleanup()
 
     def _wait_for_server(self):
@@ -679,12 +740,13 @@ class TestBackendHttpIntegration(unittest.TestCase):
             connection.close()
         self.assertEqual(
             new_issue_recipients,
-            {"CHARGE-TEST", "DOC-TEST", "NURSE-INCOMING"},
+            {"CHARGE-TEST", "DOC-TEST"},
         )
-        self.assertEqual(message_recipients, {"DOC-TEST", "NURSE-INCOMING"})
+        # Push notifications exclude the author; shared thread access does not.
+        self.assertEqual(message_recipients, {"DOC-TEST"})
         self.assertEqual(
             handoff_reply_recipients,
-            {"NURSE-INCOMING"},
+            set(),
         )
 
     def test_final_board_removal_carries_open_issue_with_thread_only_access(self):

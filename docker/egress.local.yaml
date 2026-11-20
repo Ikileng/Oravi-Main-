@@ -1,0 +1,9 @@
+# Development-only self-hosted Egress configuration.
+# This key pair is for local synthetic-data testing only.
+api_key: devkey
+api_secret: secret
+ws_url: ws://livekit:7880
+
+redis:
+  address: redis:6379
+

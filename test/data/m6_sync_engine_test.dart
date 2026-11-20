@@ -18,6 +18,189 @@ void main() {
 
   group('M6: Multi-Device Sync Pipeline (Tech Arch Section 9 & 10)', () {
     test(
+      'recovers date rejection once and reports other rejections honestly',
+      () async {
+        for (final id in ['date-rejected', 'wrong-author']) {
+          await db.appendEventWithOutbox(
+            LoopOpenedEvent(
+              eventId: id,
+              patientId: 'PAT-N',
+              loopId: id,
+              authorId: 'NURSE-X',
+              deviceId: 'PHONE-X',
+              title: 'Review',
+              description: '',
+              loopType: LoopType.taskOrPendingResult,
+              urgency: LoopUrgency.urgent,
+              initialOwnerId: 'NURSE-X',
+              initialOwnerRole: 'ward_nurse',
+            ),
+          );
+        }
+        await db.markOutboxRejected([
+          'date-rejected',
+        ], 'The patient was not assigned to this account for the event date.');
+        await db.markOutboxRejected([
+          'wrong-author',
+        ], 'Event author does not match the signed-in account.');
+        final engine = SyncEngine(
+          db,
+          wardId: 'WARD',
+          mockPushHandler: (payload) async {
+            expect((payload['events'] as List).map((e) => e['event_id']), [
+              'date-rejected',
+            ]);
+            return {
+              'acks': [
+                {'event_id': 'date-rejected', 'server_seq': 1},
+              ],
+            };
+          },
+          mockPullHandler: (_) async => {'events': []},
+        );
+        try {
+          final result = await engine.syncAll();
+          expect(result.success, isFalse);
+          expect(result.pushedCount, 1);
+          expect(engine.currentStatus.lastError, contains('not been shared'));
+          expect(engine.currentStatus.lastSyncedAt, isNull);
+          expect((await db.getOutboxStatus('date-rejected'))!.status, 'synced');
+          expect(
+            (await db.getOutboxStatus('wrong-author'))!.status,
+            'rejected',
+          );
+          await db.markOutboxRejected(
+            ['date-rejected'],
+            'The patient was not assigned to this account for the event date.',
+          );
+          await db.recoverAssignmentDateRejections();
+          expect(
+            (await db.getOutboxStatus('date-rejected'))!.status,
+            'rejected',
+          );
+        } finally {
+          engine.dispose();
+        }
+      },
+    );
+
+    test(
+      'failed upload still downloads and refreshes the other clinician issue',
+      () async {
+        await db.appendEventWithOutbox(
+          LoopOpenedEvent(
+            eventId: 'local',
+            patientId: 'PAT-N',
+            loopId: 'local',
+            authorId: 'NURSE-X',
+            deviceId: 'PHONE-X',
+            title: 'Review',
+            description: '',
+            loopType: LoopType.taskOrPendingResult,
+            urgency: LoopUrgency.urgent,
+            initialOwnerId: 'NURSE-X',
+            initialOwnerRole: 'ward_nurse',
+          ),
+        );
+        var refreshed = false;
+        final engine = SyncEngine(
+          db,
+          wardId: 'WARD',
+          mockPushHandler: (_) async =>
+              throw StateError('Server rejected sync push: HTTP 409'),
+          mockPullHandler: (_) async => {
+            'events': [
+              {
+                'event_id': 'doctor-issue',
+                'patient_id': 'PAT-N',
+                'loop_id': 'doctor-issue',
+                'type': 'LoopOpened',
+                'author_id': 'DOC-B',
+                'device_id': 'PHONE-B',
+                'client_created_at': '2026-11-18T22:30:00Z',
+                'server_seq': 1,
+                'payload': {
+                  'title': 'Doctor review',
+                  'description': '',
+                  'loop_type': 'task_or_pending_result',
+                  'urgency': 'urgent',
+                  'initial_owner_id': 'DOC-B',
+                  'initial_owner_role': 'doctor_on_call',
+                },
+              },
+            ],
+          },
+          onRemoteEventsReceived: () async {
+            refreshed = true;
+          },
+        );
+        try {
+          final result = await engine.syncAll();
+          expect(result.success, isFalse);
+          expect(result.pulledCount, 1);
+          expect(refreshed, isTrue);
+          expect(
+            (await db.getAllStoredEvents()).map((e) => e.eventId),
+            contains('doctor-issue'),
+          );
+          expect(engine.currentStatus.lastSyncedAt, isNull);
+        } finally {
+          engine.dispose();
+        }
+      },
+    );
+
+    test(
+      'doctor recovers older nurse history despite a newer local event, across pages',
+      () async {
+        Map<String, dynamic> event(int seq) => {
+          'event_id': 'nurse-event-$seq',
+          'patient_id': 'PAT-N',
+          'type': 'LoopOpened',
+          'author_id': 'NURSE-X',
+          'device_id': 'PHONE-X',
+          'client_created_at': DateTime(2026, 11, 19).toIso8601String(),
+          'loop_id': 'ISSUE-$seq',
+          'server_seq': seq,
+          'payload': {
+            'title': 'Issue $seq',
+            'description': 'Review needed',
+            'loop_type': 'escalation',
+            'urgency': 'urgent',
+            'initial_owner_id': 'DOC-B',
+            'initial_owner_role': 'doctor_on_call',
+          },
+        };
+        await db.insertRemoteEvents([event(200)]);
+        final cursors = <int>[];
+        final engine = SyncEngine(
+          db,
+          wardId: 'WARD',
+          mockPullHandler: (cursor) async {
+            cursors.add(cursor);
+            final history = List.generate(101, (i) => event(i + 1));
+            return {
+              'events': history
+                  .where((e) => (e['server_seq'] as int) > cursor)
+                  .take(100)
+                  .toList(),
+              'latest_seq': 200,
+            };
+          },
+        );
+        try {
+          expect(await engine.pullEvents(), 101);
+          expect(cursors, [0, 100]);
+          expect((await db.getAllStoredEvents()).length, 102);
+          expect(await engine.pullEvents(), 0);
+          expect(await db.getPendingOutboxEvents(), isEmpty);
+        } finally {
+          engine.dispose();
+        }
+      },
+    );
+
+    test(
       '1. pushOutbox flushes pending events and updates local serverSeq with server ack',
       () async {
         final now = DateTime.now();

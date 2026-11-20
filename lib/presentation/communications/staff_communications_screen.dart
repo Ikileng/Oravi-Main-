@@ -80,8 +80,12 @@ Future<void> startStaffCall(
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            error.toString().contains('reachable Oravi device') ||
-                    error.toString().contains('could not be notified')
+            error.toString().contains('server notification credentials')
+                ? 'Oravi server notification setup needs attention. Contact the administrator.'
+                : error.toString().contains('turned availability off')
+                ? 'This clinician has turned availability off. You can leave a message in their inbox.'
+                : error.toString().contains('reachable Oravi device') ||
+                      error.toString().contains('could not be notified')
                 ? 'This clinician is offline or has no reachable Oravi device right now.'
                 : 'Could not start the call. Check your connection and try again.',
           ),

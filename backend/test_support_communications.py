@@ -110,13 +110,14 @@ class SupportCommunicationsTests(unittest.TestCase):
         self.assertEqual(self.request('POST','/api/v1/direct/threads/H',json={'body':'Hi','client_id':'x'}).status_code,400)
 
     def test_direct_call_participants_and_no_patient_context(self):
-        with patch.object(api,'_livekit_token',return_value='test-token'), patch.dict(os.environ,{'LIVEKIT_URL':'wss://example.test'}):
+        self.staff.register_fcm_installation('H', 'phone-H', 'test-call-token', 'android')
+        with patch.object(api,'_livekit_token',return_value='test-token'), patch.dict(os.environ,{'LIVEKIT_URL':'wss://example.test'}), patch.object(api.fcm_service, 'send_call_invitation', return_value=True):
             response=self.request('POST','/api/v1/direct/calls',json={'recipient_id':'H'})
             self.assertEqual(response.status_code,200,response.text)
             call_id=response.json()['call_id']
             self.assertEqual(response.json()['patient_id'],'')
             self.assertEqual(self.request('GET',f'/api/v1/calls/{call_id}','K').status_code,404)
-            self.assertEqual(self.request('POST',f'/api/v1/calls/{call_id}/accept','K').status_code,409)
+            self.assertEqual(self.request('POST',f'/api/v1/calls/{call_id}/accept','K').status_code,404)
             self.assertEqual(self.request('POST',f'/api/v1/calls/{call_id}/accept','H').status_code,200)
             self.assertEqual(len(self.request('GET','/api/v1/direct/calls','H').json()),1)
             self.assertEqual(self.request('POST',f'/api/v1/calls/{call_id}/end','H').status_code,200)

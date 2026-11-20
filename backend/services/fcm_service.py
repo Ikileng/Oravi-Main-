@@ -4,6 +4,25 @@ from typing import Dict
 
 
 class FcmService:
+    @staticmethod
+    def credentials_ready() -> bool:
+        """Validate local credential loading, without sending a notification.
+
+        This does not prove remote FCM permissions or delivery.
+        """
+        try:
+            from firebase_admin import credentials
+            import google.auth
+            inline = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
+            if inline:
+                credentials.Certificate(json.loads(inline)).get_credential()
+            else:
+                google.auth.default(scopes=['https://www.googleapis.com/auth/firebase.messaging'])
+            return True
+        except Exception:
+            # Never include private key material or paths in the health response.
+            return False
+
     def send_staff_message(self, token: str, *, transfer: bool = False) -> bool:
         import firebase_admin
         from firebase_admin import credentials, messaging

@@ -297,8 +297,12 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            error.toString().contains('registered Oravi device') ||
-                    error.toString().contains('could not be notified')
+            error.toString().contains('server notification credentials')
+                ? 'Oravi server notification setup needs attention. Contact the administrator.'
+                : error.toString().contains('turned availability off')
+                ? 'This clinician has turned availability off. You can leave a message in their inbox.'
+                : error.toString().contains('registered Oravi device') ||
+                      error.toString().contains('could not be notified')
                 ? 'This clinician is offline or has no reachable Oravi device right now.'
                 : 'Could not start the call. Check your connection and try again.',
           ),
@@ -642,7 +646,7 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
         ? Center(
             child: Text(
               widget.issueOnlyLoopIds == null
-                  ? 'No Active Medical Issues'
+                  ? 'No Medical Issues loaded on this device.\nSync to check for team updates.'
                   : 'This carried Medical Issue is unavailable on this device.',
               style: const TextStyle(
                 fontSize: 16,
