@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from livekit import api as livekit_api
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -642,9 +642,14 @@ def build_router(api):
 
     @router.post("/webhooks/livekit")
     async def livekit_webhook(
-        body: bytes,
+        request: Request,
         authorization: str = Header(default=""),
     ):
+        # Read the original bytes so LiveKit's signature can be verified
+        # against the exact payload it sent. Declaring this as a typed body
+        # makes FastAPI parse application/*+json first, which rejects the
+        # webhook with 422 before signature verification.
+        body = await request.body()
         try:
             receiver = livekit_api.WebhookReceiver(
                 livekit_api.TokenVerifier(
@@ -660,6 +665,8 @@ def build_router(api):
         ritual = api.ritual_store.find_by_room_name(event.egress_info.room_name)
         if ritual is None:
             raise HTTPException(status_code=404, detail="Ritual recording room not found.")
+        if event.egress_info.egress_id != ritual["egress_id"]:
+            raise HTTPException(status_code=409, detail="Recording does not match this ritual.")
         if ritual["status"] in {"draft_ready", "approved"}:
             return {"accepted": True, "ritual_id": ritual["ritual_id"], "status": ritual["status"]}
         if event.egress_info.status != livekit_api.EGRESS_COMPLETE:
@@ -671,48 +678,10 @@ def build_router(api):
             api.ritual_store.set_recording_status(ritual["ritual_id"], "failed")
             raise HTTPException(status_code=422, detail="LiveKit returned no recording file.")
         location = event.egress_info.file_results[0].location
-        try:
-            source_url = api.livekit_egress_service.recording_url(
-                ritual_id=ritual["ritual_id"],
-                room_name=ritual["room_name"],
-                location=location,
-            )
-        except RuntimeError as error:
-            api.ritual_store.set_recording_status(ritual["ritual_id"], "failed")
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        api.ritual_store.set_recording_status(
-            ritual["ritual_id"], "processing", location=location
-        )
-        try:
-            if os.getenv("TRANSCRIPTION_PROVIDER", "elevenlabs").strip().lower() == "whisper_local":
-                transcription = api.transcription_service.transcribe_file(source_url)
-            else:
-                transcription = api.transcription_service.transcribe_url(source_url)
-        except RuntimeError as error:
-            api.ritual_store.set_recording_status(ritual["ritual_id"], "failed")
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        if not transcription["text"]:
-            api.ritual_store.set_recording_status(ritual["ritual_id"], "failed")
-            raise HTTPException(status_code=422, detail="No speech was transcribed.")
-        saved = api.ritual_store.save_transcript(
-            ritual["ritual_id"], transcription["text"]
-        )
-        api.ritual_store.set_recording_status(ritual["ritual_id"], "transcribed")
-        try:
-            summary = api.llm_service.summarize_ritual(
-                ritual_type=ritual["ritual_type"], title=ritual["title"], transcript=transcription["text"]
-            )
-        except Exception as error:
-            api.logger.error("Clinical Ritual summary generation failed (%s).", type(error).__name__)
-            raise HTTPException(status_code=503, detail="Transcript saved; summary generation can be retried from Home.") from error
-        draft = api.ritual_store.save_draft(ritual["ritual_id"], summary)
-        for fid in api.staff_store.get_fcm_fids_for_staff(ritual["creator_id"]):
-            try:
-                if not api.fcm_service.send_clinical_ritual_review_alert(fid, ritual_id=ritual["ritual_id"], title=ritual["title"]):
-                    api.staff_store.remove_fcm_fid(fid)
-            except Exception as error:
-                api.logger.error("Clinical Ritual review alert failed (%s).", type(error).__name__)
-        return {"accepted": True, "ritual_id": saved["ritual_id"], "status": draft["status"]}
+        # Persist before acknowledging. A serial worker handles the expensive
+        # model calls and recovers interrupted work from this durable queue.
+        api.ritual_processor.enqueue(ritual["ritual_id"], location)
+        return {"accepted": True, "ritual_id": ritual["ritual_id"], "status": "queued"}
 
     @router.post("/{ritual_id}/draft")
     def generate_draft(

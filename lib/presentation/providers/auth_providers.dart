@@ -273,14 +273,28 @@ class AuthController extends Notifier<AuthState> {
       ref.read(offlineSessionProvider.notifier).setOffline(false);
       if (authenticatedStaff.role != 'dev_admin' &&
           !token.startsWith('offline_token_')) {
-        unawaited(
-          ref
+        String? deviceId;
+        try {
+          deviceId = ref.read(localDeviceIdProvider);
+        } catch (_) {
+          // Headless authentication tests and non-device hosts do not
+          // initialize the platform device identity. The online session can
+          // still be used; the app will register push notifications once a
+          // real device identity is available.
+        }
+        if (deviceId == null || deviceId.isEmpty) {
+          deviceId = null;
+        }
+        if (deviceId != null) {
+          // Complete registration before the signed-in session becomes usable.
+          // Calls and ritual-review notifications otherwise race the first
+          // screen and can be sent before this installation exists on the
+          // backend. The controller records a non-fatal setup error so a
+          // missing Firebase permission does not prevent sign-in.
+          await ref
               .read(medicalIssuePushControllerProvider.notifier)
-              .register(
-                accessToken: token,
-                deviceId: ref.read(localDeviceIdProvider),
-              ),
-        );
+              .register(accessToken: token, deviceId: deviceId);
+        }
       }
       final boardService = WardBoardService(
         getAccessToken: () => ref.read(authAccessTokenProvider),
