@@ -7,3 +7,5 @@ tzdata>=2025.2
 elevenlabs>=2,<3
 google-cloud-storage>=3.1.1,<4
 faster-whisper>=1.1,<2
+# faster-whisper uses av.open(metadata_errors=...), removed in newer PyAV.
+av>=16,<17

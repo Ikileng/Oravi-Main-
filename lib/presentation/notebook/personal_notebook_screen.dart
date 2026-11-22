@@ -2,8 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../../data/clinical_ritual_service.dart';
+import '../../domain/models/clinical_ritual.dart';
+import '../clinical_ritual_review_screen.dart';
 import '../providers/auth_providers.dart';
 import '../providers/whiteboard_providers.dart';
+import '../providers/ward_providers.dart';
 import '../theme/clinical_theme.dart';
 
 class PersonalEntry {
@@ -54,11 +58,34 @@ final personalNotebookProvider =
           .toList();
     });
 
-final pendingPersonalTasksProvider = Provider.autoDispose<int>(
-  (ref) => (ref.watch(personalNotebookProvider).asData?.value ?? [])
+final clinicalRitualReviewProvider =
+    FutureProvider.autoDispose<List<ClinicalRitual>>((ref) async {
+      final staff = ref.watch(authenticatedStaffProvider);
+      ref.watch(authAccessTokenProvider);
+      if (staff?.isClinical != true) return const [];
+      final rituals = await ClinicalRitualService(
+        ref.watch(wardBoardServiceProvider),
+      ).list();
+      return rituals
+          .where(
+            (ritual) =>
+                ritual.status == 'draft_ready' ||
+                ritual.status == 'approved' ||
+                (ritual.status == 'ended' &&
+                    ritual.recordingStatus != 'declined'),
+          )
+          .toList();
+    });
+
+final pendingPersonalTasksProvider = Provider.autoDispose<int>((ref) {
+  final personal = (ref.watch(personalNotebookProvider).asData?.value ?? [])
       .where((e) => e.kind == 'task' && !e.completed)
-      .length,
-);
+      .length;
+  final reviews = (ref.watch(clinicalRitualReviewProvider).asData?.value ?? [])
+      .where((ritual) => ritual.status != 'approved')
+      .length;
+  return personal + reviews;
+});
 
 String entryDate(BuildContext context, DateTime date) =>
     '${MaterialLocalizations.of(context).formatMediumDate(date)} · ${TimeOfDay.fromDateTime(date).format(context)}';
@@ -304,6 +331,15 @@ class _PersonalNotebookScreenState
     );
   }
 
+  Future<void> _openRitual(ClinicalRitual ritual) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ClinicalRitualReviewScreen(ritualId: ritual.ritualId),
+      ),
+    );
+    ref.invalidate(clinicalRitualReviewProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (ref.watch(authenticatedStaffProvider)?.isClinical != true) {
@@ -320,11 +356,20 @@ class _PersonalNotebookScreenState
     final completedCount = entries
         .where((entry) => entry.kind == 'task' && entry.completed)
         .length;
-    final filterCounts = [pendingCount, noteCount, completedCount];
+    final rituals = ref.watch(clinicalRitualReviewProvider);
+    final patientInitialsById = {
+      for (final patient in ref.watch(wardPatientsProvider))
+        patient.patientId: patient.patientInitials,
+    };
+    final ritualEntries = rituals.asData?.value ?? const <ClinicalRitual>[];
+    final reviewCount = ritualEntries
+        .where((ritual) => ritual.status != 'approved')
+        .length;
+    final filterCounts = [pendingCount, noteCount, completedCount, reviewCount];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My notebook'),
+        title: Text(_filter == 3 ? 'Review summaries' : 'Tasks'),
         actions: [
           IconButton(
             tooltip: 'Refresh notebook',
@@ -344,61 +389,36 @@ class _PersonalNotebookScreenState
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: ClinicalTheme.surfaceAccent,
-                  borderRadius: BorderRadius.circular(
-                    ClinicalTheme.radiusMedium,
-                  ),
-                  border: Border.all(
-                    color: ClinicalTheme.clinicalBlue.withValues(alpha: 0.35),
-                  ),
-                ),
-                child: const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.lock_outline, color: ClinicalTheme.clinicalBlue),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Your private clinical workspace',
-                            style: TextStyle(
-                              color: ClinicalTheme.textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Keep personal tasks and notes together. Reminders are optional and stay with your account.',
-                            style: TextStyle(
-                              color: ClinicalTheme.textSecondary,
-                              fontSize: 14,
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              child: _filter == 3
+                  ? _ClinicalReviewIntro(reviewCount: reviewCount)
+                  : const _NotebookIntro(),
             ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  for (var i = 0; i < 3; i++) ...[
+                  for (var i = 0; i < 4; i++)
                     ChoiceChip(
+                      selectedColor: i == 3
+                          ? ClinicalTheme.urgentAmber.withValues(alpha: 0.22)
+                          : null,
                       label: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(['Pending', 'Notes', 'Completed'][i]),
+                          if (i == 3) ...[
+                            const Icon(Icons.fact_check_outlined, size: 16),
+                            const SizedBox(width: 5),
+                          ],
+                          Text(
+                            [
+                              'Pending',
+                              'Notes',
+                              'Completed',
+                              'Review summaries',
+                            ][i],
+                          ),
                           const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -420,223 +440,487 @@ class _PersonalNotebookScreenState
                       selected: _filter == i,
                       onSelected: (_) => setState(() => _filter = i),
                     ),
-                    if (i < 2) const SizedBox(width: 8),
-                  ],
                 ],
               ),
             ),
             const SizedBox(height: 8),
-            const NotebookReminderBanner(),
+            if (_filter != 3) const NotebookReminderBanner(),
             Expanded(
-              child: notebook.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (_, _) => Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.cloud_off_outlined,
-                          color: ClinicalTheme.textSecondary,
-                          size: 36,
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Cannot load your notebook. Check your connection.',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        FilledButton.tonal(
-                          onPressed: () =>
-                              ref.invalidate(personalNotebookProvider),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                data: (entries) {
-                  final visible = entries
-                      .where(
-                        (entry) => _filter == 1
-                            ? entry.kind == 'note'
-                            : entry.kind == 'task' &&
-                                  entry.completed == (_filter == 2),
-                      )
-                      .toList();
-                  if (visible.isEmpty) {
-                    return _NotebookEmptyState(
-                      icon: [
-                        Icons.task_alt,
-                        Icons.sticky_note_2_outlined,
-                        Icons.history,
-                      ][_filter],
-                      title: [
-                        'No pending tasks.',
-                        'No notes yet.',
-                        'No completed tasks yet.',
-                      ][_filter],
-                      message: [
-                        'Add a task for anything you need to follow up during this shift.',
-                        'Capture a private note you want to remember later.',
-                        'Completed tasks will remain here as your personal history.',
-                      ][_filter],
-                    );
-                  }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
-                    itemCount: visible.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final entry = visible[index];
-                      final isTask = entry.kind == 'task';
-                      return Card(
+              child: _filter == 3
+                  ? _buildClinicalReviewList(
+                      rituals,
+                      patientInitialsById: patientInitialsById,
+                    )
+                  : notebook.when(
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (_, _) => Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(24),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color:
-                                          (entry.completed
-                                                  ? ClinicalTheme.successGreen
-                                                  : isTask
-                                                  ? ClinicalTheme.clinicalBlue
-                                                  : ClinicalTheme
-                                                        .inChargePurple)
-                                              .withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Icon(
-                                      entry.completed
-                                          ? Icons.check
-                                          : isTask
-                                          ? Icons.checklist
-                                          : Icons.sticky_note_2_outlined,
-                                      color: entry.completed
-                                          ? ClinicalTheme.successGreen
-                                          : isTask
-                                          ? ClinicalTheme.clinicalBlue
-                                          : ClinicalTheme.inChargePurple,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          entry.body,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                height: 1.35,
-                                                decoration: entry.completed
-                                                    ? TextDecoration.lineThrough
-                                                    : null,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Added ${entryDate(context, entry.createdAt)}',
-                                          style: const TextStyle(
-                                            color: ClinicalTheme.textSecondary,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                              const Icon(
+                                Icons.cloud_off_outlined,
+                                color: ClinicalTheme.textSecondary,
+                                size: 36,
                               ),
-                              if (entry.completedAt != null ||
-                                  entry.reminderAt != null) ...[
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    if (entry.completedAt != null)
-                                      _EntryMetaChip(
-                                        icon: Icons.task_alt,
-                                        label:
-                                            'Completed ${entryDate(context, entry.completedAt!)}',
-                                        color: ClinicalTheme.successGreen,
-                                      ),
-                                    if (entry.reminderAt != null)
-                                      _EntryMetaChip(
-                                        icon: Icons.notifications_none,
-                                        label:
-                                            'Reminder ${entryDate(context, entry.reminderAt!)}',
-                                        color: ClinicalTheme.urgentAmber,
-                                      ),
-                                  ],
-                                ),
-                              ],
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 4,
-                                runSpacing: 4,
-                                children: [
-                                  if (isTask)
-                                    FilledButton.tonalIcon(
-                                      onPressed: _saving.contains(entry.id)
-                                          ? null
-                                          : () => _save(entry, {
-                                              ...entry.payload,
-                                              'completed': !entry.completed,
-                                              'reminder_at': null,
-                                            }),
-                                      icon: Icon(
-                                        entry.completed
-                                            ? Icons.undo
-                                            : Icons.check,
-                                      ),
-                                      label: Text(
-                                        entry.completed
-                                            ? 'Reopen'
-                                            : 'Mark done',
-                                      ),
-                                    ),
-                                  TextButton.icon(
-                                    onPressed: _saving.contains(entry.id)
-                                        ? null
-                                        : () => _edit(entry),
-                                    icon: const Icon(Icons.edit_outlined),
-                                    label: const Text('Edit'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: _saving.contains(entry.id)
-                                        ? null
-                                        : () => _delete(entry),
-                                    icon: const Icon(Icons.delete_outline),
-                                    label: const Text('Delete'),
-                                  ),
-                                ],
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Cannot load your notebook. Check your connection.',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 8),
+                              FilledButton.tonal(
+                                onPressed: () =>
+                                    ref.invalidate(personalNotebookProvider),
+                                child: const Text('Retry'),
                               ),
                             ],
                           ),
                         ),
-                      );
-                    },
-                  );
-                },
-              ),
+                      ),
+                      data: (entries) {
+                        final visible = entries
+                            .where(
+                              (entry) => _filter == 1
+                                  ? entry.kind == 'note'
+                                  : entry.kind == 'task' &&
+                                        entry.completed == (_filter == 2),
+                            )
+                            .toList();
+                        if (visible.isEmpty) {
+                          return _NotebookEmptyState(
+                            icon: [
+                              Icons.task_alt,
+                              Icons.sticky_note_2_outlined,
+                              Icons.history,
+                            ][_filter],
+                            title: [
+                              'No pending tasks.',
+                              'No notes yet.',
+                              'No completed tasks yet.',
+                            ][_filter],
+                            message: [
+                              'Add a task for anything you need to follow up during this shift.',
+                              'Capture a private note you want to remember later.',
+                              'Completed tasks will remain here as your personal history.',
+                            ][_filter],
+                          );
+                        }
+                        return ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+                          itemCount: visible.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final entry = visible[index];
+                            final isTask = entry.kind == 'task';
+                            return Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                (entry.completed
+                                                        ? ClinicalTheme
+                                                              .successGreen
+                                                        : isTask
+                                                        ? ClinicalTheme
+                                                              .clinicalBlue
+                                                        : ClinicalTheme
+                                                              .inChargePurple)
+                                                    .withValues(alpha: 0.14),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            entry.completed
+                                                ? Icons.check
+                                                : isTask
+                                                ? Icons.checklist
+                                                : Icons.sticky_note_2_outlined,
+                                            color: entry.completed
+                                                ? ClinicalTheme.successGreen
+                                                : isTask
+                                                ? ClinicalTheme.clinicalBlue
+                                                : ClinicalTheme.inChargePurple,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                entry.body,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleMedium
+                                                    ?.copyWith(
+                                                      height: 1.35,
+                                                      decoration:
+                                                          entry.completed
+                                                          ? TextDecoration
+                                                                .lineThrough
+                                                          : null,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                'Added ${entryDate(context, entry.createdAt)}',
+                                                style: const TextStyle(
+                                                  color: ClinicalTheme
+                                                      .textSecondary,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (entry.completedAt != null ||
+                                        entry.reminderAt != null) ...[
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          if (entry.completedAt != null)
+                                            _EntryMetaChip(
+                                              icon: Icons.task_alt,
+                                              label:
+                                                  'Completed ${entryDate(context, entry.completedAt!)}',
+                                              color: ClinicalTheme.successGreen,
+                                            ),
+                                          if (entry.reminderAt != null)
+                                            _EntryMetaChip(
+                                              icon: Icons.notifications_none,
+                                              label:
+                                                  'Reminder ${entryDate(context, entry.reminderAt!)}',
+                                              color: ClinicalTheme.urgentAmber,
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      children: [
+                                        if (isTask)
+                                          FilledButton.tonalIcon(
+                                            onPressed:
+                                                _saving.contains(entry.id)
+                                                ? null
+                                                : () => _save(entry, {
+                                                    ...entry.payload,
+                                                    'completed':
+                                                        !entry.completed,
+                                                    'reminder_at': null,
+                                                  }),
+                                            icon: Icon(
+                                              entry.completed
+                                                  ? Icons.undo
+                                                  : Icons.check,
+                                            ),
+                                            label: Text(
+                                              entry.completed
+                                                  ? 'Reopen'
+                                                  : 'Mark done',
+                                            ),
+                                          ),
+                                        TextButton.icon(
+                                          onPressed: _saving.contains(entry.id)
+                                              ? null
+                                              : () => _edit(entry),
+                                          icon: const Icon(Icons.edit_outlined),
+                                          label: const Text('Edit'),
+                                        ),
+                                        TextButton.icon(
+                                          onPressed: _saving.contains(entry.id)
+                                              ? null
+                                              : () => _delete(entry),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                          label: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildClinicalReviewList(
+    AsyncValue<List<ClinicalRitual>> rituals, {
+    required Map<String, String> patientInitialsById,
+  }) => rituals.when(
+    loading: () => const Center(child: CircularProgressIndicator()),
+    error: (_, _) => Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: ClinicalTheme.textSecondary,
+              size: 36,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Clinical reviews could not be loaded. Check your connection.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonal(
+              onPressed: () => ref.invalidate(clinicalRitualReviewProvider),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    ),
+    data: (items) {
+      if (items.isEmpty) {
+        return const _NotebookEmptyState(
+          icon: Icons.fact_check_outlined,
+          title: 'No clinical reviews yet.',
+          message:
+              'Recorded briefs and debriefs will appear here when they need review or have been approved.',
+        );
+      }
+      return ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+        itemCount: items.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final ritual = items[index];
+          final needsReview = ritual.status != 'approved';
+          final status = _ritualStatusLabel(ritual);
+          final patientInitials = ritual.patientId == null
+              ? null
+              : patientInitialsById[ritual.patientId!];
+          return Card(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _openRitual(ritual),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color:
+                            (needsReview
+                                    ? ClinicalTheme.urgentAmber
+                                    : ClinicalTheme.successGreen)
+                                .withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(
+                        needsReview
+                            ? Icons.fact_check_outlined
+                            : Icons.verified_outlined,
+                        color: needsReview
+                            ? ClinicalTheme.urgentAmber
+                            : ClinicalTheme.successGreen,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            ritual.title,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            '${ritual.ritualType.toUpperCase()} · $status',
+                            style: const TextStyle(
+                              color: ClinicalTheme.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (ritual.patientId?.isNotEmpty == true) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              patientInitials?.isNotEmpty == true
+                                  ? 'Patient $patientInitials'
+                                  : 'Patient initials unavailable',
+                              style: const TextStyle(
+                                color: ClinicalTheme.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          Text(
+                            needsReview
+                                ? 'Open to review, edit, and approve.'
+                                : 'Approved and saved to the patient record.',
+                            style: const TextStyle(
+                              color: ClinicalTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  String _ritualStatusLabel(ClinicalRitual ritual) {
+    if (ritual.status == 'draft_ready') return 'Draft ready for review';
+    if (ritual.status == 'approved') return 'Approved';
+    switch (ritual.recordingStatus) {
+      case 'processing':
+        return 'Processing transcript';
+      case 'transcribed':
+        return 'Transcript ready';
+      case 'failed':
+        return 'Processing failed';
+      default:
+        return ritual.status.replaceAll('_', ' ');
+    }
+  }
+}
+
+class _NotebookIntro extends StatelessWidget {
+  const _NotebookIntro();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: ClinicalTheme.surfaceAccent,
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+      border: Border.all(
+        color: ClinicalTheme.clinicalBlue.withValues(alpha: 0.35),
+      ),
+    ),
+    child: const Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.lock_outline, color: ClinicalTheme.clinicalBlue),
+        SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Your private clinical workspace',
+                style: TextStyle(
+                  color: ClinicalTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Keep personal tasks and notes together. Reminders are optional and stay with your account.',
+                style: TextStyle(
+                  color: ClinicalTheme.textSecondary,
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ClinicalReviewIntro extends StatelessWidget {
+  const _ClinicalReviewIntro({required this.reviewCount});
+
+  final int reviewCount;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: ClinicalTheme.surfaceAccent,
+      borderRadius: BorderRadius.circular(ClinicalTheme.radiusMedium),
+      border: Border.all(
+        color: ClinicalTheme.urgentAmber.withValues(alpha: 0.45),
+      ),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.fact_check_outlined, color: ClinicalTheme.urgentAmber),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Patient-linked summaries',
+                style: TextStyle(
+                  color: ClinicalTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                reviewCount == 0
+                    ? 'Generated briefs and debriefs will appear here for review.'
+                    : '$reviewCount ${reviewCount == 1 ? 'summary needs' : 'summaries need'} your attention or are still processing.',
+                style: const TextStyle(
+                  color: ClinicalTheme.textSecondary,
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _NotebookEmptyState extends StatelessWidget {

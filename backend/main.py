@@ -35,6 +35,7 @@ from .ward_store import WardStore
 from .services.llm_service import LLMService
 from .services.elevenlabs_service import ElevenLabsTranscriptionService
 from .services.whisper_service import WhisperTranscriptionService
+from .services.ritual_processing import RitualProcessor
 from .services.livekit_egress_service import LiveKitEgressService
 from .services.fcm_service import FcmService
 from .services.medical_issue_validation import (
@@ -70,6 +71,7 @@ communications_store = CommunicationsStore(database_path)
 notebook_store = NotebookStore(database_path)
 ritual_store = ClinicalRitualStore(database_path)
 logger = logging.getLogger(__name__)
+ritual_processor = RitualProcessor(sys.modules[__name__])
 
 
 def require_authenticated_staff(authorization: str = Header(default="")) -> StaffProfile:
@@ -427,6 +429,7 @@ def health_check():
 
 @app.on_event("startup")
 async def start_medical_issue_notification_worker():
+    app.state.ritual_processing_worker = asyncio.create_task(ritual_processor.run())
     app.state.medical_issue_notification_worker = asyncio.create_task(
         _medical_issue_notification_worker()
     )
@@ -434,6 +437,13 @@ async def start_medical_issue_notification_worker():
 
 @app.on_event("shutdown")
 async def stop_medical_issue_notification_worker():
+    ritual_worker = getattr(app.state, "ritual_processing_worker", None)
+    if ritual_worker is not None:
+        ritual_worker.cancel()
+        try:
+            await ritual_worker
+        except asyncio.CancelledError:
+            pass
     worker = getattr(app.state, "medical_issue_notification_worker", None)
     if worker is not None:
         worker.cancel()

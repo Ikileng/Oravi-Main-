@@ -99,7 +99,16 @@ class LiveKitEgressService:
             "room_name": room_name,
             "template": api.TemplateSource(audio_only=True),
             "outputs": [api.Output(file=output)],
-            "webhooks": [api.WebhookConfig(url=webhook_url)],
+            # LiveKit signs Egress lifecycle webhooks with the API key.  The
+            # backend verifies the signature with the configured API key and
+            # secret, so omitting this value causes LiveKit to record the file
+            # but silently skip the webhook notification.
+            "webhooks": [
+                api.WebhookConfig(
+                    url=webhook_url,
+                    signing_key=config["api_key"],
+                )
+            ],
         }
         if storage_config is not None:
             request_kwargs["storage"] = storage_config

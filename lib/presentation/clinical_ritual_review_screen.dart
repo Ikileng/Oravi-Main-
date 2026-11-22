@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
@@ -26,6 +28,7 @@ class _ClinicalRitualReviewScreenState
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  Timer? _processingRefresh;
 
   static const _sections = <String, String>{
     'situation': 'Situation',
@@ -44,6 +47,7 @@ class _ClinicalRitualReviewScreenState
 
   @override
   void dispose() {
+    _processingRefresh?.cancel();
     for (final controller in _sectionControllers.values) {
       controller.dispose();
     }
@@ -57,10 +61,14 @@ class _ClinicalRitualReviewScreenState
   }
 
   Future<void> _load() async {
+    _processingRefresh?.cancel();
     try {
       final ritual = await _service().get(widget.ritualId);
       if (!mounted) return;
       _setRitual(ritual);
+      if (ritual.summary == null && ritual.recordingStatus == 'processing') {
+        _processingRefresh = Timer(const Duration(seconds: 10), _load);
+      }
     } catch (error) {
       if (mounted) setState(() => _error = 'Could not load this ritual.');
     } finally {
@@ -359,6 +367,24 @@ class _ClinicalRitualReviewScreenState
                     ),
                   ],
                   if (ritual.summary == null &&
+                      ritual.recordingStatus == 'processing') ...[
+                    const SizedBox(height: 20),
+                    const _ReviewGuidanceCard(
+                      icon: Icons.hourglass_top,
+                      title: 'Preparing your summary',
+                      message:
+                          'Oravi is processing the recording in the background. You can leave this screen and return to Review summaries later.',
+                    ),
+                  ] else if (ritual.summary == null &&
+                      ritual.recordingStatus == 'failed') ...[
+                    const SizedBox(height: 20),
+                    const _ReviewGuidanceCard(
+                      icon: Icons.error_outline,
+                      title: 'Transcription could not be completed',
+                      message:
+                          'No summary is ready. The recording needs to be checked before processing can be retried.',
+                    ),
+                  ] else if (ritual.summary == null &&
                       ritual.transcript != null &&
                       canManage) ...[
                     const SizedBox(height: 20),
